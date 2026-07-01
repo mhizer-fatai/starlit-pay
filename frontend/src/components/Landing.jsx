@@ -7,9 +7,6 @@ import {
 export default function Landing({ scrollY, setAuthState, theme, toggleTheme, logo, symbol }) {
   const observerRef = useRef(null);
   
-  // Interactive Simulator State
-  const [simulatorStep, setSimulatorStep] = useState(0);
-  
   // Protocols Tabs State
   const [activeTab, setActiveTab] = useState("shielded-pool");
   
@@ -45,37 +42,6 @@ export default function Landing({ scrollY, setAuthState, theme, toggleTheme, log
       }
     };
   }, []);
-
-  const simulatorSteps = [
-    {
-      title: "1. Deposit Funds",
-      badge: "Public → Shielded",
-      description: "You deposit standard tokens (like USDC or XLM) into the Starlit vault. The vault locks the public tokens and shields them for your account. Your public balance drops, and your balance is now completely private.",
-      highlightNode: "alice",
-      arrowActive: "left"
-    },
-    {
-      title: "2. Lock & Encrypt",
-      badge: "On-Device Protection",
-      description: "When you send money, your app encrypts the payment details locally. It secures the transaction so only you and the recipient can see it, without sharing your password or keys online.",
-      highlightNode: "alice",
-      arrowActive: "none"
-    },
-    {
-      title: "3. Send Free & Privately",
-      badge: "Zero Network Fees",
-      description: "The payment is submitted. A helper node processes it and covers the network cost, keeping the transfer free for you while maintaining absolute privacy.",
-      highlightNode: "blockchain",
-      arrowActive: "right"
-    },
-    {
-      title: "4. Recipient Receives",
-      badge: "Instant Balance Update",
-      description: "Bob logs in, and his app scans the vault to find the payment. His balance updates instantly. Only Bob knows he received this transfer.",
-      highlightNode: "bob",
-      arrowActive: "none"
-    }
-  ];
 
   const protocols = {
     "shielded-pool": {
@@ -140,26 +106,6 @@ export default function Landing({ scrollY, setAuthState, theme, toggleTheme, log
           </div>
         </div>
       )
-    },
-    "compliance": {
-      title: "Audit & Tax Ready",
-      description: "Privacy does not mean breaking the rules. Easily export your transaction history whenever you need it.",
-      points: [
-        "Separate your spending control from your transaction records.",
-        "Create read-only report keys to share with tax preparers or accountants.",
-        "Download neat, private receipts for your personal accounting."
-      ],
-      visual: (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center", justifyContent: "center", height: "100%", minHeight: "160px", padding: "10px" }}>
-          <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "rgba(16, 185, 129, 0.1)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--success-color)", marginBottom: "8px" }}>
-            <FileText size={24} />
-          </div>
-          <button className="btn-primary" style={{ padding: "8px 16px", fontSize: "12px", height: "auto" }} onClick={() => alert("Mock export triggered: tax-compliant PDF created.")}>
-            Export Tax Report
-          </button>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>Generates a clean PDF log</div>
-        </div>
-      )
     }
   };
 
@@ -173,8 +119,8 @@ export default function Landing({ scrollY, setAuthState, theme, toggleTheme, log
       answer: "We use a sponsored fee network. When you make a private transfer, your browser generates a transaction and forwards it to our helper nodes. These nodes pay the network fees on the Stellar network. This gives you a completely free experience without needing to hold any gas tokens."
     },
     {
-      question: "Is Starlit Pay regulatory compliant?",
-      answer: "Yes. Starlit splits your wallet into a Spending Key and a Viewing Key. The Spending Key stays on your device to execute transfers. The Viewing Key is a read-only key that can decrypt your transaction history. You can share this Viewing Key with auditors or tax authorities to prove your income or payments without giving up ownership of your funds."
+      question: "What happens if I lose my 6-digit PIN?",
+      answer: "Starlit Pay is fully private and secure, which means we do not store your keys. If you lose your PIN, you cannot decrypt your local access seed or spend your shielded balance. Always write down your PIN and keep it in a safe place."
     },
     {
       question: "Can other people see my balance on the blockchain?",
@@ -281,90 +227,40 @@ export default function Landing({ scrollY, setAuthState, theme, toggleTheme, log
         </div>
       </section>
 
-      {/* How It Works - Interactive Simulator */}
-      <section id="simulator" className="landing-section">
+      {/* How It Works - Non-scrolling Timeline */}
+      <section id="how-it-works" className="landing-section">
         <div className="section-header animate-on-scroll">
-          <span className="section-tag">Interactive Demo</span>
-          <h2 className="section-title">See How It Works</h2>
+          <span className="section-tag">Simple Steps</span>
+          <h2 className="section-title">How It Works</h2>
         </div>
         
-        <div className="simulator-container animate-on-scroll">
-          {/* Left panel: Info and controls */}
-          <div className="simulator-card">
-            <div className="simulator-steps-nav">
-              {simulatorSteps.map((step, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setSimulatorStep(idx)}
-                  className={`simulator-step-btn ${simulatorStep === idx ? "active" : ""}`}
-                >
-                  Step {idx + 1}
-                </button>
-              ))}
-            </div>
-            
-            <span className="simulator-badge">{simulatorSteps[simulatorStep].badge}</span>
-            <h3 className="simulator-card-title" style={{ marginTop: "16px" }}>
-              {simulatorSteps[simulatorStep].title}
-            </h3>
-            <p className="simulator-card-desc">
-              {simulatorSteps[simulatorStep].description}
-            </p>
-            
-            <div style={{ display: "flex", gap: "12px" }}>
-              <button 
-                onClick={() => setSimulatorStep(prev => (prev > 0 ? prev - 1 : simulatorSteps.length - 1))}
-                className="btn-secondary"
-                style={{ padding: "10px 20px", fontSize: "14px" }}
-              >
-                Previous
-              </button>
-              <button 
-                onClick={() => setSimulatorStep(prev => (prev < simulatorSteps.length - 1 ? prev + 1 : 0))}
-                className="btn-primary"
-                style={{ padding: "10px 20px", fontSize: "14px" }}
-              >
-                Next Step
-              </button>
+        <div className="how-it-works-list">
+          <div className="step-item animate-on-scroll stagger-delay-1">
+            <div className="step-number">01</div>
+            <div className="step-content">
+              <h3>Create Your Account</h3>
+              <p>Sign up in seconds using your email and a secure 6-digit PIN. No complicated backup phrases to write down or lose.</p>
             </div>
           </div>
-          
-          {/* Right panel: Graphic visualization */}
-          <div className="simulator-visualizer">
-            <div className="simulator-flow-graphic">
-              {/* Alice Node */}
-              <div className={`simulator-node ${simulatorSteps[simulatorStep].highlightNode === "alice" ? "active" : ""}`}>
-                <div className="simulator-node-icon">
-                  <Lock size={24} />
-                </div>
-                <span className="simulator-node-label">Alice</span>
-              </div>
-              
-              {/* Arrow Alice -> Blockchain */}
-              <div className={`simulator-arrow ${simulatorSteps[simulatorStep].arrowActive === "left" ? "active" : ""}`}>
-                {simulatorSteps[simulatorStep].arrowActive === "left" && <div className="simulator-arrow-dot" />}
-              </div>
-              
-              {/* Blockchain Node */}
-              <div className={`simulator-node ${simulatorSteps[simulatorStep].highlightNode === "blockchain" ? "active" : ""}`}>
-                <div className="simulator-node-icon">
-                  <Cpu size={24} />
-                </div>
-                <span className="simulator-node-label">Secure Vault</span>
-              </div>
-              
-              {/* Arrow Blockchain -> Bob */}
-              <div className={`simulator-arrow ${simulatorSteps[simulatorStep].arrowActive === "right" ? "active" : ""}`}>
-                {simulatorSteps[simulatorStep].arrowActive === "right" && <div className="simulator-arrow-dot" />}
-              </div>
-              
-              {/* Bob Node */}
-              <div className={`simulator-node ${simulatorSteps[simulatorStep].highlightNode === "bob" ? "active" : ""}`}>
-                <div className="simulator-node-icon">
-                  <Eye size={24} />
-                </div>
-                <span className="simulator-node-label">Bob</span>
-              </div>
+          <div className="step-item animate-on-scroll stagger-delay-2">
+            <div className="step-number">02</div>
+            <div className="step-content">
+              <h3>Deposit & Shield Funds</h3>
+              <p>Put standard tokens (like USDC or XLM) into the secure vault. Your public balance drops, and your wallet balance becomes completely private.</p>
+            </div>
+          </div>
+          <div className="step-item animate-on-scroll stagger-delay-3">
+            <div className="step-number">03</div>
+            <div className="step-content">
+              <h3>Send Money for Free</h3>
+              <p>Type in any username to send money privately. A helper network processes the transfer and sponsors the transaction fee, keeping it free for you.</p>
+            </div>
+          </div>
+          <div className="step-item animate-on-scroll stagger-delay-4">
+            <div className="step-number">04</div>
+            <div className="step-content">
+              <h3>Receive Privately</h3>
+              <p>Payments show up directly in your account. Only you can see your history, received tokens, and private wallet balance.</p>
             </div>
           </div>
         </div>
@@ -398,13 +294,6 @@ export default function Landing({ scrollY, setAuthState, theme, toggleTheme, log
           >
             <Cpu size={18} />
             <span>On-Device Security</span>
-          </button>
-          <button 
-            onClick={() => setActiveTab("compliance")}
-            className={`protocols-tab-btn ${activeTab === "compliance" ? "active" : ""}`}
-          >
-            <FileText size={18} />
-            <span>Audit & Tax Ready</span>
           </button>
         </div>
         
@@ -541,9 +430,9 @@ export default function Landing({ scrollY, setAuthState, theme, toggleTheme, log
                 <td>Prevents unauthorized people from redirecting your funds.</td>
               </tr>
               <tr>
-                <td className="specs-feature-name">Key Access Control</td>
-                <td>Keeps your secret keys private while letting you export readable history.</td>
-                <td>Lets you share tax records easily without giving up your funds.</td>
+                <td className="specs-feature-name">Device-Level Encryption</td>
+                <td>Your private password is encrypted on your device and never stored online.</td>
+                <td>Keeps your money safe even if our servers go down.</td>
               </tr>
             </tbody>
           </table>
