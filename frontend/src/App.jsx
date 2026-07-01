@@ -338,6 +338,18 @@ export default function App() {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, [currentTab]);
 
+  // Default to #dashboard when logged in and no specific route is present
+  useEffect(() => {
+    const handleDefaultHash = () => {
+      if (authState === "logged-in" && (window.location.hash === "" || window.location.hash === "#")) {
+        window.location.hash = "dashboard";
+      }
+    };
+    window.addEventListener("hashchange", handleDefaultHash);
+    handleDefaultHash();
+    return () => window.removeEventListener("hashchange", handleDefaultHash);
+  }, [authState]);
+
   // Formats the remaining seconds into MM:SS format
   const formatTimeLeft = (seconds) => {
     if (seconds === null || seconds < 0) return "";
@@ -442,6 +454,7 @@ export default function App() {
     setPin("");
     notifiedCommitmentsRef.current.clear();
     isFirstLoadRef.current = true;
+    window.location.hash = "";
   };
 
   const handleOAuthSession = async (session) => {
@@ -2123,7 +2136,7 @@ export default function App() {
               <AlertCircle size={48} style={{ color: "var(--error-color)", marginBottom: "16px" }} />
               <h2 style={{ fontSize: "20px", fontWeight: "600", marginBottom: "10px" }}>Invalid Request</h2>
               <p style={{ color: "var(--text-muted)", marginBottom: "24px", fontSize: "14px" }}>{statusMessage}</p>
-              <button onClick={() => { window.location.hash = ""; setCurrentTab("home"); }} className="btn-secondary" style={{ width: "100%" }}>
+              <button onClick={() => { window.location.hash = "dashboard"; setCurrentTab("home"); }} className="btn-secondary" style={{ width: "100%" }}>
                 Go to Home
               </button>
             </div>
@@ -2136,7 +2149,7 @@ export default function App() {
               <p style={{ color: "var(--text-muted)", marginBottom: "24px", fontSize: "14px" }}>
                 You have successfully paid @{payRequestDetails?.recipientUsername || "recipient"}.
               </p>
-              <button onClick={() => { window.location.hash = ""; setCurrentTab("home"); }} className="btn-primary" style={{ width: "100%" }}>
+              <button onClick={() => { window.location.hash = "dashboard"; setCurrentTab("home"); }} className="btn-primary" style={{ width: "100%" }}>
                 Go to Home
               </button>
             </div>
@@ -2223,7 +2236,7 @@ export default function App() {
                 </div>
 
                 <button 
-                  onClick={() => { window.location.hash = ""; setCurrentTab("home"); }} 
+                  onClick={() => { window.location.hash = "dashboard"; setCurrentTab("home"); }} 
                   className="btn-secondary" 
                   style={{ width: "100%", padding: "10px", fontSize: "14px" }}
                 >
