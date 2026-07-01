@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Production/Build outputs
+dist/
+dist-ssr/
+contracts/target/
+
+# Environment configurations and secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Local state databases/JSON logs
+backend/gateway_state.json
+backend/indexer_state.json
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# System & Editor files
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Temporary scratch directories
+scratch/
+
+# Embedded tools/plugins
+stellar-dev-skill/
+.gemini/
+

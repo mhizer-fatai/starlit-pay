@@ -1,0 +1,17 @@
+{
+  "short_name": "Starlit",
+  "name": "Starlit Pay",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "type": "image/png",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#050508",
+  "theme_color": "#050508",
+  "display": "standalone",
+  "orientation": "portrait"
+}

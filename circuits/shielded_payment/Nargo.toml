@@ -1,0 +1,7 @@
+[package]
+name = "shielded_payment"
+type = "bin"
+authors = ["Starlit Shield"]
+compiler_version = ">=0.30.0"
+
+[dependencies]
