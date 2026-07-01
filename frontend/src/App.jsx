@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
-  Shield, Coins, Send as SendIcon, Download, RefreshCw, User, Lock, 
+import {
+  Shield, Coins, Send as SendIcon, Download, RefreshCw, User, Lock,
   FileText, Eye, EyeOff, CheckCircle, AlertCircle, LogOut, Search, Key, Link as LinkIcon, Upload,
   ArrowRight, Globe, Cpu, Activity as ActivityIcon, Check, Sun, Moon
 } from "lucide-react";
@@ -21,17 +21,17 @@ import Withdraw from "./components/Withdraw";
 import Activity from "./components/Activity";
 import Links from "./components/Links";
 import Keys from "./components/Keys";
-import { 
-  deriveKeysFromEmailAndPin, encryptNote, decryptNote, 
+import {
+  deriveKeysFromEmailAndPin, encryptNote, decryptNote,
   encryptSeedLocally, decryptSeedLocally, bytesToHex, hexToBytes,
   encryptSymmetrically, decryptSymmetrically
 } from "./utils/crypto";
-import { 
+import {
   getPublicBalances, ensureTokenTrustline, depositToPool, claimFromPool, sendPublicPayment,
   buildPublicPaymentTxXdr, submitSignedXdr
 } from "./utils/stellar";
-import { 
-  calculateCommitment, calculateNullifier, generateShieldedPaymentProof 
+import {
+  calculateCommitment, calculateNullifier, generateShieldedPaymentProof
 } from "./utils/zk";
 
 // Soroban Contract Configuration
@@ -44,8 +44,8 @@ const TOKENS = {
 };
 
 // Dynamic backend routing base URL
-const BACKEND_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" 
-  ? "http://localhost:3001" 
+const BACKEND_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:3001"
   : `http://${window.location.hostname}:3001`;
 
 // Initialize Supabase Client
@@ -206,7 +206,7 @@ export default function App() {
       const delay = Math.random() * 0.2;
       const color = colors[Math.floor(Math.random() * colors.length)];
       const isSquare = Math.random() > 0.5;
-      
+
       particles.push({
         id: i,
         x: `${x}px`,
@@ -265,7 +265,7 @@ export default function App() {
   useEffect(() => {
     walletKeysRef.current = walletKeys;
   }, [walletKeys]);
-  
+
   // Balances
   const [publicBalance, setPublicBalance] = useState({ XLM: "0", USDC: "0" });
   const [shieldedBalances, setShieldedBalances] = useState({ XLM: 0, USDC: 0 });
@@ -705,17 +705,17 @@ export default function App() {
     try {
       const secret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
       const tokenAddress = TOKENS[asset];
-      
+
       const commitment = await calculateCommitment(amount, walletKeys.viewing.publicKey, tokenAddress, secret);
-      
+
       const encrypted = encryptNote(
-        amount, 
-        asset, 
-        secret, 
-        userProfile.username, 
+        amount,
+        asset,
+        secret,
+        userProfile.username,
         walletKeys.viewing.publicKey
       );
-      
+
       const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
 
       const depositRes = await depositToPool(
@@ -831,7 +831,7 @@ export default function App() {
             inputSum: currentInputSum
           });
           remainingAmount -= stepSpend;
-          
+
           currentInputNotes = [];
           currentInputSum = 0;
 
@@ -848,7 +848,7 @@ export default function App() {
       }
 
       setShowingZkLoader(true);
-      
+
       const totalSteps = txSteps.length;
       let stepIndex = 0;
       let lastTxHash = "";
@@ -870,7 +870,7 @@ export default function App() {
         let secret2Hex = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
         const dummyOwner = derivedKeys.viewing.publicKey;
         let commitment2Hex = await calculateCommitment(0, dummyOwner, tokenAddress, secret2Hex);
-        
+
         if (input2) {
           secret2Hex = input2.secret;
           commitment2Hex = input2.commitment;
@@ -885,7 +885,7 @@ export default function App() {
         if (changeAmount > 0.0001) {
           changeSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
           changeCommitmentHex = await calculateCommitment(changeAmount, derivedKeys.viewing.publicKey, tokenAddress, changeSecret);
-          
+
           const changeEncrypted = encryptNote(
             changeAmount,
             selectedAsset,
@@ -1060,7 +1060,7 @@ export default function App() {
         };
 
         const decrypted = decryptNote(notePayload, walletKeys.viewing.secretKey);
-        
+
         if (decrypted) {
           let tokenCode = "USDC";
           for (const [code, addr] of Object.entries(TOKENS)) {
@@ -1096,7 +1096,7 @@ export default function App() {
 
           // Track and check if we have already notified this commitment
           const alreadyNotified = notifiedCommitmentsRef.current.has(note.commitment);
-          
+
           if (!alreadyNotified) {
             // Only trigger notifications if it is NOT the first load of the session
             if (!isFirstLoadRef.current && decrypted.sender !== userProfile.username) {
@@ -1223,13 +1223,13 @@ export default function App() {
         }
 
         console.log(`[Auto-Merge] Silently consolidating private ${tokenCode} notes: ${note1.amount} + ${note2.amount}`);
-        
+
         try {
           // Generate key secrets for new merged note
           const mergedSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
           const mergedAmount = note1.amount + note2.amount;
           const mergedCommitment = await calculateCommitment(mergedAmount, walletKeys.viewing.publicKey, tokenAddress, mergedSecret);
-          
+
           // Encrypt the combined note back to our own viewing key
           const mergedEncrypted = encryptNote(
             mergedAmount,
@@ -1370,7 +1370,7 @@ export default function App() {
   const handleShieldAsset = async (e) => {
     e.preventDefault();
     if (!depositAmount || isNaN(depositAmount)) return;
-    
+
     setLoading(true);
     setStatusMessage("Shielding assets...");
 
@@ -1378,19 +1378,19 @@ export default function App() {
       const amount = parseFloat(depositAmount);
       const secret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
       const tokenAddress = TOKENS[selectedAsset];
-      
+
       // Calculate ZK commitment
       const commitment = await calculateCommitment(amount, walletKeys.viewing.publicKey, tokenAddress, secret);
-      
+
       // Encrypt the note locally using recipient's viewing public key
       const encrypted = encryptNote(
-        amount, 
-        selectedAsset, 
-        secret, 
-        userProfile.username, 
+        amount,
+        selectedAsset,
+        secret,
+        userProfile.username,
         walletKeys.viewing.publicKey
       );
-      
+
       const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
 
       // Submit deposit transaction to Stellar directly (user pays XLM gas fees)
@@ -1543,7 +1543,7 @@ export default function App() {
             inputSum: currentInputSum
           });
           remainingAmount -= stepSpend;
-          
+
           currentInputNotes = [];
           currentInputSum = 0;
 
@@ -1560,7 +1560,7 @@ export default function App() {
       }
 
       setShowingZkLoader(true);
-      
+
       const totalSteps = txSteps.length;
       let stepIndex = 0;
       let lastTxHash = "";
@@ -1582,7 +1582,7 @@ export default function App() {
         let secret2Hex = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
         const dummyOwner = walletKeys.viewing.publicKey;
         let commitment2Hex = await calculateCommitment(0, dummyOwner, tokenAddress, secret2Hex);
-        
+
         if (input2) {
           secret2Hex = input2.secret;
           commitment2Hex = input2.commitment;
@@ -1605,7 +1605,7 @@ export default function App() {
           let changeCommitmentHex = "0000000000000000000000000000000000000000000000000000000000000000";
           let changeEncryptedHex = "00";
           let changeSecret = "";
-          
+
           if (changeAmount > 0.0001) {
             changeSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
             changeCommitmentHex = await calculateCommitment(changeAmount, walletKeys.viewing.publicKey, tokenAddress, changeSecret);
@@ -2049,11 +2049,11 @@ export default function App() {
               <p style={{ color: "var(--text-muted)", fontSize: "14px", marginBottom: "16px" }}>
                 Enter your 6-digit PIN to authorize payment of {payRequestDetails?.amount} {payRequestDetails?.asset}
               </p>
-              
+
               <div className="pin-dots">
                 {[0, 1, 2, 3, 4, 5].map((idx) => (
-                  <div 
-                    key={idx} 
+                  <div
+                    key={idx}
                     className={`pin-dot ${confirmPinInput.length > idx ? "active" : ""}`}
                   />
                 ))}
@@ -2087,9 +2087,9 @@ export default function App() {
                 }}
               />
 
-              <button 
-                onClick={() => { setShowPinConfirm(false); setConfirmPinInput(""); }} 
-                className="btn-secondary" 
+              <button
+                onClick={() => { setShowPinConfirm(false); setConfirmPinInput(""); }}
+                className="btn-secondary"
                 style={{ width: "100%", padding: "12px" }}
               >
                 Cancel
@@ -2165,13 +2165,13 @@ export default function App() {
               </div>
 
               {secondsLeft !== null && (
-                <div 
+                <div
                   className={secondsLeft < 60 ? "animate-pulse-red" : ""}
-                  style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    justifyContent: "center", 
-                    gap: "8px", 
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
                     marginBottom: "16px",
                     background: secondsLeft < 60 ? "rgba(255, 59, 48, 0.1)" : "rgba(255, 255, 255, 0.03)",
                     border: `1px solid ${secondsLeft < 60 ? "rgba(255, 59, 48, 0.3)" : "var(--border-color)"}`,
@@ -2199,12 +2199,12 @@ export default function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                   {!connectedWalletAddress ? (
-                    <button 
-                      onClick={handleConnectWalletOnly} 
-                      className="btn-primary" 
-                      style={{ 
-                        width: "100%", 
-                        fontSize: "14px", 
+                    <button
+                      onClick={handleConnectWalletOnly}
+                      className="btn-primary"
+                      style={{
+                        width: "100%",
+                        fontSize: "14px",
                         padding: "12px",
                         display: "flex",
                         alignItems: "center",
@@ -2216,12 +2216,12 @@ export default function App() {
                       Connect Wallet to Pay
                     </button>
                   ) : (
-                    <button 
-                      onClick={handlePayInvoiceWithWallet} 
-                      className="btn-primary" 
-                      style={{ 
-                        width: "100%", 
-                        fontSize: "14px", 
+                    <button
+                      onClick={handlePayInvoiceWithWallet}
+                      className="btn-primary"
+                      style={{
+                        width: "100%",
+                        fontSize: "14px",
                         padding: "12px",
                         display: "flex",
                         alignItems: "center",
@@ -2235,9 +2235,9 @@ export default function App() {
                   )}
                 </div>
 
-                <button 
-                  onClick={() => { window.location.hash = "dashboard"; setCurrentTab("home"); }} 
-                  className="btn-secondary" 
+                <button
+                  onClick={() => { window.location.hash = "dashboard"; setCurrentTab("home"); }}
+                  className="btn-secondary"
                   style={{ width: "100%", padding: "10px", fontSize: "14px" }}
                 >
                   Cancel
@@ -2317,8 +2317,8 @@ export default function App() {
               {feedback.message}
             </span>
           </div>
-          <button 
-            onClick={() => setFeedback({ type: "", message: "" })} 
+          <button
+            onClick={() => setFeedback({ type: "", message: "" })}
             style={{
               background: "none",
               border: "none",
@@ -2359,12 +2359,12 @@ export default function App() {
             <div className="spinner"></div>
             <h2 style={{ fontSize: "20px", fontWeight: "700", marginBottom: "20px", color: "#ffffff" }}>Transaction in Progress</h2>
             <div className="progress-bar-container">
-              <div 
-                className="progress-bar-fill" 
-                style={{ 
-                  width: zkProgress.toLowerCase().includes("proof") ? "65%" : 
-                         zkProgress.toLowerCase().includes("relayer") || zkProgress.toLowerCase().includes("submit") ? "85%" : 
-                         zkProgress.toLowerCase().includes("witness") ? "30%" : "15%",
+              <div
+                className="progress-bar-fill"
+                style={{
+                  width: zkProgress.toLowerCase().includes("proof") ? "65%" :
+                    zkProgress.toLowerCase().includes("relayer") || zkProgress.toLowerCase().includes("submit") ? "85%" :
+                      zkProgress.toLowerCase().includes("witness") ? "30%" : "15%",
                   transition: "width 0.5s cubic-bezier(0.4, 0, 0.2, 1)"
                 }}
               ></div>
@@ -2382,11 +2382,11 @@ export default function App() {
             <p style={{ color: "var(--text-muted)", fontSize: "14px", marginBottom: "24px" }}>
               Enter your 6-digit PIN to authorize sending {sendAmount} {selectedAsset} to @{sendRecipient}
             </p>
-            
+
             <div className="pin-dots">
               {[0, 1, 2, 3, 4, 5].map((idx) => (
-                <div 
-                  key={idx} 
+                <div
+                  key={idx}
                   className={`pin-dot ${confirmPinInput.length > idx ? "active" : ""}`}
                 />
               ))}
@@ -2418,17 +2418,17 @@ export default function App() {
             />
 
             <div style={{ display: "flex", gap: "12px", width: "100%" }}>
-              <button 
-                onClick={() => handlePinConfirmSubmit(confirmPinInput)} 
-                className="btn-primary" 
+              <button
+                onClick={() => handlePinConfirmSubmit(confirmPinInput)}
+                className="btn-primary"
                 disabled={confirmPinInput.length !== 6 || loading}
                 style={{ flex: 1, padding: "14px" }}
               >
                 {loading ? "Processing..." : "Confirm"}
               </button>
-              <button 
-                onClick={() => { setShowPinConfirm(false); setConfirmPinInput(""); }} 
-                className="btn-secondary" 
+              <button
+                onClick={() => { setShowPinConfirm(false); setConfirmPinInput(""); }}
+                className="btn-secondary"
                 style={{ flex: 1, padding: "14px" }}
               >
                 Cancel
@@ -2442,7 +2442,7 @@ export default function App() {
       {showSuccessModal && (
         <div className="proving-overlay" style={{ zIndex: 1200 }}>
           <div className="proving-card" style={{ maxWidth: "380px", padding: "32px", textAlign: "center", overflow: "hidden", position: "relative" }}>
-            
+
             {/* Flare Animation Particles */}
             <div className="flare-container">
               {flareParticles.map(p => (
@@ -2487,24 +2487,24 @@ export default function App() {
             </p>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <button 
+              <button
                 onClick={() => {
                   setShowSuccessModal(false);
                   setShowReceipt(true);
-                }} 
-                className="btn-primary" 
+                }}
+                className="btn-primary"
                 style={{ width: "100%", padding: "14px", fontWeight: "600" }}
               >
                 View Receipt
               </button>
-              <button 
+              <button
                 onClick={() => {
                   setShowSuccessModal(false);
                   setDashboardAction(null);
                   setWalletAction(null);
                   setCurrentTab("home");
-                }} 
-                className="btn-secondary" 
+                }}
+                className="btn-secondary"
                 style={{ width: "100%", padding: "12px", fontSize: "14px" }}
               >
                 Close
@@ -2532,7 +2532,7 @@ export default function App() {
             }}>
               <Check size={36} />
             </div>
-            
+
             <h2 style={{ fontSize: "22px", fontWeight: "800", color: "#ffffff", marginBottom: "8px" }}>
               {receiptData.type === "Withdrawal" ? "Withdrawal Complete" : "Payment Sent"}
             </h2>
@@ -2552,16 +2552,16 @@ export default function App() {
                 <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
                   {receiptData.type === "Withdrawal" ? "To Address" : "To User"}
                 </span>
-                <span style={{ 
-                  fontSize: "14px", 
-                  fontWeight: "700", 
+                <span style={{
+                  fontSize: "14px",
+                  fontWeight: "700",
                   color: "#ffffff",
                   fontFamily: receiptData.type === "Withdrawal" ? "var(--font-mono)" : "inherit"
                 }}>
-                  {receiptData.type === "Withdrawal" 
-                    ? (receiptData.recipient.length > 20 
-                        ? `${receiptData.recipient.substring(0, 8)}...${receiptData.recipient.substring(receiptData.recipient.length - 8)}`
-                        : receiptData.recipient)
+                  {receiptData.type === "Withdrawal"
+                    ? (receiptData.recipient.length > 20
+                      ? `${receiptData.recipient.substring(0, 8)}...${receiptData.recipient.substring(receiptData.recipient.length - 8)}`
+                      : receiptData.recipient)
                     : `@${receiptData.recipient}`}
                 </span>
               </div>
@@ -2591,14 +2591,14 @@ export default function App() {
               </div>
             </div>
 
-            <button 
-              onClick={() => { 
-                setShowReceipt(false); 
-                setDashboardAction(null); 
+            <button
+              onClick={() => {
+                setShowReceipt(false);
+                setDashboardAction(null);
                 setWalletAction(null);
                 setCurrentTab("home");
-              }} 
-              className="btn-primary" 
+              }}
+              className="btn-primary"
               style={{ width: "100%", padding: "14px" }}
             >
               Done
@@ -2618,7 +2618,7 @@ export default function App() {
                   <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>Starlit Pay</span>
                 </div>
                 <div style={{ borderLeft: "1px solid var(--border-color)", height: "24px", paddingLeft: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
-                  <div 
+                  <div
                     onClick={triggerProfilePicSelect}
                     className="mobile-avatar-container"
                     style={{
@@ -2639,15 +2639,15 @@ export default function App() {
                     }}
                   >
                     {profilePic ? (
-                      <img 
-                        src={profilePic} 
-                        alt="Profile" 
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+                      <img
+                        src={profilePic}
+                        alt="Profile"
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
                       />
                     ) : (
                       userProfile?.username?.substring(0, 2).toUpperCase() || "SP"
                     )}
-                    <div 
+                    <div
                       className="mobile-avatar-overlay"
                       style={{
                         position: "absolute",
@@ -2672,8 +2672,8 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <button 
-                onClick={toggleTheme} 
+              <button
+                onClick={toggleTheme}
                 className="theme-toggle-btn"
                 aria-label="Toggle Theme"
                 style={{
@@ -2708,7 +2708,7 @@ export default function App() {
                     {(() => {
                       const totalBalance = (shieldedBalances.USDC || 0) * prices.USDC + (shieldedBalances.XLM || 0) * prices.XLM;
                       return (
-                        <div className="premium-card" style={{ 
+                        <div className="premium-card" style={{
                           minHeight: "180px",
                           background: "linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%)",
                           backgroundImage: "radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.4), transparent 70%), radial-gradient(circle at 80% 70%, rgba(59, 130, 246, 0.35), transparent 70%), linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%)",
@@ -2730,14 +2730,14 @@ export default function App() {
                               ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </h2>
                           </div>
-                          
+
                           {/* Bottom Drawer showing breakdown */}
-                          <div style={{ 
-                            display: "flex", 
-                            justifyContent: "space-between", 
-                            alignItems: "center", 
-                            background: "rgba(0, 0, 0, 0.3)", 
-                            margin: "0 -28px -28px", 
+                          <div style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            background: "rgba(0, 0, 0, 0.3)",
+                            margin: "0 -28px -28px",
                             padding: "14px 28px",
                             borderTop: "1px solid rgba(255, 255, 255, 0.05)"
                           }}>
@@ -2768,8 +2768,8 @@ export default function App() {
 
                     {/* Quick actions routing buttons */}
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginTop: "20px", marginBottom: "24px" }}>
-                      <button 
-                        onClick={() => { setMobileTab("pay"); setDashboardAction("send"); }} 
+                      <button
+                        onClick={() => { setMobileTab("pay"); setDashboardAction("send"); }}
                         className="btn-secondary"
                         style={{
                           display: "flex",
@@ -2800,8 +2800,8 @@ export default function App() {
                         </div>
                         <span>Send</span>
                       </button>
-                      <button 
-                        onClick={() => { setDashboardAction("receive"); setWalletAction("receive-active"); }} 
+                      <button
+                        onClick={() => { setDashboardAction("receive"); setWalletAction("receive-active"); }}
                         className="btn-secondary"
                         style={{
                           display: "flex",
@@ -2832,8 +2832,8 @@ export default function App() {
                         </div>
                         <span>Request</span>
                       </button>
-                      <button 
-                        onClick={() => setWalletAction("out")} 
+                      <button
+                        onClick={() => setWalletAction("out")}
                         className="btn-secondary"
                         style={{
                           display: "flex",
@@ -2870,8 +2870,8 @@ export default function App() {
                     <div style={{ marginTop: "28px", marginBottom: "28px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
                         <h3 style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)" }}>Transaction History</h3>
-                        <button 
-                          onClick={() => setMobileTab("activity")} 
+                        <button
+                          onClick={() => setMobileTab("activity")}
                           style={{
                             background: "none",
                             border: "none",
@@ -2884,7 +2884,7 @@ export default function App() {
                           View All
                         </button>
                       </div>
-                      
+
                       {transactions.length === 0 ? (
                         <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-muted)", background: "var(--card-bg)", border: "1px solid var(--border-color)", borderRadius: "16px" }}>
                           <p style={{ fontSize: "14px" }}>No payments yet</p>
@@ -2893,7 +2893,7 @@ export default function App() {
                         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
                           {transactions.slice(0, 3).map((tx, idx) => {
                             const isIncoming = tx.type === "Incoming" || tx.type === "Received" || tx.type === "Deposit" || tx.type === "Deposited";
-                            
+
                             let displayLabel = "";
                             if (tx.type === "Deposit") {
                               displayLabel = tx.party && tx.party.startsWith("G")
@@ -2914,13 +2914,13 @@ export default function App() {
                             }
 
                             return (
-                              <div 
-                                key={idx} 
-                                className="glass-card" 
-                                style={{ 
-                                  display: "flex", 
-                                  justifyContent: "space-between", 
-                                  alignItems: "center", 
+                              <div
+                                key={idx}
+                                className="glass-card"
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
                                   padding: "12px 14px",
                                   background: "var(--card-bg)",
                                   border: "1px solid var(--border-color)",
@@ -2928,7 +2928,7 @@ export default function App() {
                                 }}
                               >
                                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                                  <div style={{ 
+                                  <div style={{
                                     width: "32px",
                                     height: "32px",
                                     background: isIncoming ? "rgba(16, 185, 129, 0.1)" : "rgba(124, 58, 237, 0.08)",
@@ -2966,10 +2966,10 @@ export default function App() {
                       userProfile={userProfile}
                       showFeedback={showFeedback}
                     />
-                    <button 
-                      type="button" 
-                      onClick={() => setWalletAction(null)} 
-                      className="btn-secondary" 
+                    <button
+                      type="button"
+                      onClick={() => setWalletAction(null)}
+                      className="btn-secondary"
                       style={{ width: "100%", padding: "14px", marginTop: "16px" }}
                     >
                       Back to Wallet
@@ -2996,22 +2996,22 @@ export default function App() {
               <div className="tab-pane" style={{ display: "flex", flexDirection: "column", height: "100%", justifyContent: "space-between" }}>
                 <div style={{ textAlign: "center", margin: "10px 0" }}>
                   <span style={{ fontSize: "12px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "600" }}>Enter Amount</span>
-                  
+
                   <div style={{ position: "relative", maxWidth: "220px", margin: "16px auto" }}>
                     <span style={{ position: "absolute", left: "16px", top: "50%", transform: "translateY(-50%)", fontSize: "24px", fontWeight: "700", color: "var(--text-muted)" }}>
                       {selectedAsset === "XLM" ? "" : "$"}
                     </span>
-                    <input 
-                      type="text" 
-                      placeholder="0.00" 
-                      value={sendAmount} 
+                    <input
+                      type="text"
+                      placeholder="0.00"
+                      value={sendAmount}
                       onChange={(e) => {
                         const val = e.target.value.replace(/[^0-9.]/g, "");
                         const parts = val.split(".");
                         if (parts.length > 2) return;
                         if (parts[1] && parts[1].length > 2) return;
                         setSendAmount(val);
-                      }} 
+                      }}
                       style={{ padding: "18px 18px 18px 36px", fontSize: "26px", fontWeight: "700", textAlign: "center", width: "100%" }}
                     />
                   </div>
@@ -3034,8 +3034,8 @@ export default function App() {
 
                   <div className="asset-pills" style={{ margin: "8px auto" }}>
                     {Object.keys(TOKENS).map((asset) => (
-                      <button 
-                        key={asset} 
+                      <button
+                        key={asset}
                         className={`asset-pill ${selectedAsset === asset ? "active" : ""}`}
                         onClick={() => setSelectedAsset(asset)}
                       >
@@ -3043,23 +3043,23 @@ export default function App() {
                       </button>
                     ))}
                   </div>
-                  
+
                   <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", margin: "16px 0", width: "100%" }}>
                     <span style={{ fontSize: "14px", color: "var(--text-muted)", flexShrink: 0 }}>To:</span>
-                    <input 
-                      type="text" 
-                      placeholder="Starlit username" 
-                      value={sendRecipient} 
-                      onChange={(e) => setSendRecipient(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""))} 
+                    <input
+                      type="text"
+                      placeholder="Starlit username"
+                      value={sendRecipient}
+                      onChange={(e) => setSendRecipient(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""))}
                       style={{ width: "100%", maxWidth: "200px", padding: "8px 12px", fontSize: "14px", borderRadius: "12px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)" }}
                     />
                   </div>
                 </div>
 
                 <div style={{ padding: "0 10px", marginBottom: "20px" }}>
-                  <button 
-                    onClick={handleSendSubmit} 
-                    className="btn-primary" 
+                  <button
+                    onClick={handleSendSubmit}
+                    className="btn-primary"
                     style={{ width: "100%", padding: "16px" }}
                     disabled={!sendRecipient || parseFloat(sendAmount || 0) <= 0 || (shieldedBalances[selectedAsset] || 0) < parseFloat(sendAmount)}
                   >
@@ -3071,9 +3071,9 @@ export default function App() {
                   <h4 style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", marginBottom: "12px", paddingLeft: "4px" }}>Top Contacts</h4>
                   <div className="contact-list">
                     {contacts.map((contact, idx) => (
-                      <div 
-                        key={idx} 
-                        className="contact-item" 
+                      <div
+                        key={idx}
+                        className="contact-item"
                         onClick={() => setSendRecipient(contact.username)}
                       >
                         <div className="contact-avatar">
@@ -3112,13 +3112,13 @@ export default function App() {
                     </div>
                     <div>
                       <label style={{ display: "block", fontSize: "12px", color: "var(--text-muted)", marginBottom: "6px" }}>Amount</label>
-                      <input 
-                        type="number" 
-                        step="0.01" 
-                        placeholder="0.00" 
-                        value={depositAmount} 
-                        onChange={(e) => setDepositAmount(e.target.value)} 
-                        required 
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={depositAmount}
+                        onChange={(e) => setDepositAmount(e.target.value)}
+                        required
                         style={{ padding: "12px 14px", fontSize: "14px", borderRadius: "12px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)" }}
                       />
                     </div>
@@ -3197,7 +3197,7 @@ export default function App() {
                 {/* Column 1: Wallet Balances & Actions */}
                 <section className="grid-panel">
                   <h3 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "20px", color: "var(--text-primary)" }}>Balances</h3>
-                  
+
                   {walletAction === null ? (
                     <Balances
                       shieldedBalances={shieldedBalances}
@@ -3282,12 +3282,12 @@ export default function App() {
         </div>
       )}
       {/* Hidden file input for client-side avatar upload */}
-      <input 
-        type="file" 
-        ref={profilePicInputRef} 
-        onChange={handleProfilePicChange} 
-        accept="image/*" 
-        style={{ display: "none" }} 
+      <input
+        type="file"
+        ref={profilePicInputRef}
+        onChange={handleProfilePicChange}
+        accept="image/*"
+        style={{ display: "none" }}
       />
     </div>
   );

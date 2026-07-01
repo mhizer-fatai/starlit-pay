@@ -8,6 +8,9 @@
   # The build command to compile the Vite project
   command = "npm run build"
 
+[build.environment]
+  VITE_BACKEND_URL = "https://starlit-pay.onrender.com"
+
 # Configure redirects so SPA routing loads index.html for all sub-paths
 [[redirects]]
   from = "/*"
