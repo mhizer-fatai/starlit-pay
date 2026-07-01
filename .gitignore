@@ -40,4 +40,6 @@ scratch/
 # Embedded tools/plugins
 stellar-dev-skill/
 .gemini/
+netlify/
+
 
