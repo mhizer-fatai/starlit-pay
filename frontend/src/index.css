@@ -1226,9 +1226,9 @@ input:focus, select:focus {
 /* --- LIGHT THEME STYLING SYSTEM --- */
 .light-theme {
   --bg-color: #f8fafc;
-  --card-bg: rgba(255, 255, 255, 0.75);
-  --card-bg-hover: rgba(241, 245, 249, 0.9);
-  --border-color: rgba(15, 23, 42, 0.08);
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-bg-hover: rgba(241, 245, 249, 0.85);
+  --border-color: rgba(15, 23, 42, 0.05);
   --primary-accent: #7c3aed;
   --primary-accent-hover: #6d28d9;
   --secondary-accent: #2563eb;
@@ -1242,9 +1242,11 @@ input:focus, select:focus {
 
 /* Light theme general and component layout overrides */
 .light-theme body, 
-.light-theme html, 
-.light-theme #root {
-  background-image: radial-gradient(circle at 50% 0%, #f5f3ff 0%, #f8fafc 100%);
+html.light-theme, 
+.light-theme #root,
+.light-theme .mobile-viewport {
+  background-color: var(--bg-color) !important;
+  background-image: radial-gradient(circle at 50% 0%, #f5f3ff 0%, #f8fafc 100%) !important;
 }
 
 .light-theme .landing-page-root {
@@ -1444,6 +1446,38 @@ input:focus, select:focus {
 .light-theme .keypad-btn:hover {
   background: rgba(124, 58, 237, 0.06);
   border-color: var(--primary-accent);
+}
+
+/* Premium Light Mode Components */
+.light-theme .mobile-nav {
+  background: rgba(255, 255, 255, 0.75) !important;
+  border: 1px solid rgba(15, 23, 42, 0.06) !important;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03) !important;
+}
+
+.light-theme .mobile-nav-btn {
+  color: var(--text-muted) !important;
+}
+
+.light-theme .mobile-nav-btn.active {
+  color: var(--primary-accent) !important;
+}
+
+.light-theme .contact-avatar {
+  background: rgba(15, 23, 42, 0.03) !important;
+  color: var(--text-primary) !important;
+  border-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+.light-theme .badge-outgoing {
+  background: rgba(15, 23, 42, 0.04) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid rgba(15, 23, 42, 0.06) !important;
+}
+
+.light-theme .scrollable-content::-webkit-scrollbar-thumb, 
+.light-theme .main-content::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.08) !important;
 }
 
 /* --- SCROLL ANIMATIONS SYSTEM --- */
