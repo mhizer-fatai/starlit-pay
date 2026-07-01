@@ -1,0 +1,15 @@
+[build]
+  # The base directory where the frontend project is located
+  base = "frontend"
+
+  # The directory that will contain the compiled production assets
+  publish = "dist"
+
+  # The build command to compile the Vite project
+  command = "npm run build"
+
+# Configure redirects so SPA routing loads index.html for all sub-paths
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
