@@ -375,30 +375,6 @@ export default function Landing({ scrollY, setAuthState, theme, toggleTheme, log
               </div>
             </div>
           </div>
-
-          {/* EURC */}
-          <div className="asset-card-homepage">
-            <div className="asset-card-homepage-header">
-              <span className="asset-card-homepage-title">
-                <Sparkles size={20} style={{ color: "#10b981" }} />
-                EURC
-              </span>
-              <span className="asset-card-homepage-tag">Euro Stablecoin</span>
-            </div>
-            <p className="asset-card-homepage-desc">
-              Private European stablecoin transactions. Send and store euros securely, bridging traditional currency to private ledger pools.
-            </p>
-            <div className="asset-card-homepage-details">
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Gas Sponsorship:</span>
-                <span style={{ color: "var(--success-color)", fontWeight: "600" }}>Active</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>Settle Time:</span>
-                <span style={{ color: "#ffffff", fontWeight: "600" }}>~5 Seconds</span>
-              </div>
-            </div>
-          </div>
         </div>
       </section>
 

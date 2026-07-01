@@ -1809,9 +1809,12 @@ input:focus, select:focus {
 /* Assets Section */
 .assets-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 28px;
   margin-top: 40px;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 @media (max-width: 768px) {
