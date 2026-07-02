@@ -586,7 +586,8 @@ export default function App() {
             stellar_address: derived.stellar.publicKey,
             identity_commitment: derived.spendingKey,
             public_encryption_key: derived.viewing.publicKey,
-            avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`
+            avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
+            deposit_memo: Math.floor(100000 + Math.random() * 900000)
           }
         ])
         .select()
@@ -653,6 +654,17 @@ export default function App() {
           .eq("id", userProfile.id);
         if (!updateError) {
           userProfile.stellar_address = derived.stellar.publicKey;
+        }
+      }
+
+      if (userProfile && !userProfile.deposit_memo) {
+        const generatedMemo = Math.floor(100000 + Math.random() * 900000);
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({ deposit_memo: generatedMemo })
+          .eq("id", userProfile.id);
+        if (!updateError) {
+          userProfile.deposit_memo = generatedMemo;
         }
       }
 
