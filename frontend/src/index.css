@@ -1225,18 +1225,18 @@ input:focus, select:focus {
 
 /* --- LIGHT THEME STYLING SYSTEM --- */
 .light-theme {
-  --bg-color: #f8fafc;
-  --card-bg: rgba(255, 255, 255, 0.7);
-  --card-bg-hover: rgba(241, 245, 249, 0.85);
-  --border-color: rgba(15, 23, 42, 0.05);
+  --bg-color: #f4f3ee;
+  --card-bg: rgba(255, 255, 255, 0.65);
+  --card-bg-hover: rgba(255, 255, 255, 0.85);
+  --border-color: rgba(60, 40, 20, 0.06);
   --primary-accent: #7c3aed;
   --primary-accent-hover: #6d28d9;
   --secondary-accent: #2563eb;
   --success-color: #059669;
   --error-color: #e11d48;
-  --text-primary: #0f172a;
-  --text-muted: #64748b;
-  --input-bg: #ffffff;
+  --text-primary: #1c1b18;
+  --text-muted: #797670;
+  --input-bg: rgba(255, 255, 255, 0.8);
   --input-bg-focus: #ffffff;
 }
 
@@ -1246,17 +1246,17 @@ html.light-theme,
 .light-theme #root,
 .light-theme .mobile-viewport {
   background-color: var(--bg-color) !important;
-  background-image: radial-gradient(circle at 50% 0%, #f5f3ff 0%, #f8fafc 100%) !important;
+  background-image: radial-gradient(circle at 50% 0%, #FAF9F5 0%, #f4f3ee 100%) !important;
 }
 
 .light-theme .landing-page-root {
-  background-color: #f8fafc;
+  background-color: #f4f3ee;
 }
 
 .light-theme .landing-header {
-  background: rgba(248, 250, 252, 0.85);
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-  box-shadow: 0 4px 30px rgba(15, 23, 42, 0.02);
+  background: rgba(244, 243, 238, 0.85);
+  border-bottom: 1px solid rgba(60, 40, 20, 0.05);
+  box-shadow: 0 4px 30px rgba(60, 40, 20, 0.02);
 }
 
 .light-theme .landing-logo {
@@ -1451,8 +1451,8 @@ html.light-theme,
 /* Premium Light Mode Components */
 .light-theme .mobile-nav {
   background: rgba(255, 255, 255, 0.75) !important;
-  border: 1px solid rgba(15, 23, 42, 0.06) !important;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03) !important;
+  border: 1px solid rgba(60, 40, 20, 0.05) !important;
+  box-shadow: 0 10px 30px rgba(60, 40, 20, 0.03) !important;
 }
 
 .light-theme .mobile-nav-btn {
@@ -1464,20 +1464,20 @@ html.light-theme,
 }
 
 .light-theme .contact-avatar {
-  background: rgba(15, 23, 42, 0.03) !important;
+  background: rgba(60, 40, 20, 0.03) !important;
   color: var(--text-primary) !important;
-  border-color: rgba(15, 23, 42, 0.08) !important;
+  border-color: rgba(60, 40, 20, 0.06) !important;
 }
 
 .light-theme .badge-outgoing {
-  background: rgba(15, 23, 42, 0.04) !important;
+  background: rgba(60, 40, 20, 0.04) !important;
   color: var(--text-primary) !important;
-  border: 1px solid rgba(15, 23, 42, 0.06) !important;
+  border: 1px solid rgba(60, 40, 20, 0.05) !important;
 }
 
 .light-theme .scrollable-content::-webkit-scrollbar-thumb, 
 .light-theme .main-content::-webkit-scrollbar-thumb {
-  background: rgba(15, 23, 42, 0.08) !important;
+  background: rgba(60, 40, 20, 0.06) !important;
 }
 
 /* --- SCROLL ANIMATIONS SYSTEM --- */
