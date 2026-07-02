@@ -188,6 +188,7 @@ export default function App() {
 
   const [profilePic, setProfilePic] = useState(null);
   const profilePicInputRef = useRef(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -2607,6 +2608,143 @@ export default function App() {
         </div>
       )}
 
+      {/* Mobile Profile Menu Modal */}
+      {showProfileModal && (
+        <div 
+          className="proving-overlay" 
+          style={{ zIndex: 2500 }}
+          onClick={() => setShowProfileModal(false)}
+        >
+          <div 
+            className="glass-card" 
+            style={{ 
+              width: "90%", 
+              maxWidth: "380px", 
+              background: theme === "light" ? "var(--card-bg)" : "rgba(20, 20, 30, 0.95)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "24px",
+              padding: "28px",
+              textAlign: "center",
+              display: "flex",
+              flexDirection: "column",
+              gap: "20px",
+              position: "relative"
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button 
+                onClick={() => setShowProfileModal(false)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  fontSize: "18px",
+                  padding: 0
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
+              <div
+                onClick={() => {
+                  setShowProfileModal(false);
+                  triggerProfilePicSelect();
+                }}
+                style={{
+                  width: "72px",
+                  height: "72px",
+                  borderRadius: "50%",
+                  background: "var(--primary-accent)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#ffffff",
+                  fontWeight: "700",
+                  fontSize: "24px",
+                  cursor: "pointer",
+                  boxShadow: "0 8px 24px rgba(139, 92, 246, 0.25)",
+                  position: "relative",
+                  overflow: "hidden"
+                }}
+                title="Change Profile Picture"
+              >
+                {profilePic ? (
+                  <img
+                    src={profilePic}
+                    alt="Profile"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : (
+                  userProfile?.username?.substring(0, 2).toUpperCase() || "SP"
+                )}
+                <div style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  background: "rgba(0, 0, 0, 0.6)",
+                  padding: "4px 0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "9px",
+                  color: "#ffffff"
+                }}>
+                  Change
+                </div>
+              </div>
+
+              <div>
+                <h3 style={{ fontSize: "18px", fontWeight: "700", color: "var(--text-primary)" }}>
+                  {userProfile?.display_name || userProfile?.username}
+                </h3>
+                <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>
+                  @{userProfile?.username}
+                </span>
+              </div>
+            </div>
+
+            <hr style={{ border: "none", borderTop: "1px solid var(--border-color)" }} />
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(userProfile?.stellar_address || "");
+                  showFeedback("success", "Stellar address copied!");
+                  setShowProfileModal(false);
+                }}
+                className="btn-secondary"
+                style={{ width: "100%", padding: "14px", fontSize: "14px", fontWeight: "600" }}
+              >
+                Copy Stellar Address
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowProfileModal(false);
+                  handleLogout();
+                }}
+                className="btn-primary"
+                style={{ 
+                  width: "100%", 
+                  padding: "14px", 
+                  fontSize: "14px", 
+                  fontWeight: "600",
+                  background: "linear-gradient(135deg, var(--error-color) 0%, #e11d48 100%)",
+                  boxShadow: "0 4px 20px rgba(225, 29, 72, 0.25)"
+                }}
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isMobile ? (
         <div className="mobile-viewport">
           <div className="mobile-content">
@@ -2617,9 +2755,20 @@ export default function App() {
                   <img src={symbol} alt="Starlit Pay Logo" style={{ height: "20px", width: "auto" }} />
                   <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>Starlit Pay</span>
                 </div>
-                <div style={{ borderLeft: "1px solid var(--border-color)", height: "24px", paddingLeft: "12px", display: "flex", alignItems: "center", gap: "8px" }}>
+                <div 
+                  onClick={() => setShowProfileModal(true)}
+                  style={{ 
+                    borderLeft: "1px solid var(--border-color)", 
+                    height: "36px", 
+                    paddingLeft: "12px", 
+                    display: "flex", 
+                    alignItems: "center", 
+                    gap: "8px",
+                    cursor: "pointer"
+                  }}
+                  title="View Profile Options"
+                >
                   <div
-                    onClick={triggerProfilePicSelect}
                     className="mobile-avatar-container"
                     style={{
                       width: "32px",
@@ -2632,7 +2781,6 @@ export default function App() {
                       fontWeight: "700",
                       fontSize: "12px",
                       color: "#FFFFFF",
-                      cursor: "pointer",
                       position: "relative",
                       overflow: "hidden",
                       flexShrink: 0
@@ -2647,24 +2795,6 @@ export default function App() {
                     ) : (
                       userProfile?.username?.substring(0, 2).toUpperCase() || "SP"
                     )}
-                    <div
-                      className="mobile-avatar-overlay"
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        background: "rgba(0, 0, 0, 0.4)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        opacity: 0,
-                        transition: "opacity 0.2s ease",
-                        fontSize: "8px",
-                        fontWeight: "600",
-                        color: "#ffffff"
-                      }}
-                    >
-                      EDIT
-                    </div>
                   </div>
                   <div>
                     <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block" }}>Welcome Back,</span>

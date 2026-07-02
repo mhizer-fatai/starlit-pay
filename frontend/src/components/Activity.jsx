@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { createPortal } from "react-dom";
 import { Coins, Download, Send } from "lucide-react";
 
 export default function Activity({ transactions, theme }) {
@@ -107,7 +108,7 @@ export default function Activity({ transactions, theme }) {
       </div>
 
       {/* Transaction Details Modal */}
-      {selectedTx && (
+      {selectedTx && createPortal(
         <div style={{
           position: "fixed",
           top: 0,
@@ -119,7 +120,7 @@ export default function Activity({ transactions, theme }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          zIndex: 1000,
+          zIndex: 10000,
         }} onClick={() => setSelectedTx(null)}>
           <div className="glass-card" style={{
             width: "90%",
@@ -232,7 +233,8 @@ export default function Activity({ transactions, theme }) {
               Close Receipt
             </button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </section>
   );
