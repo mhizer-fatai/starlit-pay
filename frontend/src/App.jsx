@@ -27,7 +27,7 @@ import {
   encryptSymmetrically, decryptSymmetrically
 } from "./utils/crypto";
 import {
-  getPublicBalances, ensureTokenTrustline, depositToPool, claimFromPool, sendPublicPayment,
+  claimFromPool, sendPublicPayment,
   buildPublicPaymentTxXdr, submitSignedXdr
 } from "./utils/stellar";
 import {
@@ -268,7 +268,6 @@ export default function App() {
   }, [walletKeys]);
 
   // Balances
-  const [publicBalance, setPublicBalance] = useState({ XLM: "0", USDC: "0" });
   const [shieldedBalances, setShieldedBalances] = useState({ XLM: 0, USDC: 0 });
   const [shieldedNotes, setShieldedNotes] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -713,54 +712,7 @@ export default function App() {
   };
 
 
-  // Helper to automatically deposit public stablecoins into the shielded pool
-  const autoShieldIncomingFunds = async (asset, amount) => {
-    try {
-      const secret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-      const tokenAddress = TOKENS[asset];
 
-      const commitment = await calculateCommitment(amount, walletKeys.viewing.publicKey, tokenAddress, secret);
-
-      const encrypted = encryptNote(
-        amount,
-        asset,
-        secret,
-        userProfile.username,
-        walletKeys.viewing.publicKey
-      );
-
-      const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
-
-      const depositRes = await depositToPool(
-        walletKeys.stellar.keypair,
-        SHIELDED_POOL_CONTRACT_ID,
-        tokenAddress,
-        amount,
-        commitment,
-        encryptedHex
-      );
-
-      // Saves the shielded note commitment to the database cache
-      await fetch(`${BACKEND_URL}/api/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          commitment,
-          token_address: tokenAddress,
-          amount,
-          encrypted_note: encryptedHex,
-          recipient_viewing_key: walletKeys.viewing.publicKey
-        })
-      });
-
-      // Log deposit to transaction history
-      await logTransaction("Deposit", amount, asset, "", depositRes.hash, commitment);
-
-      showFeedback("success", `Automatically secured ${amount} ${asset} into your Starlit balance!`);
-    } catch (err) {
-      console.error(`Auto-shield failed for ${asset}:`, err);
-    }
-  };
 
   // Logs a new encrypted transaction history entry symmetrically
   const logTransaction = async (type, amount, asset, counterparty, txHash, commitment = "") => {
@@ -1017,25 +969,7 @@ export default function App() {
     }
 
     try {
-      const pubBals = await getPublicBalances(walletKeys.stellar.publicKey, TOKENS);
-      setPublicBalance(pubBals);
 
-      let shouldReloadBals = false;
-      if (pubBals.USDC && parseFloat(pubBals.USDC) > 0) {
-        await autoShieldIncomingFunds("USDC", parseFloat(pubBals.USDC));
-        shouldReloadBals = true;
-      }
-
-      if (pubBals.XLM && parseFloat(pubBals.XLM) > 10) {
-        const amountToShield = parseFloat(pubBals.XLM) - 5;
-        await autoShieldIncomingFunds("XLM", amountToShield);
-        shouldReloadBals = true;
-      }
-
-      if (shouldReloadBals) {
-        const updatedBals = await getPublicBalances(walletKeys.stellar.publicKey, TOKENS);
-        setPublicBalance(updatedBals);
-      }
 
       // Fetch transaction history
       const txsRes = await fetch(`${BACKEND_URL}/api/transactions/${userProfile.id}`);
@@ -1379,70 +1313,7 @@ export default function App() {
     }
   }, [authState, walletKeys]);
 
-  // 8. Action: Shield Asset (Deposit)
-  const handleShieldAsset = async (e) => {
-    e.preventDefault();
-    if (!depositAmount || isNaN(depositAmount)) return;
 
-    setLoading(true);
-    setStatusMessage("Shielding assets...");
-
-    try {
-      const amount = parseFloat(depositAmount);
-      const secret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-      const tokenAddress = TOKENS[selectedAsset];
-
-      // Calculate ZK commitment
-      const commitment = await calculateCommitment(amount, walletKeys.viewing.publicKey, tokenAddress, secret);
-
-      // Encrypt the note locally using recipient's viewing public key
-      const encrypted = encryptNote(
-        amount,
-        selectedAsset,
-        secret,
-        userProfile.username,
-        walletKeys.viewing.publicKey
-      );
-
-      const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
-
-      // Submit deposit transaction to Stellar directly (user pays XLM gas fees)
-      const depositRes = await depositToPool(
-        walletKeys.stellar.keypair,
-        SHIELDED_POOL_CONTRACT_ID,
-        tokenAddress,
-        amount,
-        commitment,
-        encryptedHex
-      );
-
-      // Caches the new shielded note in the database
-      await fetch(`${BACKEND_URL}/api/notes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          commitment,
-          token_address: tokenAddress,
-          amount,
-          encrypted_note: encryptedHex,
-          recipient_viewing_key: walletKeys.viewing.publicKey
-        })
-      });
-
-      // Log deposit to transaction history
-      await logTransaction("Deposit", amount, selectedAsset, "", depositRes.hash, commitment);
-
-      showFeedback("success", `Successfully added ${amount} ${selectedAsset} to your balance.`);
-      setDepositAmount("");
-      setCurrentTab("home");
-      await loadWalletData();
-    } catch (error) {
-      console.error(error);
-      showFeedback("error", error.message || "Failed to complete shielded deposit.");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Action: Pay another user directly (ZK-proof note spending to their funding account)
   // Initiates direct send flow by triggering PIN verification
@@ -1882,7 +1753,8 @@ export default function App() {
         payRequestDetails.recipientAddress,
         payRequestDetails.amount,
         payRequestDetails.asset,
-        TOKENS[payRequestDetails.asset]
+        TOKENS[payRequestDetails.asset],
+        payRequestDetails.recipientMemo
       );
 
       await supabase

@@ -219,7 +219,7 @@ async function runGatewayDaemon() {
 export function startGateway() {
   if (gatewayKeypair) {
     console.log(`Enterprise Deposit Gateway daemon started on address: ${gatewayKeypair.publicKey()}`);
-    setInterval(runGatewayDaemon, 5000);
+    setInterval(runGatewayDaemon, 15000);
   } else {
     console.log("Enterprise Deposit Gateway daemon skipped (GATEWAY_SECRET_KEY not set).");
   }

@@ -1,3 +1,6 @@
+import dns from "dns";
+dns.setDefaultResultOrder("ipv4first");
+
 import { app, PORT } from "./src/config.js";
 import "./src/auth.js";
 import "./src/relayer.js";

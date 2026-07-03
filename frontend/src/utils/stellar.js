@@ -340,7 +340,8 @@ export async function sendPublicPayment(
   recipientAddress,
   amount,
   assetCode,
-  assetIssuer
+  assetIssuer,
+  memoId = null
 ) {
   console.log(`Sending public payment of ${amount} ${assetCode} to ${recipientAddress}...`);
   const senderPublicKey = senderKeypair.publicKey();
@@ -354,7 +355,7 @@ export async function sendPublicPayment(
     asset = new StellarSdk.Asset(assetCode, assetIssuer);
   }
 
-  const tx = new StellarSdk.TransactionBuilder(account, {
+  const txBuilder = new StellarSdk.TransactionBuilder(account, {
     fee: StellarSdk.BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
   })
@@ -365,9 +366,13 @@ export async function sendPublicPayment(
         amount: amount.toFixed(7),
       })
     )
-    .setTimeout(180)
-    .build();
+    .setTimeout(180);
 
+  if (memoId) {
+    txBuilder.addMemo(StellarSdk.Memo.id(memoId.toString()));
+  }
+
+  const tx = txBuilder.build();
   tx.sign(senderKeypair);
   const response = await horizon.submitTransaction(tx);
   console.log(`Public payment sent successfully! Tx Hash: ${response.hash}`);

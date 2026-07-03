@@ -142,5 +142,5 @@ async function runIndexer() {
 // Starts the polling indexer interval automatically when this script is imported
 export function startIndexer() {
   console.log("Soroban Event Indexer started.");
-  setInterval(runIndexer, 5000);
+  setInterval(runIndexer, 15000);
 }
