@@ -21,7 +21,8 @@ const horizon = new StellarSdk.Horizon.Server(HORIZON_URL);
 let relayerKeypair = null;
 if (process.env.RELAYER_SECRET_KEY) {
   try {
-    relayerKeypair = StellarSdk.Keypair.fromSecret(process.env.RELAYER_SECRET_KEY);
+    const cleanSecret = process.env.RELAYER_SECRET_KEY.replace(/['"]/g, "").trim();
+    relayerKeypair = StellarSdk.Keypair.fromSecret(cleanSecret);
     console.log(`Relayer initialized with address: ${relayerKeypair.publicKey()}`);
   } catch (err) {
     console.error("Invalid RELAYER_SECRET_KEY configured:", err.message);
@@ -32,7 +33,8 @@ if (process.env.RELAYER_SECRET_KEY) {
 let gatewayKeypair = null;
 if (process.env.GATEWAY_SECRET_KEY) {
   try {
-    gatewayKeypair = StellarSdk.Keypair.fromSecret(process.env.GATEWAY_SECRET_KEY);
+    const cleanSecret = process.env.GATEWAY_SECRET_KEY.replace(/['"]/g, "").trim();
+    gatewayKeypair = StellarSdk.Keypair.fromSecret(cleanSecret);
     console.log(`Gateway initialized with address: ${gatewayKeypair.publicKey()}`);
   } catch (err) {
     console.error("Invalid GATEWAY_SECRET_KEY configured:", err.message);

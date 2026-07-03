@@ -92,7 +92,7 @@ export default function Send({
 
       {/* Renders horizontal scroll of frequently used contact shortcuts */}
       <div style={{ marginTop: "24px" }}>
-        <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", display: "block", marginBottom: "12px" }}>Top Contacts</span>
+        <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", display: "block", marginBottom: "12px" }}>Recently Contacted</span>
         <div className="contact-list">
           {contacts.map((contact, idx) => (
             <div 

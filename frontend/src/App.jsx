@@ -1096,34 +1096,97 @@ export default function App() {
       setShieldedNotes(decryptedNotes);
       setShieldedBalances(balanceSum);
 
-      // Sort recent transactions by time descending
-      decryptedTxs.sort((a, b) => b.timestamp - a.timestamp);
-      setTransactions(decryptedTxs);
-
-      // Cache decrypted notes, balances, and transactions for instant UI loads
-      try {
-        localStorage.setItem(`starlit_notes_${userProfile.id}`, JSON.stringify(decryptedNotes));
-        localStorage.setItem(`starlit_balance_${userProfile.id}`, JSON.stringify(balanceSum));
-        localStorage.setItem(`starlit_txs_${userProfile.id}`, JSON.stringify(decryptedTxs));
-      } catch (e) {
-        console.error("Failed to cache wallet data:", e);
+      // Deduplicate recent transactions to handle database duplicates from network retries or tab concurrency
+      const uniqueTxs = [];
+      const seenTxKeys = new Set();
+      for (const tx of decryptedTxs) {
+        const key = `${tx.type}-${tx.amount}-${tx.asset}-${tx.party}-${tx.commitment || tx.hash}`;
+        if (!seenTxKeys.has(key)) {
+          seenTxKeys.add(key);
+          uniqueTxs.push(tx);
+        }
       }
 
-      // Query registered profile contacts
+      // Sort recent transactions by time descending
+      uniqueTxs.sort((a, b) => b.timestamp - a.timestamp);
+      setTransactions(uniqueTxs);
+ 
+       // Cache decrypted notes, balances, and transactions for instant UI loads
+       try {
+         localStorage.setItem(`starlit_notes_${userProfile.id}`, JSON.stringify(decryptedNotes));
+         localStorage.setItem(`starlit_balance_${userProfile.id}`, JSON.stringify(balanceSum));
+         localStorage.setItem(`starlit_txs_${userProfile.id}`, JSON.stringify(uniqueTxs));
+       } catch (e) {
+         console.error("Failed to cache wallet data:", e);
+       }
+
+      // Populate Recently Contacted list from transaction history
+      const recentUsernames = [];
+      const seenUsernames = new Set();
+
+      for (const tx of uniqueTxs) {
+        const party = tx.party;
+        if (
+          party &&
+          party !== "deposit" &&
+          !party.startsWith("G") &&
+          party.toLowerCase() !== userProfile.username.toLowerCase()
+        ) {
+          const lowerParty = party.toLowerCase();
+          if (!seenUsernames.has(lowerParty)) {
+            seenUsernames.add(lowerParty);
+            recentUsernames.push(party);
+          }
+        }
+        if (recentUsernames.length >= 10) break;
+      }
+
+      let recentContacts = [];
+      if (recentUsernames.length > 0) {
+        const { data: profiles } = await supabase
+          .from("users")
+          .select("username, display_name, avatar_url, stellar_address")
+          .in("username", recentUsernames);
+
+        if (profiles && profiles.length > 0) {
+          const profileMap = new Map(profiles.map(p => [p.username.toLowerCase(), p]));
+          for (const username of recentUsernames) {
+            const profile = profileMap.get(username.toLowerCase());
+            if (profile) {
+              recentContacts.push(profile);
+            }
+          }
+        }
+      }
+
+      // If we don't have enough recent contacts, fill the rest with registered users
       const { data: dbUsers } = await supabase
         .from("users")
         .select("username, display_name, avatar_url, stellar_address")
         .neq("username", userProfile.username)
-        .limit(10);
+        .limit(20);
+
       if (dbUsers && dbUsers.length > 0) {
-        setContacts(dbUsers);
-      } else {
-        setContacts([
+        const existingUsernames = new Set(recentContacts.map(c => c.username.toLowerCase()));
+        for (const user of dbUsers) {
+          if (!existingUsernames.has(user.username.toLowerCase())) {
+            recentContacts.push(user);
+            existingUsernames.add(user.username.toLowerCase());
+          }
+          if (recentContacts.length >= 10) break;
+        }
+      }
+
+      // Fallback to static users if database is empty/inaccessible
+      if (recentContacts.length === 0) {
+        recentContacts = [
           { username: "alice", display_name: "Alice Vance", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=alice" },
           { username: "bob", display_name: "Bob Stone", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=bob" },
           { username: "charlie", display_name: "Charlie Day", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=charlie" }
-        ]);
+        ];
       }
+
+      setContacts(recentContacts);
     } catch (error) {
       console.error(error);
       if (!isSilent) {
@@ -2974,7 +3037,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <h4 style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", marginBottom: "12px", paddingLeft: "4px" }}>Top Contacts</h4>
+                  <h4 style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", marginBottom: "12px", paddingLeft: "4px" }}>Recently Contacted</h4>
                   <div className="contact-list">
                     {contacts.map((contact, idx) => (
                       <div

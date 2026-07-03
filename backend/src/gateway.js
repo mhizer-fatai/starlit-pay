@@ -153,7 +153,8 @@ async function runGatewayDaemon() {
 
             console.log(`Gateway processing incoming deposit of ${amount} ${assetName} for @${user.username} (Memo: ${memoId})`);
 
-            const noteSecret = crypto.randomBytes(32).toString("hex");
+            // Derive noteSecret deterministically from transaction hash to prevent duplicate processing on server restarts
+            const noteSecret = crypto.createHmac("sha256", gatewayKeypair.secret()).update(txRecord.hash).digest("hex");
             const commitmentHex = await calculateCommitment(amount, user.public_encryption_key, tokenAddress, noteSecret);
             const encrypted = encryptNoteForUser(amount, assetName, noteSecret, tx.source, user.public_encryption_key);
             const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
