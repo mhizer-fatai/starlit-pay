@@ -1344,9 +1344,7 @@ export default function App() {
       setShowPinConfirm(false);
       setConfirmPinInput("");
 
-      if (currentTab === "pay-request") {
-        await handlePayRequestWithStarlit(enteredPin);
-      } else if (walletAction === "out") {
+      if (walletAction === "out") {
         await executeWithdrawal(derived);
       } else {
         await executeSendPayment(derived);
@@ -1723,58 +1721,7 @@ export default function App() {
   };
 
 
-  // BOB pays the invoice using his logged-in Starlit account
-  const handlePayRequestWithStarlit = async (enteredPin) => {
-    if (!walletKeys || !payRequestDetails) return;
-    setLoading(true);
-    setStatusMessage("Verifying PIN...");
 
-    try {
-      // Check if the payment request is still valid and not expired
-      const checkRes = await fetch(`${BACKEND_URL}/api/payment-links/${payRequestDetails.commitment}`);
-      if (!checkRes.ok) {
-        const checkData = await checkRes.json();
-        throw new Error(checkData.error || "This payment request is no longer valid.");
-      }
-
-      const derived = await deriveKeysFromEmailAndPin(email, enteredPin);
-      if (derived.spendingKey !== userProfile.identity_commitment) {
-        showFeedback("error", "Incorrect payment PIN.");
-        setConfirmPinInput("");
-        setLoading(false);
-        return;
-      }
-
-      setPayStep("loading");
-      setStatusMessage("Submitting transaction on-chain...");
-
-      const txHash = await sendPublicPayment(
-        derived.stellar.keypair,
-        payRequestDetails.recipientAddress,
-        payRequestDetails.amount,
-        payRequestDetails.asset,
-        TOKENS[payRequestDetails.asset],
-        payRequestDetails.recipientMemo
-      );
-
-      await supabase
-        .from("payment_links")
-        .update({ status: "claimed" })
-        .eq("commitment", payRequestDetails.commitment);
-
-      await logTransaction("Sent", payRequestDetails.amount, payRequestDetails.asset, payRequestDetails.username, txHash);
-
-      setPayStep("success");
-      showFeedback("success", "Payment request paid successfully!");
-      await loadWalletData();
-    } catch (err) {
-      console.error(err);
-      showFeedback("error", "Payment failed: " + err.message);
-      setPayStep("details");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   // Connects external wallets via Stellar Wallets Kit and saves connection state
   const handleConnectWalletOnly = async () => {
@@ -1926,62 +1873,7 @@ export default function App() {
           </div>
         )}
 
-        {showPinConfirm && (
-          <div className="proving-overlay" style={{ zIndex: 1100 }}>
-            <div className="proving-card" style={{ maxWidth: "360px" }}>
-              <Lock size={32} style={{ color: "var(--primary-accent)", marginBottom: "16px" }} />
-              <h2 style={{ fontSize: "20px", fontWeight: "600", marginBottom: "8px" }}>Confirm Payment PIN</h2>
-              <p style={{ color: "var(--text-muted)", fontSize: "14px", marginBottom: "16px" }}>
-                Enter your 6-digit PIN to authorize payment of {payRequestDetails?.amount} {payRequestDetails?.asset}
-              </p>
 
-              <div className="pin-dots">
-                {[0, 1, 2, 3, 4, 5].map((idx) => (
-                  <div
-                    key={idx}
-                    className={`pin-dot ${confirmPinInput.length > idx ? "active" : ""}`}
-                  />
-                ))}
-              </div>
-
-              <input
-                type="password"
-                maxLength={6}
-                placeholder="******"
-                value={confirmPinInput}
-                onChange={(e) => {
-                  const val = e.target.value.replace(/\D/g, "");
-                  setConfirmPinInput(val);
-                  if (val.length === 6) {
-                    setTimeout(() => handlePinConfirmSubmit(val), 100);
-                  }
-                }}
-                autoFocus
-                style={{
-                  textAlign: "center",
-                  letterSpacing: "12px",
-                  fontSize: "28px",
-                  padding: "12px",
-                  background: "rgba(255, 255, 255, 0.05)",
-                  border: "1px solid var(--border-color)",
-                  borderRadius: "12px",
-                  color: "white",
-                  width: "100%",
-                  marginBottom: "24px",
-                  outline: "none"
-                }}
-              />
-
-              <button
-                onClick={() => { setShowPinConfirm(false); setConfirmPinInput(""); }}
-                className="btn-secondary"
-                style={{ width: "100%", padding: "12px" }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
 
         <div className="glass-panel" style={{ position: "relative", width: "100%", maxWidth: "440px", padding: "32px" }}>
           {connectedWalletAddress && (
