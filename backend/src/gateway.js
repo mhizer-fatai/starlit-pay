@@ -127,17 +127,6 @@ async function runGatewayDaemon() {
         }
 
         const tx = new StellarSdk.Transaction(txRecord.envelope_xdr, NETWORK_PASSPHRASE);
-        
-        const { data: existingNote } = await supabase
-          .from("shielded_notes")
-          .select("commitment")
-          .eq("encrypted_note", txRecord.hash)
-          .maybeSingle();
-
-        if (existingNote) {
-          lastProcessedTxToken = txRecord.paging_token;
-          continue;
-        }
 
         for (const op of tx.operations) {
           if (op.type === "payment" && op.destination === gatewayAddress) {
@@ -159,7 +148,19 @@ async function runGatewayDaemon() {
             const encrypted = encryptNoteForUser(amount, assetName, noteSecret, tx.source, user.public_encryption_key);
             const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
 
-             const { error: insertErr } = await supabase
+            // Check if this commitment has already been processed
+            const { data: existingNote } = await supabase
+              .from("shielded_notes")
+              .select("commitment")
+              .eq("commitment", commitmentHex)
+              .maybeSingle();
+
+            if (existingNote) {
+              console.log(`Gateway: commitment ${commitmentHex} already processed. Skipping.`);
+              continue;
+            }
+
+            const { error: insertErr } = await supabase
               .from("shielded_notes")
               .insert([{
                 commitment: commitmentHex,

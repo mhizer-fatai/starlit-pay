@@ -1,4 +1,6 @@
 -- SQL Database Schema for Starlit Shield (Supabase / Postgres)
+-- Migration reference:
+-- ALTER TABLE public.users ADD CONSTRAINT unique_deposit_memo UNIQUE (deposit_memo);
 
 -- Enable UUID extension if not enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -13,6 +15,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     identity_commitment TEXT NOT NULL,
     public_encryption_key TEXT NOT NULL,
     avatar_url TEXT,
+    deposit_memo BIGINT UNIQUE,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
     CONSTRAINT username_length CHECK (char_length(username) >= 3)
 );

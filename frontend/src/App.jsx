@@ -574,6 +574,26 @@ export default function App() {
       const derived = await deriveKeysFromEmailAndPin(email, pin);
 
       // 3. Save profile to users table
+      let depositMemo = 0;
+      let memoUnique = false;
+      let attempts = 0;
+      while (!memoUnique && attempts < 15) {
+        depositMemo = Math.floor(100000 + Math.random() * 900000);
+        const { data: existingUser } = await supabase
+          .from("users")
+          .select("id")
+          .eq("deposit_memo", depositMemo)
+          .maybeSingle();
+        if (!existingUser) {
+          memoUnique = true;
+        }
+        attempts++;
+      }
+
+      if (!memoUnique) {
+        throw new Error("Failed to generate unique deposit memo.");
+      }
+
       const { data: newUser, error: profileError } = await supabase
         .from("users")
         .insert([
@@ -586,7 +606,7 @@ export default function App() {
             identity_commitment: derived.spendingKey,
             public_encryption_key: derived.viewing.publicKey,
             avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
-            deposit_memo: Math.floor(100000 + Math.random() * 900000)
+            deposit_memo: depositMemo
           }
         ])
         .select()
@@ -657,13 +677,30 @@ export default function App() {
       }
 
       if (userProfile && !userProfile.deposit_memo) {
-        const generatedMemo = Math.floor(100000 + Math.random() * 900000);
-        const { error: updateError } = await supabase
-          .from("users")
-          .update({ deposit_memo: generatedMemo })
-          .eq("id", userProfile.id);
-        if (!updateError) {
-          userProfile.deposit_memo = generatedMemo;
+        let depositMemo = 0;
+        let memoUnique = false;
+        let attempts = 0;
+        while (!memoUnique && attempts < 15) {
+          depositMemo = Math.floor(100000 + Math.random() * 900000);
+          const { data: existingUser } = await supabase
+            .from("users")
+            .select("id")
+            .eq("deposit_memo", depositMemo)
+            .maybeSingle();
+          if (!existingUser) {
+            memoUnique = true;
+          }
+          attempts++;
+        }
+
+        if (memoUnique) {
+          const { error: updateError } = await supabase
+            .from("users")
+            .update({ deposit_memo: depositMemo })
+            .eq("id", userProfile.id);
+          if (!updateError) {
+            userProfile.deposit_memo = depositMemo;
+          }
         }
       }
 
@@ -715,7 +752,7 @@ export default function App() {
 
 
   // Logs a new encrypted transaction history entry symmetrically
-  const logTransaction = async (type, amount, asset, counterparty, txHash, commitment = "") => {
+  const logTransaction = async (type, amount, asset, counterparty, txHash, commitment = "", customTimestamp = null) => {
     try {
       if (!walletKeys || !userProfile) return;
       const txData = {
@@ -725,7 +762,7 @@ export default function App() {
         party: counterparty || "",
         hash: txHash || "",
         commitment: commitment || "",
-        timestamp: Date.now()
+        timestamp: customTimestamp || Date.now()
       };
       const encryptedPayload = encryptSymmetrically(JSON.stringify(txData), walletKeys.viewing.secretKey);
       await fetch(`${BACKEND_URL}/api/transactions`, {
@@ -1027,7 +1064,15 @@ export default function App() {
             if (!loggedCommitments.has(note.commitment)) {
               const isDeposit = decrypted.sender === "deposit" || decrypted.sender.startsWith("G");
               const txType = isDeposit ? "Deposit" : "Deposited";
-              await logTransaction(txType, parsedAmount, tokenCode, decrypted.sender, "", note.commitment);
+              await logTransaction(
+                txType,
+                parsedAmount,
+                tokenCode,
+                decrypted.sender,
+                "",
+                note.commitment,
+                new Date(note.created_at).getTime()
+              );
               decryptedTxs.unshift({
                 type: txType,
                 amount: parsedAmount,
