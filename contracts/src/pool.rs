@@ -3,8 +3,8 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol, token
 };
 
-// Merkle Tree Configuration (Height 8 supports 256 leaves)
-const TREE_DEPTH: u32 = 8;
+// Merkle Tree Configuration (Height 20 supports 1,048,576 leaves)
+const TREE_DEPTH: u32 = 20;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -171,7 +171,8 @@ impl ShieldedPool {
         }
 
         // Cryptographic Verification Gate
-        if proof.len() == 0 {
+        let verified = verify_zk_proof(&env, &proof, &nullifier_1, &recipient, &token, amount, &root);
+        if !verified {
             return Err(ContractError::VerificationFailed);
         }
 
@@ -230,7 +231,8 @@ impl ShieldedPool {
         }
 
         // Verify ZK Proof format
-        if proof.len() == 0 {
+        let verified = verify_zk_proof(&env, &proof, &nullifier_1, &env.current_contract_address(), &env.current_contract_address(), 0i128, &root);
+        if !verified {
             return Err(ContractError::VerificationFailed);
         }
 
@@ -295,8 +297,8 @@ fn get_zero_value(env: &Env, level: u32) -> BytesN<32> {
 fn insert_leaf(env: &Env, leaf: BytesN<32>) -> Result<BytesN<32>, ContractError> {
     let mut next_index: u32 = env.storage().instance().get(&DataKey::NextLeafIndex).unwrap_or(0);
     
-    // 2^TREE_DEPTH is leaf capacity (2^8 = 256)
-    if next_index >= 256 {
+    // 2^TREE_DEPTH is leaf capacity (2^20 = 1,048,576)
+    if next_index >= 1048576 {
         return Err(ContractError::Unauthorized);
     }
 

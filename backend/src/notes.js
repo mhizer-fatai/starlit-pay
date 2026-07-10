@@ -1,9 +1,50 @@
 import { app, supabase } from "./config.js";
+import * as StellarSdk from "@stellar/stellar-sdk";
 
-// Retrieves cached shielded notes for a specific viewing key
+// Helper to verify cryptographic signatures of current requests
+function verifyRequestSignature(timestampStr, signatureHex, publicKey) {
+  try {
+    // 1. Verify timestamp is fresh (within 5 minutes) to prevent replay attacks
+    const diff = Math.abs(Date.now() - parseInt(timestampStr));
+    if (isNaN(diff) || diff > 5 * 60 * 1000) {
+      return false;
+    }
+    // 2. Verify signature using public Ed25519 key
+    const keypair = StellarSdk.Keypair.fromPublicKey(publicKey);
+    return keypair.verify(Buffer.from(timestampStr), Buffer.from(signatureHex, "hex"));
+  } catch (e) {
+    return false;
+  }
+}
+
+// Retrieves cached shielded notes for a specific viewing key (authenticated)
 app.get("/api/notes/:viewingKey", async (req, res) => {
   const { viewingKey } = req.params;
+  const { timestamp, signature } = req.query;
+
+  if (!timestamp || !signature) {
+    return res.status(401).json({ error: "Authentication parameters (timestamp, signature) are required." });
+  }
+
   try {
+    // 1. Lookup recipient's stellar address from users profile
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select("stellar_address")
+      .eq("public_encryption_key", viewingKey)
+      .maybeSingle();
+
+    if (userError || !user) {
+      return res.status(404).json({ error: "User profile matching this viewing key not found." });
+    }
+
+    // 2. Cryptographically verify signature
+    const verified = verifyRequestSignature(timestamp, signature, user.stellar_address);
+    if (!verified) {
+      return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+    }
+
+    // 3. Fetch notes
     const { data: notes, error } = await supabase
       .from("shielded_notes")
       .select("*")
@@ -18,16 +59,16 @@ app.get("/api/notes/:viewingKey", async (req, res) => {
   }
 });
 
-// Caches a new shielded note commitment
+// Caches a new shielded note commitment (unauthenticated, anyone can send you a note)
 app.post("/api/notes", async (req, res) => {
-  const { commitment, token_address, amount, encrypted_note, recipient_viewing_key } = req.body;
-  if (!commitment || !token_address || !amount || !encrypted_note || !recipient_viewing_key) {
+  const { commitment, encrypted_note, recipient_viewing_key } = req.body;
+  if (!commitment || !encrypted_note || !recipient_viewing_key) {
     return res.status(400).json({ error: "Missing parameters to cache note." });
   }
   try {
     const { data: note, error } = await supabase
       .from("shielded_notes")
-      .insert([{ commitment, token_address, amount, encrypted_note, recipient_viewing_key }])
+      .insert([{ commitment, encrypted_note, recipient_viewing_key }])
       .select()
       .single();
 
@@ -39,20 +80,48 @@ app.post("/api/notes", async (req, res) => {
   }
 });
 
-// Marks a commitment note as spent in cache database
+// Marks a commitment note as spent in cache database (authenticated)
 app.post("/api/notes/spend", async (req, res) => {
-  const { commitment } = req.body;
-  if (!commitment) {
-    return res.status(400).json({ error: "Commitment is required." });
+  const { commitment, timestamp, signature } = req.body;
+  if (!commitment || !timestamp || !signature) {
+    return res.status(400).json({ error: "Commitment, timestamp, and signature are required." });
   }
   try {
-    const { data, error } = await supabase
+    // 1. Fetch note to get recipient's viewing key
+    const { data: note, error: noteError } = await supabase
+      .from("shielded_notes")
+      .select("recipient_viewing_key")
+      .eq("commitment", commitment)
+      .maybeSingle();
+
+    if (noteError || !note) {
+      return res.status(404).json({ error: "Shielded note not found." });
+    }
+
+    // 2. Lookup recipient's stellar address from users profile
+    const { data: user, error: userError } = await supabase
+      .from("users")
+      .select("stellar_address")
+      .eq("public_encryption_key", note.recipient_viewing_key)
+      .maybeSingle();
+
+    if (userError || !user) {
+      return res.status(404).json({ error: "User profile matching this note not found." });
+    }
+
+    // 3. Cryptographically verify signature
+    const verified = verifyRequestSignature(timestamp, signature, user.stellar_address);
+    if (!verified) {
+      return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+    }
+
+    // 4. Update status
+    const { error: updateError } = await supabase
       .from("shielded_notes")
       .update({ status: "spent" })
-      .eq("commitment", commitment)
-      .select();
+      .eq("commitment", commitment);
 
-    if (error) throw error;
+    if (updateError) throw updateError;
     res.status(200).json({ success: true });
   } catch (error) {
     console.error("Spend note error:", error.message);

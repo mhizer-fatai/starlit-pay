@@ -2,11 +2,11 @@
 CREATE TABLE IF NOT EXISTS public.shielded_notes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     commitment TEXT UNIQUE NOT NULL,
-    token_address VARCHAR(56) NOT NULL,
-    amount NUMERIC(20, 7) NOT NULL,
     encrypted_note TEXT NOT NULL,
     recipient_viewing_key TEXT NOT NULL,
     status VARCHAR(20) DEFAULT 'unspent' CHECK (status IN ('unspent', 'spent')) NOT NULL,
+    root VARCHAR(64),
+    ledger BIGINT,
     created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 

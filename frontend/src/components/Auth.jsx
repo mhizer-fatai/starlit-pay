@@ -211,6 +211,21 @@ export default function Auth({
               </p>
             </div>
 
+            {feedback.message && (
+              <div style={{
+                padding: "12px 16px",
+                borderRadius: "8px",
+                marginBottom: "16px",
+                background: feedback.type === "error" ? "rgba(255,59,48,0.1)" : "rgba(0,200,83,0.1)",
+                border: `1px solid ${feedback.type === "error" ? "rgba(255,59,48,0.2)" : "rgba(0,200,83,0.2)"}`,
+                color: feedback.type === "error" ? "#FF453A" : "var(--primary-accent)",
+                fontSize: "13px",
+                textAlign: "center"
+              }}>
+                {feedback.message}
+              </div>
+            )}
+
             <form onSubmit={handlePinSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <input
                 type="password"

@@ -164,8 +164,6 @@ async function runGatewayDaemon() {
               .from("shielded_notes")
               .insert([{
                 commitment: commitmentHex,
-                token_address: tokenAddress,
-                amount: amount,
                 encrypted_note: encryptedHex,
                 recipient_viewing_key: user.public_encryption_key,
                 status: "unspent"

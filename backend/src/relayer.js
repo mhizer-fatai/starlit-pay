@@ -1,10 +1,19 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { app, rpc, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
 
+// Helper to validate Stellar/Soroban Contract ID format (starts with C, 56 chars)
+function isValidContractId(id) {
+  return typeof id === "string" && /^C[A-Z2-7]{55}$/.test(id);
+}
+
 // Submits client claims/withdrawals to Soroban Shielded Pool contract using relayer gas
 app.post("/api/relayer/submit", async (req, res) => {
-  const { proof, nullifier, recipient, token, amount, root, contractId } = req.body;
-  const activeContractId = contractId || process.env.SHIELDED_POOL_CONTRACT_ID;
+  const { proof, nullifier, recipient, token, amount, root } = req.body;
+  const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
+
+  if (!isValidContractId(activeContractId)) {
+    return res.status(500).json({ error: "Invalid active contract configuration on server." });
+  }
 
   if (!proof || !nullifier || !recipient || !token || !amount || !root) {
     return res.status(400).json({ error: "Missing parameters for transaction submission." });
@@ -77,10 +86,13 @@ app.post("/api/relayer/transfer", async (req, res) => {
     encrypted_note_1,
     output_commitment_2,
     encrypted_note_2,
-    root,
-    contractId
+    root
   } = req.body;
-  const activeContractId = contractId || process.env.SHIELDED_POOL_CONTRACT_ID;
+  const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
+
+  if (!isValidContractId(activeContractId)) {
+    return res.status(500).json({ error: "Invalid active contract configuration on server." });
+  }
 
   if (
     !proof ||
@@ -177,10 +189,13 @@ app.post("/api/relayer/withdraw", async (req, res) => {
     amount,
     root,
     change_commitment,
-    encrypted_change_note,
-    contractId
+    encrypted_change_note
   } = req.body;
-  const activeContractId = contractId || process.env.SHIELDED_POOL_CONTRACT_ID;
+  const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
+
+  if (!isValidContractId(activeContractId)) {
+    return res.status(500).json({ error: "Invalid active contract configuration on server." });
+  }
 
   if (
     !proof ||

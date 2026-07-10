@@ -24,7 +24,7 @@ import Keys from "./components/Keys";
 import {
   deriveKeysFromEmailAndPin, encryptNote, decryptNote,
   encryptSeedLocally, decryptSeedLocally, bytesToHex, hexToBytes,
-  encryptSymmetrically, decryptSymmetrically
+  encryptSymmetrically, decryptSymmetrically, sha256
 } from "./utils/crypto";
 import {
   claimFromPool, sendPublicPayment,
@@ -35,7 +35,7 @@ import {
 } from "./utils/zk";
 
 // Soroban Contract Configuration
-const SHIELDED_POOL_CONTRACT_ID = "CDGRLPOMGHXFPVCH6AZGXAOBQUDWKXQUKQU7NDH3XUZA7EWWWWQP6MUI";
+const SHIELDED_POOL_CONTRACT_ID = "CAHSOWD7JVCRO4U73MGXRET7DRJDM3K2CFS5EGYARWDEGACHWSR6ZEZM";
 const DEPOSIT_GATEWAY_ADDRESS = "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
 
 const TOKENS = {
@@ -594,6 +594,8 @@ export default function App() {
         throw new Error("Failed to generate unique deposit memo.");
       }
 
+      const hashedSpendingKey = bytesToHex(await sha256(derived.spendingKey));
+
       const { data: newUser, error: profileError } = await supabase
         .from("users")
         .insert([
@@ -603,7 +605,7 @@ export default function App() {
             username: username.toLowerCase().replace("@", ""),
             display_name: username,
             stellar_address: derived.stellar.publicKey,
-            identity_commitment: derived.spendingKey,
+            identity_commitment: hashedSpendingKey,
             public_encryption_key: derived.viewing.publicKey,
             avatar_url: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`,
             deposit_memo: depositMemo
@@ -658,8 +660,9 @@ export default function App() {
       }
 
       const derived = await deriveKeysFromEmailAndPin(email, pin);
+      const hashedSpendingKey = bytesToHex(await sha256(derived.spendingKey));
 
-      if (userProfile && userProfile.identity_commitment && derived.spendingKey !== userProfile.identity_commitment) {
+      if (userProfile && userProfile.identity_commitment && hashedSpendingKey !== userProfile.identity_commitment) {
         showFeedback("error", "Incorrect PIN.");
         setPin("");
         setLoading(false);
@@ -938,17 +941,29 @@ export default function App() {
         const relayerData = await relayerRes.json();
         lastTxHash = relayerData.hash;
 
+        const timestamp = Date.now().toString();
+        const signatureBytes = derivedKeys.stellar.keypair.sign(new TextEncoder().encode(timestamp));
+        const signature = bytesToHex(signatureBytes);
+
         await fetch(`${BACKEND_URL}/api/notes/spend`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ commitment: input1.commitment })
+          body: JSON.stringify({
+            commitment: input1.commitment,
+            timestamp,
+            signature
+          })
         });
 
         if (input2) {
           await fetch(`${BACKEND_URL}/api/notes/spend`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ commitment: input2.commitment })
+            body: JSON.stringify({
+              commitment: input2.commitment,
+              timestamp,
+              signature
+            })
           });
         }
 
@@ -958,8 +973,6 @@ export default function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               commitment: changeCommitmentHex,
-              token_address: tokenAddress,
-              amount: changeAmount,
               encrypted_note: changeEncryptedHex,
               recipient_viewing_key: derivedKeys.viewing.publicKey
             })
@@ -1028,7 +1041,11 @@ export default function App() {
       }
 
       // Fetch unspent commitments from backend database notes cache
-      const notesRes = await fetch(`${BACKEND_URL}/api/notes/${walletKeys.viewing.publicKey}`);
+      const timestamp = Date.now().toString();
+      const signatureBytes = walletKeys.stellar.keypair.sign(new TextEncoder().encode(timestamp));
+      const signature = bytesToHex(signatureBytes);
+
+      const notesRes = await fetch(`${BACKEND_URL}/api/notes/${walletKeys.viewing.publicKey}?timestamp=${timestamp}&signature=${signature}`);
       const notesData = await notesRes.json();
       const cachedNotes = notesData.notes || [];
 
@@ -1046,12 +1063,7 @@ export default function App() {
         const decrypted = decryptNote(notePayload, walletKeys.viewing.secretKey);
 
         if (decrypted) {
-          let tokenCode = "USDC";
-          for (const [code, addr] of Object.entries(TOKENS)) {
-            if (note.token_address === addr) {
-              tokenCode = code;
-            }
-          }
+          const tokenCode = decrypted.asset || "USDC";
 
           const parsedAmount = parseFloat(decrypted.amount);
           const noteRoot = note.root;
@@ -1125,7 +1137,7 @@ export default function App() {
           const decryptedNoteObj = {
             amount: parsedAmount,
             commitment: note.commitment,
-            tokenAddress: note.token_address,
+            tokenAddress: TOKENS[tokenCode] || "",
             sender: decrypted.sender,
             secret: decrypted.secret,
             root: noteRoot,
@@ -1344,15 +1356,27 @@ export default function App() {
           const relayerData = await relayerRes.json();
 
           // Mark notes as spent
+          const timestamp = Date.now().toString();
+          const signatureBytes = walletKeys.stellar.keypair.sign(new TextEncoder().encode(timestamp));
+          const signature = bytesToHex(signatureBytes);
+
           await fetch(`${BACKEND_URL}/api/notes/spend`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ commitment: note1.commitment })
+            body: JSON.stringify({
+              commitment: note1.commitment,
+              timestamp,
+              signature
+            })
           });
           await fetch(`${BACKEND_URL}/api/notes/spend`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ commitment: note2.commitment })
+            body: JSON.stringify({
+              commitment: note2.commitment,
+              timestamp,
+              signature
+            })
           });
 
           // Register new merged note in backend note cache
@@ -1361,8 +1385,6 @@ export default function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               commitment: mergedCommitment,
-              token_address: tokenAddress,
-              amount: mergedAmount,
               encrypted_note: mergedEncryptedHex,
               recipient_viewing_key: walletKeys.viewing.publicKey
             })
@@ -1442,7 +1464,8 @@ export default function App() {
 
     try {
       const derived = await deriveKeysFromEmailAndPin(email, enteredPin);
-      if (derived.spendingKey !== userProfile.identity_commitment) {
+      const hashedSpendingKey = bytesToHex(await sha256(derived.spendingKey));
+      if (hashedSpendingKey !== userProfile.identity_commitment) {
         showFeedback("error", "Incorrect confirmation PIN.");
         setConfirmPinInput("");
         setLoading(false);
@@ -1647,17 +1670,29 @@ export default function App() {
           const relayerData = await relayerRes.json();
           lastTxHash = relayerData.hash;
 
+          const timestamp = Date.now().toString();
+          const signatureBytes = walletKeys.stellar.keypair.sign(new TextEncoder().encode(timestamp));
+          const signature = bytesToHex(signatureBytes);
+
           await fetch(`${BACKEND_URL}/api/notes/spend`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ commitment: input1.commitment })
+            body: JSON.stringify({
+              commitment: input1.commitment,
+              timestamp,
+              signature
+            })
           });
 
           if (input2) {
             await fetch(`${BACKEND_URL}/api/notes/spend`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ commitment: input2.commitment })
+              body: JSON.stringify({
+                commitment: input2.commitment,
+                timestamp,
+                signature
+              })
             });
           }
 
@@ -1666,8 +1701,6 @@ export default function App() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               commitment: recipientCommitmentHex,
-              token_address: tokenAddress,
-              amount: spendAmount,
               encrypted_note: recipientEncryptedHex,
               recipient_viewing_key: recipientViewingKey
             })
@@ -1679,8 +1712,6 @@ export default function App() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 commitment: changeCommitmentHex,
-                token_address: tokenAddress,
-                amount: changeAmount,
                 encrypted_note: changeEncryptedHex,
                 recipient_viewing_key: walletKeys.viewing.publicKey
               })
@@ -1729,17 +1760,29 @@ export default function App() {
           const relayerData = await relayerRes.json();
           lastTxHash = relayerData.hash;
 
+          const timestamp = Date.now().toString();
+          const signatureBytes = walletKeys.stellar.keypair.sign(new TextEncoder().encode(timestamp));
+          const signature = bytesToHex(signatureBytes);
+
           await fetch(`${BACKEND_URL}/api/notes/spend`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ commitment: input1.commitment })
+            body: JSON.stringify({
+              commitment: input1.commitment,
+              timestamp,
+              signature
+            })
           });
 
           if (input2) {
             await fetch(`${BACKEND_URL}/api/notes/spend`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ commitment: input2.commitment })
+              body: JSON.stringify({
+                commitment: input2.commitment,
+                timestamp,
+                signature
+              })
             });
           }
 
@@ -3158,22 +3201,18 @@ export default function App() {
             )}
           </div>
 
-          {/* Frosted rounded bottom navigation bar */}
           <nav className="mobile-nav">
             <button className={`mobile-nav-btn ${mobileTab === "wallet" ? "active" : ""}`} onClick={() => { setMobileTab("wallet"); setWalletAction(null); }}>
               <Coins size={20} />
               <span>Wallet</span>
-              {mobileTab === "wallet" && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "var(--primary-accent)", marginTop: "2px" }} />}
             </button>
             <button className={`mobile-nav-btn ${mobileTab === "links" ? "active" : ""}`} onClick={() => setMobileTab("links")}>
               <LinkIcon size={20} />
               <span>Links</span>
-              {mobileTab === "links" && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "var(--primary-accent)", marginTop: "2px" }} />}
             </button>
             <button className={`mobile-nav-btn ${mobileTab === "activity" ? "active" : ""}`} onClick={() => setMobileTab("activity")}>
               <FileText size={20} />
               <span>Activities</span>
-              {mobileTab === "activity" && <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "var(--primary-accent)", marginTop: "2px" }} />}
             </button>
           </nav>
         </div>

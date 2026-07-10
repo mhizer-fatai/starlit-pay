@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     display_name VARCHAR(100),
     email VARCHAR(255) UNIQUE NOT NULL,
     stellar_address VARCHAR(56),
-    identity_commitment TEXT NOT NULL,
+    identity_commitment TEXT NOT NULL, -- SHA-256 hash of the user's spending key (for security)
     public_encryption_key TEXT NOT NULL,
     avatar_url TEXT,
     deposit_memo BIGINT UNIQUE,
