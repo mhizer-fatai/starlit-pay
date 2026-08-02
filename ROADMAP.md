@@ -36,13 +36,19 @@ graph LR
 - [x] Deposit gateway for converting public SEP-41 assets into shielded commitments.
 - [x] Block indexer listening to contract events to maintain Supabase cache.
 
-### Milestone 1.4: Frontend Experience & UI (Active)
+### Milestone 1.4: Frontend Experience & UI (Completed)
 - [x] React/Vite web application with modern responsive layout.
 - [x] Real-time decrypted balance display and shielded note management.
-- [ ] QR code support for rapid peer-to-peer transfers.
-- [ ] Push notifications for incoming private payments.
+- [x] Universal pop-up action modals for Send, Receive, and Withdraw.
+- [x] Smart receipts with live Stellar.expert explorer integration.
+- [x] Desktop Activities navigation tab and transaction feed.
 
-### Milestone 1.5: Production ZK Proofs & Mainnet Launch (Upcoming)
+### Milestone 1.5: Private Asset Swaps (Active Focus)
+- [ ] Private asset swap interface (`Swap.jsx`) for XLM ↔ USDC exchange.
+- [ ] Real-time price calculation and slippage tolerance controls.
+- [ ] Direct liquidity execution via Stellar DEX / Soroban AMM pools while preserving note privacy.
+
+### Milestone 1.6: Production ZK Proofs & Mainnet Launch (Upcoming)
 - [ ] Replace prototype ZK module (`zk.js`) with production Circom / Groth16 circuits.
 - [ ] On-chain proof verification function inside Soroban pool contract.
 - [ ] Smart contract security audit and stress testing on Stellar Mainnet.

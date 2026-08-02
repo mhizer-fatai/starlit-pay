@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Send, Download, Coins, Shield, Eye, EyeOff } from "lucide-react";
+import { Send, Download, Coins, Shield, Eye, EyeOff, ArrowDownUp } from "lucide-react";
 
 export default function Balances({
   shieldedBalances,
@@ -107,8 +107,8 @@ export default function Balances({
 
       </div>
 
-      {/* Grid of quick action buttons styled like user screenshot */}
-      <div className="action-grid" style={{ marginTop: "28px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+      {/* Grid of quick action buttons (Send, Receive, Swap, Withdraw) */}
+      <div className="action-grid" style={{ marginTop: "28px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
         <button 
           onClick={() => { setDashboardAction("send"); setWalletAction(null); }} 
           className="action-tile active-primary"
@@ -117,19 +117,19 @@ export default function Balances({
             color: "#0b1326",
             border: "none",
             borderRadius: "16px",
-            padding: "20px",
-            height: "90px",
+            padding: "16px",
+            height: "85px",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: "8px",
+            gap: "6px",
             fontWeight: "700",
-            fontSize: "14px",
+            fontSize: "13px",
             cursor: "pointer"
           }}
         >
-          <Send size={22} color="#0b1326" />
+          <Send size={20} color="#0b1326" />
           <span style={{ fontWeight: "700" }}>Send</span>
         </button>
         <button 
@@ -138,45 +138,68 @@ export default function Balances({
           style={{
             background: "var(--card-bg)",
             border: "1px solid var(--border-color)",
-            color: "var(--primary-accent)",
             borderRadius: "16px",
-            padding: "20px",
-            height: "90px",
+            padding: "16px",
+            height: "85px",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: "8px",
-            fontWeight: "700",
-            fontSize: "14px",
+            gap: "6px",
+            color: "var(--text-primary)",
+            fontWeight: "600",
+            fontSize: "13px",
             cursor: "pointer"
           }}
         >
-          <Download size={22} color="var(--primary-accent)" />
-          <span style={{ color: "var(--primary-accent)", fontWeight: "600" }}>Receive</span>
+          <Download size={20} color="var(--primary-accent)" />
+          <span style={{ color: "var(--primary-accent)", fontWeight: "700" }}>Receive</span>
         </button>
         <button 
-          onClick={() => { setWalletAction("out"); setDashboardAction(null); }} 
+          onClick={() => { setDashboardAction("swap"); setWalletAction(null); }} 
           className="action-tile"
           style={{
             background: "var(--card-bg)",
             border: "1px solid var(--border-color)",
-            color: "var(--primary-accent)",
             borderRadius: "16px",
-            padding: "20px",
-            height: "90px",
+            padding: "16px",
+            height: "85px",
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            gap: "8px",
-            fontWeight: "700",
-            fontSize: "14px",
+            gap: "6px",
+            color: "var(--text-primary)",
+            fontWeight: "600",
+            fontSize: "13px",
             cursor: "pointer"
           }}
         >
-          <Coins size={22} color="var(--primary-accent)" />
-          <span style={{ color: "var(--primary-accent)", fontWeight: "600" }}>Withdraw</span>
+          <ArrowDownUp size={20} color="var(--primary-accent)" />
+          <span style={{ color: "var(--primary-accent)", fontWeight: "700" }}>Swap</span>
+        </button>
+        <button 
+          onClick={() => { setDashboardAction("withdraw"); setWalletAction(null); }} 
+          className="action-tile"
+          style={{
+            background: "var(--card-bg)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "16px",
+            padding: "16px",
+            height: "85px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "6px",
+            color: "var(--text-primary)",
+            fontWeight: "600",
+            fontSize: "13px",
+            cursor: "pointer"
+          }}
+        >
+          <Coins size={20} color="var(--primary-accent)" />
+          <span style={{ color: "var(--primary-accent)", fontWeight: "700" }}>Withdraw</span>
         </button>
       </div>
     </div>

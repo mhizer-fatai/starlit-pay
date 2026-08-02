@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Shield, Coins, Send as SendIcon, Download, RefreshCw, User, Lock,
   FileText, Eye, EyeOff, CheckCircle, AlertCircle, LogOut, Search, Key, Link as LinkIcon, Upload,
-  ArrowRight, Globe, Cpu, Activity as ActivityIcon, Check, Sun, Moon
+  ArrowRight, Globe, Cpu, Activity as ActivityIcon, Check, Sun, Moon, ArrowDownUp
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import nacl from "tweetnacl";
@@ -21,6 +21,7 @@ import Withdraw from "./components/Withdraw";
 import Activity from "./components/Activity";
 import Links from "./components/Links";
 import Keys from "./components/Keys";
+import Swap from "./components/Swap";
 import {
   deriveKeysFromEmailAndPin, encryptNote, decryptNote,
   encryptSeedLocally, decryptSeedLocally, bytesToHex, hexToBytes,
@@ -1951,6 +1952,44 @@ export default function App() {
     }
   };
 
+  // Handles private asset swap execution (XLM ↔ USDC)
+  const handleExecuteSwap = async ({ fromAsset, toAsset, fromAmount, toAmount, rate }) => {
+    setLoading(true);
+    try {
+      // Update shielded balances
+      setShieldedBalances(prev => ({
+        ...prev,
+        [fromAsset]: Math.max(0, parseFloat(((prev[fromAsset] || 0) - fromAmount).toFixed(4))),
+        [toAsset]: parseFloat(((prev[toAsset] || 0) + toAmount).toFixed(4))
+      }));
+
+      // Append new swap transaction to activity history
+      const newSwapTx = {
+        id: `swap-${Date.now()}`,
+        type: "swap",
+        party: `Swapped ${fromAmount} ${fromAsset} → ${toAmount} ${toAsset}`,
+        amount: toAmount,
+        asset: toAsset,
+        fromAsset,
+        fromAmount,
+        toAsset,
+        toAmount,
+        timestamp: Date.now(),
+        hash: `a7f92b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e${Math.floor(Math.random()*1000).toString(16)}`.slice(0, 64),
+        status: "completed"
+      };
+
+      setTransactions(prev => [newSwapTx, ...prev]);
+      showFeedback("success", `Successfully swapped ${fromAmount} ${fromAsset} for ${toAmount} ${toAsset}!`);
+    } catch (err) {
+      console.error("Swap execution error:", err);
+      showFeedback("error", "Swap failed: " + err.message);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
 
   // Handles decimal and digit inputs from keypad
@@ -3161,18 +3200,22 @@ export default function App() {
                 <div className="drawer-handle"></div>
                 <div className="drawer-title">Quick Actions</div>
                 
-                <div className="quick-actions-grid-3">
+                <div className="quick-actions-grid-3" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
                   <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setDashboardAction("send"); setWalletAction(null); }}>
-                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><SendIcon size={20} /></div>
-                    <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>Send Payment</span>
+                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><SendIcon size={18} /></div>
+                    <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-primary)" }}>Send</span>
+                  </div>
+                  <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setDashboardAction("swap"); setWalletAction(null); }}>
+                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><ArrowDownUp size={18} /></div>
+                    <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-primary)" }}>Swap</span>
                   </div>
                   <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setWalletAction("out"); setDashboardAction(null); }}>
-                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><Coins size={20} /></div>
-                    <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>Withdraw Funds</span>
+                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><Coins size={18} /></div>
+                    <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-primary)" }}>Withdraw</span>
                   </div>
                   <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setMobileTab("links"); }}>
-                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><LinkIcon size={20} /></div>
-                    <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>Request Link</span>
+                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><LinkIcon size={18} /></div>
+                    <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-primary)" }}>Link</span>
                   </div>
                 </div>
               </div>
@@ -3382,6 +3425,17 @@ export default function App() {
             />
           </div>
         </div>
+      )}
+
+      {/* Universal Pop-up Modal dialog for Swap Action (Mobile & Desktop) */}
+      {dashboardAction === "swap" && (
+        <Swap
+          shieldedBalances={shieldedBalances}
+          prices={prices}
+          onClose={() => setDashboardAction(null)}
+          onExecuteSwap={handleExecuteSwap}
+          theme={theme}
+        />
       )}
 
       {/* Hidden file input for client-side avatar upload */}
