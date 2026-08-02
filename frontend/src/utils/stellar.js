@@ -396,7 +396,12 @@ export async function buildPublicPaymentTxXdr(
   if (assetCode === "XLM") {
     asset = StellarSdk.Asset.native();
   } else {
-    asset = new StellarSdk.Asset(assetCode, assetIssuer);
+    // Dynamically match issuer from sender account balances if held, fallback to provided assetIssuer
+    const matchedBalance = account.balances.find(
+      (b) => b.asset_code === assetCode && parseFloat(b.balance) > 0
+    ) || account.balances.find((b) => b.asset_code === assetCode);
+    const effectiveIssuer = matchedBalance?.asset_issuer || assetIssuer || "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+    asset = new StellarSdk.Asset(assetCode, effectiveIssuer);
   }
 
   const txBuilder = new StellarSdk.TransactionBuilder(account, {
@@ -424,7 +429,17 @@ export async function buildPublicPaymentTxXdr(
  * Submits a signed Stellar transaction XDR to the Horizon network
  */
 export async function submitSignedXdr(signedXdr) {
-  const tx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-  const response = await horizon.submitTransaction(tx);
-  return response.hash;
+  try {
+    const tx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
+    const response = await horizon.submitTransaction(tx);
+    return response.hash;
+  } catch (err) {
+    if (err.response?.data?.extras?.result_codes) {
+      console.error("Horizon Result Codes:", err.response.data.extras.result_codes);
+      const resultCodes = err.response.data.extras.result_codes;
+      const opCodes = resultCodes.operations ? `, Operations: ${resultCodes.operations.join(", ")}` : "";
+      throw new Error(`Transaction failed. Transaction code: ${resultCodes.transaction}${opCodes}`);
+    }
+    throw err;
+  }
 }

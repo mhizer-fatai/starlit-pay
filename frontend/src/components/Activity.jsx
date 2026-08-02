@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { createPortal } from "react-dom";
-import { Coins, Download, Send } from "lucide-react";
+import { Coins, Download, Send, ExternalLink } from "lucide-react";
 
 export default function Activity({ transactions, theme }) {
   const [selectedTx, setSelectedTx] = useState(null);
@@ -96,8 +96,19 @@ export default function Activity({ transactions, theme }) {
                   </div>
                   {/* Visual amount difference colored according to direction */}
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                    <span className={`pill-badge ${isIncoming ? "badge-incoming" : "badge-outgoing"}`} style={{ fontSize: "13px", fontWeight: "700" }}>
-                      {isIncoming ? "+" : "-"}{tx.amount} <span style={{ fontSize: "10px", opacity: 0.8 }}>{tx.asset}</span>
+                    <span 
+                      style={{ 
+                        fontSize: "13px", 
+                        fontWeight: "700", 
+                        padding: "6px 14px", 
+                        borderRadius: "20px",
+                        background: isIncoming ? "rgba(78, 222, 163, 0.15)" : "rgba(255, 255, 255, 0.08)",
+                        color: isIncoming ? "var(--primary-accent)" : "var(--text-primary)",
+                        border: isIncoming ? "1px solid rgba(78, 222, 163, 0.25)" : "1px solid rgba(255, 255, 255, 0.1)",
+                        fontFamily: "var(--font-mono)"
+                      }}
+                    >
+                      {isIncoming ? "+" : "-"}{tx.amount} <span style={{ fontSize: "11px", opacity: 0.9 }}>{tx.asset}</span>
                     </span>
                   </div>
                 </div>
@@ -125,7 +136,7 @@ export default function Activity({ transactions, theme }) {
           <div className="glass-card" style={{
             width: "90%",
             maxWidth: "440px",
-            background: theme === "light" ? "var(--card-bg)" : "rgba(25, 20, 45, 0.95)",
+            background: theme === "light" ? "var(--card-bg)" : "rgba(19, 27, 46, 0.95)",
             border: "1px solid var(--border-color)",
             borderRadius: "20px",
             padding: "28px",
@@ -196,33 +207,84 @@ export default function Activity({ transactions, theme }) {
                 </div>
               )}
 
-              {selectedTx.hash && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "13px" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Transaction Hash</span>
-                  <div style={{ display: "flex", alignItems: "center", justifyItems: "center", justifyContent: "space-between", background: "var(--input-bg)", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                    <span style={{ color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "11px", wordBreak: "break-all", marginRight: "10px" }}>
-                      {selectedTx.hash}
-                    </span>
-                    <button 
-                      onClick={() => {
-                        navigator.clipboard.writeText(selectedTx.hash);
-                      }}
-                      className="btn-secondary"
-                      style={{ padding: "4px 8px", fontSize: "10px", height: "auto", whiteSpace: "nowrap" }}
-                    >
-                      Copy
-                    </button>
+              {(() => {
+                const isRealOnChain = selectedTx.hash && /^[0-9a-fA-F]{64}$/.test(selectedTx.hash) && !selectedTx.hash.startsWith("a7f92b3c4d5e");
+                const txHash = isRealOnChain 
+                  ? selectedTx.hash 
+                  : (selectedTx.hash || `a7f92b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e${Math.abs((selectedTx.timestamp || 10000) % 9999).toString(16)}`.slice(0, 64));
+                const stellarExpertUrl = `https://stellar.expert/explorer/testnet/tx/${txHash}`;
+                
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "13px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ color: "var(--text-muted)" }}>
+                        {isRealOnChain ? "Stellar Transaction Hash" : "Simulated Note Hash"}
+                      </span>
+                      {!isRealOnChain && (
+                        <span style={{ fontSize: "10px", background: "rgba(255, 171, 0, 0.15)", color: "#ffab00", border: "1px solid rgba(255, 171, 0, 0.3)", padding: "2px 8px", borderRadius: "6px", fontWeight: "600" }}>
+                          Off-Chain ZK Note
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--input-bg)", padding: "10px 12px", borderRadius: "10px", border: "1px solid var(--border-color)" }}>
+                      <span style={{ color: "var(--text-primary)", fontFamily: "var(--font-mono)", fontSize: "11px", wordBreak: "break-all", marginRight: "10px" }}>
+                        {txHash.slice(0, 16)}...{txHash.slice(-12)}
+                      </span>
+                      <button 
+                        onClick={() => {
+                          navigator.clipboard.writeText(txHash);
+                        }}
+                        className="btn-secondary"
+                        style={{ padding: "4px 8px", fontSize: "10px", height: "auto", whiteSpace: "nowrap" }}
+                      >
+                        Copy
+                      </button>
+                    </div>
+
+                    {isRealOnChain ? (
+                      <a 
+                        href={stellarExpertUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "8px",
+                          marginTop: "4px",
+                          padding: "10px 14px",
+                          borderRadius: "10px",
+                          background: "rgba(16, 185, 129, 0.12)",
+                          border: "1px solid rgba(16, 185, 129, 0.3)",
+                          color: "var(--primary-accent)",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          textDecoration: "none",
+                          transition: "all 0.2s ease"
+                        }}
+                        className="hover-highlight-btn"
+                      >
+                        <ExternalLink size={14} />
+                        View on Stellar.expert
+                      </a>
+                    ) : (
+                      <div style={{
+                        textAlign: "center",
+                        fontSize: "11px",
+                        color: "var(--text-muted)",
+                        padding: "8px 12px",
+                        background: "rgba(255, 255, 255, 0.03)",
+                        borderRadius: "8px",
+                        border: "1px dashed var(--border-color)",
+                        marginTop: "4px"
+                      }}>
+                        🔒 Off-chain private note payment (not published to public Stellar ledger)
+                      </div>
+                    )}
                   </div>
-                  <a 
-                    href={`https://stellar.expert/explorer/testnet/tx/${selectedTx.hash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontSize: "11px", color: "var(--primary-accent)", textDecoration: "none", alignSelf: "flex-end", marginTop: "4px" }}
-                  >
-                    View on Stellar.expert ↗
-                  </a>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             <button 

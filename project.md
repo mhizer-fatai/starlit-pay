@@ -1,11 +1,13 @@
 # Starlit Pay: Technical Reference Manual
 
-Starlit Pay is a self-custodial, privacy-preserving payments application built on the Stellar Testnet. It utilizes a **Shielded Pool Smart Contract (Soroban)** and **Client-Side Cryptography** to hide transaction details, asset codes, and user balances from public blockchain explorers and database administrators.
+> **Note on Active Project Scope:** This technical reference covers **Starlit Pay** (Consumer P2P private payments), which is currently under active development. For the future enterprise product strategy (**Starlit Business**), please refer to [ROADMAP.md](file:///c:/Users/Playmaster/Desktop/Starlit/ROADMAP.md).
+
+Starlit Pay is a self-custodial, privacy-preserving consumer payments application built on the Stellar Testnet. It utilizes a **Shielded Pool Smart Contract (Soroban)** and **Client-Side Cryptography** to hide transaction details, asset codes, and user balances from public blockchain explorers and database administrators.
 
 ---
 
 ## 🎯 Project Goal
-To provide a fast, gasless (sponsored), and completely private payment experience on Stellar. 
+To provide a fast, gasless (sponsored), and completely private peer-to-peer payment experience on Stellar. 
 *   **Privacy:** On-chain observers only see a collective pool vault. Database admins only see encrypted cyphertext (notes) and one-way hashes of identity keys.
 *   **User Experience:** No complicated recovery phrases. Accounts are secured by Google OAuth and decrypted locally using a 6-digit PIN.
 
@@ -105,3 +107,10 @@ The contract maintains the ledger state of the private pool.
 *   **Contract Build:** Run `stellar contract build` in `contracts/` directory.
 *   **Backend Startup:** `npm start` inside `backend/`.
 *   **Frontend Startup:** `npm run dev` inside `frontend/`.
+
+---
+
+## 🗺️ Product Evolution & Roadmap
+
+For a comprehensive breakdown of current deliverables for **Starlit Pay** and planned expansion into **Starlit Business** (Enterprise Confidential Payments), see [ROADMAP.md](file:///c:/Users/Playmaster/Desktop/Starlit/ROADMAP.md).
+

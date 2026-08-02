@@ -1,5 +1,5 @@
-import React from "react";
-import { Send, Download, Coins } from "lucide-react";
+import React, { useState } from "react";
+import { Send, Download, Coins, Shield, Eye, EyeOff } from "lucide-react";
 
 export default function Balances({
   shieldedBalances,
@@ -9,92 +9,174 @@ export default function Balances({
   prices = { USDC: 1.00, XLM: 0.12 },
   userProfile
 }) {
+  const [showBalance, setShowBalance] = useState(true);
   const totalBalance = (shieldedBalances?.USDC || 0) * prices.USDC + (shieldedBalances?.XLM || 0) * prices.XLM;
 
   return (
     <div style={{ flexGrow: 1, display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px", marginTop: "8px" }}>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         
-        {/* Render private single total balance card */}
-        <div className="premium-card" style={{ 
+        {/* Shielded Balance Card */}
+        <div className="premium-card balance-card" style={{ 
           minHeight: "180px",
-          background: "linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%)",
-          backgroundImage: "radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.4), transparent 70%), radial-gradient(circle at 80% 70%, rgba(59, 130, 246, 0.35), transparent 70%), linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%)",
           padding: "24px 28px",
-          borderRadius: "24px",
-          border: "1px solid rgba(255, 255, 255, 0.1)",
+          borderRadius: "16px",
           position: "relative",
           overflow: "hidden"
         }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "1px", color: "rgba(255, 255, 255, 0.5)", textTransform: "uppercase" }}>Your Balance</span>
-            <span className="pill-badge" style={{ background: "rgba(255, 255, 255, 0.1)", color: "#ffffff", fontSize: "9px", padding: "4px 8px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.15)" }}>
-              SHIELDED
-            </span>
-          </div>
-          <div style={{ margin: "20px 0" }}>
-            <h2 style={{ fontSize: "36px", fontWeight: "800", fontFamily: "var(--font-sans)", color: "#ffffff", letterSpacing: "-1px" }}>
-              ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </h2>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%", position: "relative", zIndex: 10 }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "1px", color: "var(--text-muted)", textTransform: "uppercase" }}>Private Balance</span>
           </div>
           
-          {/* Bottom Drawer showing breakdown */}
-          <div style={{ 
-            display: "flex", 
-            justifyContent: "space-between", 
-            alignItems: "center", 
-            background: "rgba(0, 0, 0, 0.3)", 
-            margin: "0 -28px -28px", 
-            padding: "14px 28px",
-            borderTop: "1px solid rgba(255, 255, 255, 0.05)"
-          }}>
-            <div style={{ display: "flex", gap: "20px" }}>
-              <div>
-                <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.4)", textTransform: "uppercase", display: "block" }}>USDC</span>
-                <span style={{ fontSize: "13px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "#ffffff" }}>
-                  ${(shieldedBalances?.USDC || 0).toFixed(2)}
-                </span>
+          <div style={{ margin: "20px 0", display: "flex", alignItems: "center", gap: "12px", position: "relative", zIndex: 10 }}>
+            <h2 className="balance-amount" style={{ fontSize: "36px", fontWeight: "800", fontFamily: "var(--font-sans)", letterSpacing: "-1px" }}>
+              {showBalance ? (
+                `$${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              ) : (
+                "••••••"
+              )}
+              <span style={{ fontSize: "18px", marginLeft: "8px", color: "var(--primary-accent)", fontWeight: "700" }}>USDC</span>
+            </h2>
+            
+            <button 
+              onClick={() => setShowBalance(!showBalance)}
+              aria-label="Toggle Balance Visibility" 
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--text-muted)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "4px",
+                transition: "color 0.2s ease"
+              }}
+              className="hover-highlight-btn"
+            >
+              {showBalance ? <Eye size={18} /> : <EyeOff size={18} />}
+            </button>
+          </div>
+          
+          {/* Underlying Asset Wallet Cards (USDC & XLM) */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginTop: "24px", position: "relative", zIndex: 10 }}>
+            {/* USDC Wallet Card */}
+            <div className="wallet-card-tile" style={{
+              borderRadius: "14px",
+              padding: "16px 20px",
+              display: "flex",
+              flexDirection: "column",
+              position: "relative"
+            }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                USDC WALLET
+              </span>
+              <div className="wallet-amount" style={{ fontSize: "22px", fontWeight: "800", marginTop: "6px", fontFamily: "var(--font-mono)" }}>
+                {showBalance ? `$${(shieldedBalances?.USDC || 0).toFixed(2)}` : "••••••"}
               </div>
-              <div style={{ borderLeft: "1px solid rgba(255, 255, 255, 0.15)", paddingLeft: "20px" }}>
-                <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.4)", textTransform: "uppercase", display: "block" }}>XLM</span>
-                <span style={{ fontSize: "13px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "#ffffff" }}>
-                  {(shieldedBalances?.XLM || 0).toFixed(2)}
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "4px" }}>
+                <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--primary-accent)", fontFamily: "var(--font-mono)" }}>
+                  1 USDC = ${(prices?.USDC || 1.00).toFixed(2)}
                 </span>
               </div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.4)", textTransform: "uppercase", display: "block" }}>Account</span>
-              <span style={{ fontSize: "11px", fontWeight: "600", color: "rgba(255, 255, 255, 0.8)", fontFamily: "var(--font-mono)" }}>
-                @{userProfile?.username}
+
+            {/* XLM Wallet Card */}
+            <div className="wallet-card-tile" style={{
+              borderRadius: "14px",
+              padding: "16px 20px",
+              display: "flex",
+              flexDirection: "column",
+              position: "relative"
+            }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                XLM WALLET
               </span>
+              <div className="wallet-amount" style={{ fontSize: "22px", fontWeight: "800", marginTop: "6px", fontFamily: "var(--font-mono)" }}>
+                {showBalance ? `${(shieldedBalances?.XLM || 0).toFixed(2)}` : "••••••"}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginTop: "4px" }}>
+                <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--primary-accent)", fontFamily: "var(--font-mono)" }}>
+                  1 XLM = ${(prices?.XLM || 0.1718).toFixed(4)}
+                </span>
+              </div>
             </div>
           </div>
         </div>
 
       </div>
 
-      {/* Grid of quick action buttons for sending, receiving, and withdrawing */}
-      <div className="action-grid" style={{ marginTop: "40px" }}>
+      {/* Grid of quick action buttons styled like user screenshot */}
+      <div className="action-grid" style={{ marginTop: "28px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
         <button 
           onClick={() => { setDashboardAction("send"); setWalletAction(null); }} 
-          className="action-tile"
+          className="action-tile active-primary"
+          style={{
+            background: "var(--primary-accent)",
+            color: "#0b1326",
+            border: "none",
+            borderRadius: "16px",
+            padding: "20px",
+            height: "90px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            fontWeight: "700",
+            fontSize: "14px",
+            cursor: "pointer"
+          }}
         >
-          <Send size={20} />
-          <span>Send</span>
+          <Send size={22} color="#0b1326" />
+          <span style={{ fontWeight: "700" }}>Send</span>
         </button>
         <button 
           onClick={() => { setDashboardAction("receive"); setWalletAction(null); }} 
           className="action-tile"
+          style={{
+            background: "var(--card-bg)",
+            border: "1px solid var(--border-color)",
+            color: "var(--primary-accent)",
+            borderRadius: "16px",
+            padding: "20px",
+            height: "90px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            fontWeight: "700",
+            fontSize: "14px",
+            cursor: "pointer"
+          }}
         >
-          <Download size={20} />
-          <span>Receive</span>
+          <Download size={22} color="var(--primary-accent)" />
+          <span style={{ color: "var(--primary-accent)", fontWeight: "600" }}>Receive</span>
         </button>
         <button 
           onClick={() => { setWalletAction("out"); setDashboardAction(null); }} 
           className="action-tile"
+          style={{
+            background: "var(--card-bg)",
+            border: "1px solid var(--border-color)",
+            color: "var(--primary-accent)",
+            borderRadius: "16px",
+            padding: "20px",
+            height: "90px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "8px",
+            fontWeight: "700",
+            fontSize: "14px",
+            cursor: "pointer"
+          }}
         >
-          <Coins size={20} />
-          <span>Withdrawal</span>
+          <Coins size={22} color="var(--primary-accent)" />
+          <span style={{ color: "var(--primary-accent)", fontWeight: "600" }}>Withdraw</span>
         </button>
       </div>
     </div>

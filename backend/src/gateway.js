@@ -215,10 +215,48 @@ async function runGatewayDaemon() {
   }
 }
 
+async function ensureGatewayTrustlines() {
+  if (!gatewayKeypair) return;
+  try {
+    const gatewayAddr = gatewayKeypair.publicKey();
+    const account = await horizon.loadAccount(gatewayAddr);
+    
+    // Supported USDC issuers for Testnet / Mainnet
+    const usdcIssuers = [
+      "GA25KROVBCHI76V7PMMVOOZEOA4WDROCHMOJMXFWX2D4ZCEM7KEUZJM2", // Common Testnet USDC Issuer
+      "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"  // Official Circle Mainnet Issuer
+    ];
+
+    for (const issuer of usdcIssuers) {
+      if (!StellarSdk.StrKey.isValidEd25519PublicKey(issuer)) continue;
+      const hasTrust = account.balances.some(
+        (b) => b.asset_code === "USDC" && b.asset_issuer === issuer
+      );
+      if (!hasTrust) {
+        console.log(`Gateway: establishing trustline for USDC issuer ${issuer}...`);
+        const usdcAsset = new StellarSdk.Asset("USDC", issuer);
+        const tx = new StellarSdk.TransactionBuilder(account, {
+          fee: StellarSdk.BASE_FEE,
+          networkPassphrase: NETWORK_PASSPHRASE
+        })
+          .addOperation(StellarSdk.Operation.changeTrust({ asset: usdcAsset, limit: "900000000000" }))
+          .setTimeout(30)
+          .build();
+        tx.sign(gatewayKeypair);
+        await horizon.submitTransaction(tx);
+        console.log(`Gateway: successfully added trustline for USDC issuer ${issuer}`);
+      }
+    }
+  } catch (err) {
+    console.error("Gateway trustline setup warning:", err.message);
+  }
+}
+
 // Starts the gateway polling daemon interval automatically when this script is imported
 export function startGateway() {
   if (gatewayKeypair) {
     console.log(`Enterprise Deposit Gateway daemon started on address: ${gatewayKeypair.publicKey()}`);
+    ensureGatewayTrustlines().catch((e) => console.error("Trustline setup error:", e.message));
     setInterval(runGatewayDaemon, 15000);
   } else {
     console.log("Enterprise Deposit Gateway daemon skipped (GATEWAY_SECRET_KEY not set).");

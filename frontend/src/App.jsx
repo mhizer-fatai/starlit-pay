@@ -43,6 +43,10 @@ const TOKENS = {
   USDC: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA" // Testnet USDC
 };
 
+const CLASSIC_TOKENS = {
+  USDC: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" // Testnet USDC Classic Issuer
+};
+
 // Dynamic backend routing base URL
 const BACKEND_URL = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
   ? "http://localhost:3001"
@@ -59,7 +63,6 @@ export default function App() {
   // Navigation & Auth States
   const [currentTab, setCurrentTab] = useState("home"); // Tracks the currently active dashboard view
   const [authState, setAuthState] = useState("landing"); // landing, logged-out, pin-setup, pin-entry, logged-in
-  const [scrollY, setScrollY] = useState(0);
   const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
 
   const toggleTheme = () => setTheme(prev => prev === "light" ? "dark" : "light");
@@ -75,44 +78,12 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [inAppNotification, setInAppNotification] = useState(null);
 
-  // Manages layout overflow settings and records scrolling offset
-  useEffect(() => {
-    if (authState === "landing") {
-      document.body.style.overflow = "auto";
-      document.documentElement.style.overflow = "auto";
-      const rootEl = document.getElementById("root");
-      if (rootEl) {
-        rootEl.style.overflow = "auto";
-        rootEl.style.height = "auto";
-      }
-      const handleScroll = () => {
-        setScrollY(window.scrollY);
-      };
-      window.addEventListener("scroll", handleScroll);
-      return () => {
-        window.removeEventListener("scroll", handleScroll);
-        document.body.style.overflow = "hidden";
-        document.documentElement.style.overflow = "hidden";
-        if (rootEl) {
-          rootEl.style.overflow = "hidden";
-          rootEl.style.height = "100%";
-        }
-      };
-    } else {
-      document.body.style.overflow = "hidden";
-      document.documentElement.style.overflow = "hidden";
-      const rootEl = document.getElementById("root");
-      if (rootEl) {
-        rootEl.style.overflow = "hidden";
-        rootEl.style.height = "100%";
-      }
-      setScrollY(0);
-    }
-  }, [authState]);
+
 
   // Mobile layout state management
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 800);
   const [mobileTab, setMobileTab] = useState("wallet"); // wallet, pay, activity, more
+  const [showQuickActions, setShowQuickActions] = useState(false);
   const [walletAction, setWalletAction] = useState(null); // null, add, out
   const [contacts, setContacts] = useState([]);
   const [dashboardAction, setDashboardAction] = useState(null); // null, send, receive
@@ -257,6 +228,7 @@ export default function App() {
   const syncInProgressRef = useRef(false);
   const notifiedCommitmentsRef = useRef(new Set());
   const isFirstLoadRef = useRef(true);
+  const failedAutoMergeRef = useRef(new Set());
   // Event tracking and pointers are managed on the backend indexer database
 
   useEffect(() => {
@@ -285,6 +257,7 @@ export default function App() {
   const [generatedLink, setGeneratedLink] = useState("");
 
   // UI Status
+  const [initializing, setInitializing] = useState(true);
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
   const [zkProgress, setZkProgress] = useState("");
@@ -295,9 +268,16 @@ export default function App() {
   // Listen for Supabase session changes (for Google OAuth and persistent logins)
   useEffect(() => {
     const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session && !walletKeysRef.current) {
-        await handleOAuthSession(session);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session && !walletKeysRef.current) {
+          await handleOAuthSession(session);
+        } else {
+          setInitializing(false);
+        }
+      } catch (err) {
+        console.error("Auth init error:", err);
+        setInitializing(false);
       }
     };
     initAuth();
@@ -309,6 +289,7 @@ export default function App() {
         }
       } else if (event === "SIGNED_OUT") {
         handleLogoutState();
+        setInitializing(false);
       }
     });
 
@@ -483,6 +464,8 @@ export default function App() {
       }
     } catch (err) {
       showFeedback("error", "Failed to load authenticated profile.");
+    } finally {
+      setInitializing(false);
     }
   };
 
@@ -796,6 +779,7 @@ export default function App() {
       return;
     }
 
+    setWalletAction(null);
     setConfirmPinInput("");
     setShowPinConfirm(true);
   };
@@ -1072,7 +1056,7 @@ export default function App() {
           balanceSum[tokenCode] += parsedAmount;
 
           // Log received transaction if not already done
-          if (decrypted.sender !== userProfile.username) {
+          if (decrypted.sender !== userProfile.username && decrypted.sender !== "auto-merge") {
             if (!loggedCommitments.has(note.commitment)) {
               const isDeposit = decrypted.sender === "deposit" || decrypted.sender.startsWith("G");
               const txType = isDeposit ? "Deposit" : "Deposited";
@@ -1103,7 +1087,7 @@ export default function App() {
 
           if (!alreadyNotified) {
             // Only trigger notifications if it is NOT the first load of the session
-            if (!isFirstLoadRef.current && decrypted.sender !== userProfile.username) {
+            if (!isFirstLoadRef.current && decrypted.sender !== userProfile.username && decrypted.sender !== "auto-merge") {
               showFeedback("success", `You received ${parsedAmount} ${tokenCode} from @${decrypted.sender}!`);
 
               // Triggers a native system alert popup
@@ -1279,8 +1263,12 @@ export default function App() {
           }
         }
 
+        // Filter out notes that failed auto-merge previously
+        const validNotes = notes.filter((n) => !failedAutoMergeRef.current.has(n.commitment));
+        if (validNotes.length < 3) continue;
+
         // Sort ascending to merge the two smallest note values
-        const sorted = [...notes].sort((a, b) => a.amount - b.amount);
+        const sorted = [...validNotes].sort((a, b) => a.amount - b.amount);
         const note1 = sorted[0];
         const note2 = sorted[1];
 
@@ -1289,7 +1277,7 @@ export default function App() {
           continue;
         }
 
-        console.log(`[Auto-Merge] Silently consolidating private ${tokenCode} notes: ${note1.amount} + ${note2.amount}`);
+        console.log(`[Auto-Merge] Silently consolidating private ${tokenCode} notes...`);
 
         try {
           // Generate key secrets for new merged note
@@ -1319,7 +1307,7 @@ export default function App() {
           );
           const dummyEncryptedHex = dummyEncrypted.ephemeralPublicKey + dummyEncrypted.nonce + dummyEncrypted.ciphertext;
 
-          // Generate 2-in-2 ZK proof
+          // Generate 2-in-2 ZK proof quietly
           const zkData = await generateShieldedPaymentProof(
             note1.secret,
             note1.commitment,
@@ -1329,7 +1317,7 @@ export default function App() {
             tokenAddress,
             mergedAmount,
             0,
-            (msg) => console.log(`[Auto-Merge Proof] ${msg}`)
+            null
           );
 
           // Submit ZK transfer to relayer
@@ -1395,7 +1383,10 @@ export default function App() {
           // Reload wallet silently to fetch new commitments
           await loadWalletData(true);
         } catch (err) {
-          console.error("[Auto-Merge] Consolidating notes failed:", err.message);
+          // Mark commitments as unmergeable so we don't repeatedly retry failing notes
+          failedAutoMergeRef.current.add(note1.commitment);
+          failedAutoMergeRef.current.add(note2.commitment);
+          console.warn("[Auto-Merge] Skipping unmergeable notes pair:", err.message);
         }
 
         // Limit to 1 merge transaction per polling interval to prevent sequence conflicts
@@ -1453,6 +1444,7 @@ export default function App() {
       showFeedback("error", "Please enter a recipient and amount.");
       return;
     }
+    setDashboardAction(null);
     setShowPinConfirm(true);
     setConfirmPinInput("");
   };
@@ -1924,7 +1916,7 @@ export default function App() {
         payRequestDetails.recipientAddress,
         payRequestDetails.amount,
         payRequestDetails.asset,
-        TOKENS[payRequestDetails.asset],
+        CLASSIC_TOKENS[payRequestDetails.asset],
         payRequestDetails.recipientMemo
       );
 
@@ -1946,7 +1938,13 @@ export default function App() {
       showFeedback("success", "Payment request paid successfully!");
     } catch (error) {
       console.error("Wallet payment error:", error);
-      showFeedback("error", "Payment failed: " + error.message);
+      let errorMsg = error.message || "";
+      if (errorMsg.includes("op_src_no_trust")) {
+        errorMsg = "Your wallet does not have a trustline for the USDC asset used by Starlit. Please establish a trustline for USDC issued by GA25KROVBCHI76V7PMMVOOZEOA4WDROCHMOJMXFWX2D4ZCEM7KEUZJM2.";
+      } else {
+        errorMsg = "Payment failed: " + errorMsg;
+      }
+      showFeedback("error", errorMsg);
       setPayStep("details");
     } finally {
       setLoading(false);
@@ -2178,8 +2176,58 @@ export default function App() {
     );
   }
 
+  if (initializing) {
+    return (
+      <div className="landing-page-root" style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: "100vh",
+        background: "var(--bg-color)",
+        color: "var(--text-primary)"
+      }}>
+        <style>{`
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+          }
+        `}</style>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "24px" }}>
+          <div style={{ position: "relative", width: "80px", height: "80px" }}>
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              border: "4px solid rgba(78, 222, 163, 0.1)",
+              borderTop: "4px solid var(--primary-accent)",
+              borderRadius: "50%",
+              animation: "spin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite"
+            }} />
+            <div style={{
+              position: "absolute",
+              inset: "16px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}>
+              <img src={symbol} alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+            <span style={{ fontSize: "16px", fontWeight: "700", letterSpacing: "-0.3px" }}>Starlit Pay</span>
+            <span style={{ fontSize: "13px", color: "var(--text-muted)", animation: "pulse 1.5s infinite ease-in-out" }}>Securing connection...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (authState === "landing") {
-    return <Landing scrollY={scrollY} setAuthState={setAuthState} theme={theme} toggleTheme={toggleTheme} logo={logo} symbol={symbol} />;
+    return <Landing setAuthState={setAuthState} theme={theme} toggleTheme={toggleTheme} logo={logo} symbol={symbol} />;
   }
 
   if (authState !== "logged-in") {
@@ -2226,7 +2274,7 @@ export default function App() {
           padding: "16px 24px",
           borderRadius: "16px",
           border: `1px solid ${feedback.type === "error" ? "var(--error-color)" : "var(--primary-accent)"}`,
-          background: feedback.type === "error" ? "rgba(244, 63, 94, 0.95)" : "rgba(139, 92, 246, 0.95)",
+          background: feedback.type === "error" ? "rgba(244, 63, 94, 0.95)" : "rgba(78, 222, 163, 0.95)",
           boxShadow: "0 20px 40px -15px rgba(0, 0, 0, 0.5), 0 10px 15px -10px rgba(0, 0, 0, 0.5)",
           color: "#ffffff",
           zIndex: 9999,
@@ -2303,12 +2351,12 @@ export default function App() {
 
       {/* Transaction validation confirmation overlay */}
       {showPinConfirm && (
-        <div className="proving-overlay" style={{ zIndex: 1100 }}>
+        <div className="proving-overlay" style={{ zIndex: 10000 }}>
           <div className="proving-card" style={{ maxWidth: "400px" }}>
             <Lock size={32} style={{ color: "var(--primary-accent)", marginBottom: "16px", margin: "0 auto" }} />
             <h2 style={{ fontSize: "22px", fontWeight: "700", marginBottom: "8px", color: "#ffffff" }}>Confirm PIN</h2>
             <p style={{ color: "var(--text-muted)", fontSize: "14px", marginBottom: "24px" }}>
-              Enter your 6-digit PIN to authorize sending {sendAmount} {selectedAsset} to @{sendRecipient}
+              Enter your 6-digit PIN to authorize payment
             </p>
 
             <div className="pin-dots">
@@ -2328,6 +2376,9 @@ export default function App() {
               onChange={(e) => {
                 const val = e.target.value.replace(/\D/g, "");
                 setConfirmPinInput(val);
+                if (val.length === 6 && !loading) {
+                  handlePinConfirmSubmit(val);
+                }
               }}
               autoFocus
               style={{
@@ -2593,7 +2644,7 @@ export default function App() {
                   fontWeight: "700",
                   fontSize: "24px",
                   cursor: "pointer",
-                  boxShadow: "0 8px 24px rgba(139, 92, 246, 0.25)",
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
                   position: "relative",
                   overflow: "hidden"
                 }}
@@ -2671,7 +2722,6 @@ export default function App() {
           </div>
         </div>
       )}
-
       {isMobile ? (
         <div className="mobile-viewport">
           <div className="mobile-content">
@@ -2701,7 +2751,7 @@ export default function App() {
                       width: "32px",
                       height: "32px",
                       borderRadius: "50%",
-                      background: "var(--primary-accent)",
+                      background: "#4edea3",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
@@ -2724,8 +2774,8 @@ export default function App() {
                     )}
                   </div>
                   <div>
-                    <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block" }}>Welcome Back,</span>
-                    <h3 style={{ fontSize: "13px", fontWeight: "700", color: "var(--text-primary)", lineHeight: "1.2" }}>{userProfile?.display_name || userProfile?.username}</h3>
+                    <span className="mobile-greeting-subtitle">Welcome Back,</span>
+                    <h3 className="mobile-greeting-name">{userProfile?.display_name || userProfile?.username}</h3>
                   </div>
                 </div>
               </div>
@@ -2754,191 +2804,84 @@ export default function App() {
               </button>
             </div>
 
-
-
             {/* Wallet tab displaying private asset balances */}
             {mobileTab === "wallet" && (
               <div className="tab-pane">
-                {walletAction === null ? (
-                  <div>
-                    {/* Single balance card showing total equivalent and individual breakdown */}
+                <div>
+                  {/* Dual sub-card balance card container styled like Image 1 */}
                     {(() => {
                       const totalBalance = (shieldedBalances.USDC || 0) * prices.USDC + (shieldedBalances.XLM || 0) * prices.XLM;
                       return (
-                        <div className="premium-card" style={{
-                          minHeight: "180px",
-                          background: "linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%)",
-                          backgroundImage: "radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.4), transparent 70%), radial-gradient(circle at 80% 70%, rgba(59, 130, 246, 0.35), transparent 70%), linear-gradient(135deg, #4c1d95 0%, #1e1b4b 100%)",
-                          padding: "24px 28px",
+                        <div className="premium-card balance-card mobile-balance-card" style={{
+                          minHeight: "220px",
+                          padding: "24px",
                           borderRadius: "24px",
-                          border: "1px solid rgba(255, 255, 255, 0.1)",
                           position: "relative",
                           overflow: "hidden",
                           marginBottom: "20px"
                         }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
-                            <span style={{ fontSize: "11px", fontWeight: "700", letterSpacing: "1px", color: "rgba(255, 255, 255, 0.5)", textTransform: "uppercase" }}>Your Balance</span>
-                            <span className="pill-badge" style={{ background: "rgba(255, 255, 255, 0.1)", color: "#ffffff", fontSize: "9px", padding: "4px 8px", borderRadius: "8px", border: "1px solid rgba(255, 255, 255, 0.15)" }}>
-                              SHIELDED
-                            </span>
+                            <span className="mobile-total-balance-lbl">Total Balance</span>
                           </div>
-                          <div style={{ margin: "20px 0" }}>
-                            <h2 style={{ fontSize: "36px", fontWeight: "800", fontFamily: "var(--font-sans)", color: "#ffffff", letterSpacing: "-1px" }}>
-                              ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </h2>
+                          
+                          <div className="mobile-total-balance-val">
+                            ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
 
-                          {/* Bottom Drawer showing breakdown */}
-                          <div style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            background: "rgba(0, 0, 0, 0.3)",
-                            margin: "0 -28px -28px",
-                            padding: "14px 28px",
-                            borderTop: "1px solid rgba(255, 255, 255, 0.05)"
-                          }}>
-                            <div style={{ display: "flex", gap: "20px" }}>
-                              <div>
-                                <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.4)", textTransform: "uppercase", display: "block" }}>USDC</span>
-                                <span style={{ fontSize: "13px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "#ffffff" }}>
-                                  ${(shieldedBalances.USDC || 0).toFixed(2)}
-                                </span>
-                              </div>
-                              <div style={{ borderLeft: "1px solid rgba(255, 255, 255, 0.15)", paddingLeft: "20px" }}>
-                                <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.4)", textTransform: "uppercase", display: "block" }}>XLM</span>
-                                <span style={{ fontSize: "13px", fontWeight: "700", fontFamily: "var(--font-mono)", color: "#ffffff" }}>
-                                  {(shieldedBalances.XLM || 0).toFixed(2)}
-                                </span>
+                          {/* Dual balance cards container inside the main panel */}
+                          <div className="dual-card-container">
+                            <div className="sub-balance-card" style={{ position: "relative" }}>
+                              <span className="sub-balance-title">USDC Wallet</span>
+                              <div className="sub-balance-value">${(shieldedBalances.USDC || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", width: "100%", marginTop: "4px" }}>
+                                <span className="sub-balance-price">1 USDC = ${(prices?.USDC || 1.00).toFixed(2)}</span>
                               </div>
                             </div>
-                            <div style={{ textAlign: "right" }}>
-                              <span style={{ fontSize: "9px", color: "rgba(255, 255, 255, 0.4)", textTransform: "uppercase", display: "block" }}>Account</span>
-                              <span style={{ fontSize: "11px", fontWeight: "600", color: "rgba(255, 255, 255, 0.8)", fontFamily: "var(--font-mono)" }}>
-                                @{userProfile?.username}
-                              </span>
+                            <div className="sub-balance-card" style={{ position: "relative" }}>
+                              <span className="sub-balance-title">XLM Wallet</span>
+                              <div className="sub-balance-value">{(shieldedBalances.XLM || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", width: "100%", marginTop: "4px" }}>
+                                <span className="sub-balance-price">1 XLM = ${(prices?.XLM || 0.1718).toFixed(4)}</span>
+                              </div>
                             </div>
                           </div>
+                          <div className="mobile-drag-handle"></div>
                         </div>
                       );
                     })()}
 
-                    {/* Quick actions routing buttons */}
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", marginTop: "20px", marginBottom: "24px" }}>
-                      <button
-                        onClick={() => { setMobileTab("pay"); setDashboardAction("send"); }}
-                        className="btn-secondary"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "flex-start",
-                          gap: "8px",
-                          padding: "12px 10px",
-                          borderRadius: "20px",
-                          fontSize: "13px",
-                          fontWeight: "600",
-                          height: "auto",
-                          border: "1px solid var(--border-color)",
-                          background: "var(--card-bg)"
-                        }}
-                      >
-                        <div style={{
-                          width: "28px",
-                          height: "28px",
-                          borderRadius: "50%",
-                          background: "var(--primary-accent)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#ffffff",
-                          flexShrink: 0
-                        }}>
-                          <ArrowRight size={14} style={{ transform: "rotate(-45deg)" }} />
-                        </div>
+                    {/* Quick actions tiles grid: Send, Receive, Withdraw */}
+                    <div className="mobile-action-grid-3">
+                      <div className="mobile-action-tile-3" onClick={() => { setDashboardAction("send"); setWalletAction(null); }}>
+                        <div className="mobile-action-tile-icon"><ArrowRight size={16} style={{ transform: "rotate(-45deg)" }} /></div>
                         <span>Send</span>
-                      </button>
-                      <button
-                        onClick={() => { setDashboardAction("receive"); setWalletAction("receive-active"); }}
-                        className="btn-secondary"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "flex-start",
-                          gap: "8px",
-                          padding: "12px 10px",
-                          borderRadius: "20px",
-                          fontSize: "13px",
-                          fontWeight: "600",
-                          height: "auto",
-                          border: "1px solid var(--border-color)",
-                          background: "var(--card-bg)"
-                        }}
-                      >
-                        <div style={{
-                          width: "28px",
-                          height: "28px",
-                          borderRadius: "50%",
-                          background: "var(--primary-accent)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#ffffff",
-                          flexShrink: 0
-                        }}>
-                          <ArrowRight size={14} style={{ transform: "rotate(135deg)" }} />
-                        </div>
-                        <span>Request</span>
-                      </button>
-                      <button
-                        onClick={() => setWalletAction("out")}
-                        className="btn-secondary"
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "flex-start",
-                          gap: "8px",
-                          padding: "12px 10px",
-                          borderRadius: "20px",
-                          fontSize: "13px",
-                          fontWeight: "600",
-                          height: "auto",
-                          border: "1px solid var(--border-color)",
-                          background: "var(--card-bg)"
-                        }}
-                      >
-                        <div style={{
-                          width: "28px",
-                          height: "28px",
-                          borderRadius: "50%",
-                          background: "var(--primary-accent)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#ffffff",
-                          flexShrink: 0
-                        }}>
-                          <Coins size={14} />
-                        </div>
-                        <span>Withdrawal</span>
-                      </button>
+                      </div>
+                      <div className="mobile-action-tile-3" onClick={() => { setDashboardAction("receive"); setWalletAction(null); }}>
+                        <div className="mobile-action-tile-icon"><ArrowRight size={16} style={{ transform: "rotate(135deg)" }} /></div>
+                        <span>Receive</span>
+                      </div>
+                      <div className="mobile-action-tile-3" onClick={() => { setWalletAction("out"); setDashboardAction(null); }}>
+                        <div className="mobile-action-tile-icon"><Coins size={16} /></div>
+                        <span>Withdraw</span>
+                      </div>
                     </div>
 
                     {/* Transaction History Section */}
                     <div style={{ marginTop: "28px", marginBottom: "28px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                        <h3 style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-primary)" }}>Transaction History</h3>
+                        <h3 style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Transaction</h3>
                         <button
                           onClick={() => setMobileTab("activity")}
                           style={{
                             background: "none",
                             border: "none",
-                            color: "var(--primary-accent)",
+                            color: "#4edea3",
                             fontSize: "13px",
                             fontWeight: "600",
                             cursor: "pointer"
                           }}
                         >
-                          View All
+                          See All
                         </button>
                       </div>
 
@@ -2947,7 +2890,7 @@ export default function App() {
                           <p style={{ fontSize: "14px" }}>No payments yet</p>
                         </div>
                       ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                           {transactions.slice(0, 3).map((tx, idx) => {
                             const isIncoming = tx.type === "Incoming" || tx.type === "Received" || tx.type === "Deposit" || tx.type === "Deposited";
 
@@ -2971,44 +2914,32 @@ export default function App() {
                             }
 
                             return (
-                              <div
-                                key={idx}
-                                className="glass-card"
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  padding: "12px 14px",
-                                  background: "var(--card-bg)",
-                                  border: "1px solid var(--border-color)",
-                                  borderRadius: "16px"
-                                }}
-                              >
+                              <div key={idx} className="mobile-tx-row-card">
                                 <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                                   <div style={{
-                                    width: "32px",
-                                    height: "32px",
-                                    background: isIncoming ? "rgba(16, 185, 129, 0.1)" : "rgba(124, 58, 237, 0.08)",
-                                    borderRadius: "50%",
+                                    width: "36px",
+                                    height: "36px",
+                                    background: isIncoming ? "rgba(5, 150, 105, 0.1)" : "rgba(78, 222, 163, 0.08)",
+                                    borderRadius: "12px",
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    color: isIncoming ? "#10b981" : "var(--primary-accent)",
+                                    color: isIncoming ? "#10b981" : "#4edea3",
                                     flexShrink: 0
                                   }}>
-                                    {isIncoming ? <Download size={14} /> : <SendIcon size={14} />}
+                                    {isIncoming ? <Download size={16} /> : <SendIcon size={16} />}
                                   </div>
                                   <div>
-                                    <h4 style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-primary)" }}>
+                                    <h4 style={{ fontSize: "13px", fontWeight: "700", color: "#ffffff" }}>
                                       {displayLabel}
                                     </h4>
                                     <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                                      {new Date(tx.timestamp).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                      {new Date(tx.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                                     </span>
                                   </div>
                                 </div>
-                                <span className={isIncoming ? "badge-incoming" : "badge-outgoing"} style={{ fontSize: "13px", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "2px" }}>
-                                  {isIncoming ? "+" : "-"}{tx.amount} <span style={{ fontSize: "9px", opacity: 0.7 }}>{tx.asset}</span>
+                                <span style={{ fontSize: "14px", fontWeight: "700", color: isIncoming ? "var(--success-color)" : "#ffffff" }}>
+                                  {isIncoming ? "+" : "-"}${parseFloat(tx.amount).toFixed(2)}
                                 </span>
                               </div>
                             );
@@ -3017,34 +2948,6 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                ) : walletAction === "receive-active" ? (
-                  <div className="glass-panel" style={{ padding: "24px", marginBottom: "20px" }}>
-                    <Receive
-                      userProfile={userProfile}
-                      showFeedback={showFeedback}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setWalletAction(null)}
-                      className="btn-secondary"
-                      style={{ width: "100%", padding: "14px", marginTop: "16px" }}
-                    >
-                      Back to Wallet
-                    </button>
-                  </div>
-                ) : walletAction === "out" ? (
-                  <Withdraw
-                    withdrawRecipient={withdrawRecipient}
-                    setWithdrawRecipient={setWithdrawRecipient}
-                    selectedAsset={selectedAsset}
-                    setSelectedAsset={setSelectedAsset}
-                    depositAmount={depositAmount}
-                    setDepositAmount={setDepositAmount}
-                    shieldedBalances={shieldedBalances}
-                    handleCashOut={handleCashOut}
-                    setWalletAction={setWalletAction}
-                  />
-                ) : null}
               </div>
             )}
 
@@ -3184,7 +3087,7 @@ export default function App() {
                     </button>
                   </form>
                   {generatedLink && (
-                    <div className="glass-card" style={{ marginTop: "20px", padding: "16px", background: "rgba(139, 92, 246, 0.05)", border: "1px solid var(--primary-accent)", borderRadius: "16px" }}>
+                    <div className="glass-card" style={{ marginTop: "20px", padding: "16px", background: "rgba(78, 222, 163, 0.05)", border: "1px solid #4edea3", borderRadius: "16px" }}>
                       <span style={{ fontSize: "13px", fontWeight: "600", color: "#ffffff" }}>Link Ready:</span>
                       <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
                         <input type="text" value={generatedLink} readOnly style={{ fontSize: "11px", padding: "10px", flexGrow: 1, borderRadius: "12px", border: "1px solid var(--border-color)", background: "var(--input-bg)", color: "var(--text-primary)" }} />
@@ -3201,20 +3104,80 @@ export default function App() {
             )}
           </div>
 
-          <nav className="mobile-nav">
-            <button className={`mobile-nav-btn ${mobileTab === "wallet" ? "active" : ""}`} onClick={() => { setMobileTab("wallet"); setWalletAction(null); }}>
-              <Coins size={20} />
-              <span>Wallet</span>
+          {/* Custom Curved Bottom Navigation Bar & Centered FAB */}
+          <div className="mobile-nav-container">
+            <div className="mobile-nav-curved-bar">
+              <button 
+                className={`mobile-nav-btn-new ${mobileTab === "wallet" && walletAction === null ? "active" : ""}`} 
+                onClick={() => { setMobileTab("wallet"); setWalletAction(null); }}
+              >
+                <Coins size={20} />
+                <span>Home</span>
+              </button>
+              
+              <button 
+                className={`mobile-nav-btn-new ${mobileTab === "links" ? "active" : ""}`} 
+                onClick={() => setMobileTab("links")}
+              >
+                <LinkIcon size={20} />
+                <span>Links</span>
+              </button>
+              
+              {/* Central Cutout Spacer */}
+              <div className="mobile-nav-spacer"></div>
+              
+              <button 
+                className={`mobile-nav-btn-new ${mobileTab === "activity" ? "active" : ""}`} 
+                onClick={() => setMobileTab("activity")}
+              >
+                <FileText size={20} />
+                <span>Activities</span>
+              </button>
+              
+              <button 
+                className="mobile-nav-btn-new" 
+                onClick={() => setShowProfileModal(true)}
+              >
+                <User size={20} />
+                <span>Profile</span>
+              </button>
+            </div>
+            
+            {/* Centered Floating double arrows FAB */}
+            <button 
+              className="mobile-fab-btn" 
+              onClick={() => setShowQuickActions(true)}
+              aria-label="Quick Actions"
+            >
+              <ArrowRight size={22} style={{ transform: "rotate(-45deg)" }} />
             </button>
-            <button className={`mobile-nav-btn ${mobileTab === "links" ? "active" : ""}`} onClick={() => setMobileTab("links")}>
-              <LinkIcon size={20} />
-              <span>Links</span>
-            </button>
-            <button className={`mobile-nav-btn ${mobileTab === "activity" ? "active" : ""}`} onClick={() => setMobileTab("activity")}>
-              <FileText size={20} />
-              <span>Activities</span>
-            </button>
-          </nav>
+          </div>
+
+          {/* Quick Actions Bottom Sheet Drawer Modal */}
+          {showQuickActions && (
+            <div>
+              <div className="quick-actions-drawer-overlay" onClick={() => setShowQuickActions(false)}></div>
+              <div className="quick-actions-drawer-sheet">
+                <div className="drawer-handle"></div>
+                <div className="drawer-title">Quick Actions</div>
+                
+                <div className="quick-actions-grid-3">
+                  <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setDashboardAction("send"); setWalletAction(null); }}>
+                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><SendIcon size={20} /></div>
+                    <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>Send Payment</span>
+                  </div>
+                  <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setWalletAction("out"); setDashboardAction(null); }}>
+                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><Coins size={20} /></div>
+                    <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>Withdraw Funds</span>
+                  </div>
+                  <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setMobileTab("links"); }}>
+                    <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><LinkIcon size={20} /></div>
+                    <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" }}>Request Link</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="desktop-layout" style={{ display: "flex", width: "100%", height: "100%" }}>
@@ -3240,79 +3203,25 @@ export default function App() {
               <h1 style={{ fontSize: "28px", fontWeight: "800", color: "var(--text-primary)", letterSpacing: "-0.5px" }}>
                 {currentTab === "home" && "Dashboard"}
                 {currentTab === "pay-links" && "Shareable Links"}
+                {currentTab === "activity" && "Activity History"}
               </h1>
             </div>
 
-
-
             {currentTab === "home" && (
-              <div className="dashboard-grid tab-pane">
-                {/* Column 1: Wallet Balances & Actions */}
-                <section className="grid-panel">
-                  <h3 style={{ fontSize: "18px", fontWeight: "700", marginBottom: "20px", color: "var(--text-primary)" }}>Balances</h3>
+              <div className="tab-pane" style={{ width: "100%", maxWidth: "1000px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "28px" }}>
+                {/* 1. Wallet Balances Card & Action Buttons */}
+                <Balances
+                  shieldedBalances={shieldedBalances}
+                  walletAction={walletAction}
+                  setDashboardAction={setDashboardAction}
+                  setWalletAction={setWalletAction}
+                  prices={prices}
+                  userProfile={userProfile}
+                />
 
-                  {walletAction === null ? (
-                    <Balances
-                      shieldedBalances={shieldedBalances}
-                      walletAction={walletAction}
-                      setDashboardAction={setDashboardAction}
-                      setWalletAction={setWalletAction}
-                      prices={prices}
-                      userProfile={userProfile}
-                    />
-                  ) : walletAction === "out" ? (
-                    <Withdraw
-                      withdrawRecipient={withdrawRecipient}
-                      setWithdrawRecipient={setWithdrawRecipient}
-                      selectedAsset={selectedAsset}
-                      setSelectedAsset={setSelectedAsset}
-                      depositAmount={depositAmount}
-                      setDepositAmount={setDepositAmount}
-                      shieldedBalances={shieldedBalances}
-                      handleCashOut={handleCashOut}
-                      setWalletAction={setWalletAction}
-                    />
-                  ) : null}
-                </section>
-
-                {/* Column 2: Send/Receive Form Panel */}
-                <section className="grid-panel">
-                  {dashboardAction === "send" ? (
-                    <Send
-                      sendRecipient={sendRecipient}
-                      setSendRecipient={setSendRecipient}
-                      sendAmount={sendAmount}
-                      setSendAmount={setSendAmount}
-                      selectedAsset={selectedAsset}
-                      setSelectedAsset={setSelectedAsset}
-                      loading={loading}
-                      shieldedBalances={shieldedBalances}
-                      contacts={contacts}
-                      handleSendSubmit={handleSendSubmit}
-                      prices={prices}
-                    />
-                  ) : dashboardAction === "receive" ? (
-                    <Receive
-                      userProfile={userProfile}
-                      showFeedback={showFeedback}
-                    />
-                  ) : (
-                    <div style={{ flexGrow: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
-                      <Shield size={64} style={{ opacity: 0.15, marginBottom: "20px", color: "var(--primary-accent)" }} />
-                      <h3 style={{ fontSize: "20px", fontWeight: "700", color: "var(--text-primary)", marginBottom: "12px" }}>Starlit Pay</h3>
-                      <p style={{ fontSize: "14px", maxWidth: "260px", margin: "0 auto 28px", lineHeight: "1.5" }}>
-                        Select Send or Receive to get started. All transaction details remain completely private by default.
-                      </p>
-                      <div style={{ display: "flex", gap: "12px", width: "100%", maxWidth: "260px" }}>
-                        <button onClick={() => setDashboardAction("send")} className="btn-primary" style={{ flex: 1, padding: "14px" }}>Send</button>
-                        <button onClick={() => setDashboardAction("receive")} className="btn-secondary" style={{ flex: 1, padding: "14px" }}>Receive</button>
-                      </div>
-                    </div>
-                  )}
-                </section>
-
-                {/* Column 3: Recent Activity Feed */}
+                {/* 2. Recent Activity Feed */}
                 <Activity transactions={transactions} theme={theme} />
+
               </div>
             )}
 
@@ -3330,10 +3239,151 @@ export default function App() {
               />
             )}
 
-
+            {currentTab === "activity" && (
+              <div className="tab-pane" style={{ width: "100%", maxWidth: "1000px", margin: "0 auto" }}>
+                <Activity transactions={transactions} theme={theme} />
+              </div>
+            )}
           </main>
         </div>
       )}
+
+      {/* Universal Pop-up Modal dialog for Send Action (Mobile & Desktop) */}
+      {dashboardAction === "send" && (
+        <div className="modal-overlay" onClick={() => setDashboardAction(null)} style={{
+          position: "fixed",
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0, 0, 0, 0.85)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "16px",
+          zIndex: 5000
+        }}>
+          <div className="glass-card" onClick={(e) => e.stopPropagation()} style={{
+            width: "95%",
+            maxWidth: "460px",
+            maxHeight: "88vh",
+            overflowY: "auto",
+            background: theme === "light" ? "#ffffff" : "rgba(19, 27, 46, 0.98)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "20px",
+            padding: "24px 20px",
+            position: "relative",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)"
+          }}>
+            <button 
+              onClick={() => setDashboardAction(null)} 
+              style={{ position: "absolute", top: "18px", right: "18px", background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "20px", zIndex: 10 }}
+            >
+              ✕
+            </button>
+            <Send
+              sendRecipient={sendRecipient}
+              setSendRecipient={setSendRecipient}
+              sendAmount={sendAmount}
+              setSendAmount={setSendAmount}
+              selectedAsset={selectedAsset}
+              setSelectedAsset={setSelectedAsset}
+              loading={loading}
+              shieldedBalances={shieldedBalances}
+              contacts={contacts}
+              handleSendSubmit={handleSendSubmit}
+              prices={prices}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Universal Pop-up Modal dialog for Receive Action (Mobile & Desktop) */}
+      {dashboardAction === "receive" && (
+        <div className="modal-overlay" onClick={() => setDashboardAction(null)} style={{
+          position: "fixed",
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0, 0, 0, 0.85)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "16px",
+          zIndex: 5000
+        }}>
+          <div className="glass-card" onClick={(e) => e.stopPropagation()} style={{
+            width: "95%",
+            maxWidth: "460px",
+            maxHeight: "88vh",
+            overflowY: "auto",
+            background: theme === "light" ? "#ffffff" : "rgba(19, 27, 46, 0.98)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "20px",
+            padding: "24px 20px",
+            position: "relative",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)"
+          }}>
+            <button 
+              onClick={() => setDashboardAction(null)} 
+              style={{ position: "absolute", top: "18px", right: "18px", background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "20px", zIndex: 10 }}
+            >
+              ✕
+            </button>
+            <Receive
+              userProfile={userProfile}
+              showFeedback={showFeedback}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Universal Pop-up Modal dialog for Withdraw Action (Mobile & Desktop) */}
+      {walletAction === "out" && (
+        <div className="modal-overlay" onClick={() => setWalletAction(null)} style={{
+          position: "fixed",
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: "rgba(0, 0, 0, 0.85)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "16px",
+          zIndex: 5000
+        }}>
+          <div className="glass-card" onClick={(e) => e.stopPropagation()} style={{
+            width: "95%",
+            maxWidth: "460px",
+            maxHeight: "88vh",
+            overflowY: "auto",
+            background: theme === "light" ? "#ffffff" : "rgba(19, 27, 46, 0.98)",
+            border: "1px solid var(--border-color)",
+            borderRadius: "20px",
+            padding: "24px 20px",
+            position: "relative",
+            boxShadow: "0 20px 50px rgba(0, 0, 0, 0.7)"
+          }}>
+            <button 
+              onClick={() => setWalletAction(null)} 
+              style={{ position: "absolute", top: "18px", right: "18px", background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: "20px", zIndex: 10 }}
+            >
+              ✕
+            </button>
+            <Withdraw
+              withdrawRecipient={withdrawRecipient}
+              setWithdrawRecipient={setWithdrawRecipient}
+              selectedAsset={selectedAsset}
+              setSelectedAsset={setSelectedAsset}
+              depositAmount={depositAmount}
+              setDepositAmount={setDepositAmount}
+              shieldedBalances={shieldedBalances}
+              handleCashOut={handleCashOut}
+              setWalletAction={setWalletAction}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Hidden file input for client-side avatar upload */}
       <input
         type="file"

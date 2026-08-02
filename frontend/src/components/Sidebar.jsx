@@ -1,5 +1,5 @@
 import React from "react";
-import { Coins, Link as LinkIcon, FileText, Download, LogOut, Sun, Moon } from "lucide-react";
+import { Coins, Link as LinkIcon, FileText, Download, LogOut, Sun, Moon, Activity as ActivityIcon } from "lucide-react";
 
 export default function Sidebar({
   currentTab,
@@ -80,7 +80,7 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* Navigation buttons to switch between Dashboard, Links and Statements views */}
+      {/* Navigation buttons to switch between Dashboard, Links and Activities views */}
       <nav className="sidebar-nav">
         <button onClick={() => { setCurrentTab("home"); if (setMobileTab) setMobileTab("wallet"); }} className={`sidebar-btn ${currentTab === "home" ? "active" : ""}`}>
           <Coins size={18} />
@@ -89,6 +89,10 @@ export default function Sidebar({
         <button onClick={() => setCurrentTab("pay-links")} className={`sidebar-btn ${currentTab === "pay-links" ? "active" : ""}`}>
           <LinkIcon size={18} />
           <span>Links</span>
+        </button>
+        <button onClick={() => { setCurrentTab("activity"); if (setMobileTab) setMobileTab("activity"); }} className={`sidebar-btn ${currentTab === "activity" ? "active" : ""}`}>
+          <ActivityIcon size={18} />
+          <span>Activities</span>
         </button>
       </nav>
 
