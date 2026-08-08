@@ -1,5 +1,15 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
+import rateLimit from "express-rate-limit";
 import { app, rpc, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
+
+// Rate Limiter for Relayer Gas Endpoints (Max 20 requests per 15 minutes per IP)
+const relayerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many transaction submissions. Please wait before attempting another relayer transaction." }
+});
 
 // Helper to validate Stellar/Soroban Contract ID format (starts with C, 56 chars)
 function isValidContractId(id) {
@@ -7,7 +17,7 @@ function isValidContractId(id) {
 }
 
 // Submits client claims/withdrawals to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/submit", async (req, res) => {
+app.post("/api/relayer/submit", relayerLimiter, async (req, res) => {
   const { proof, nullifier, recipient, token, amount, root } = req.body;
   const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
 
@@ -77,7 +87,7 @@ app.post("/api/relayer/submit", async (req, res) => {
 });
 
 // Submits client private pool-to-pool transfer to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/transfer", async (req, res) => {
+app.post("/api/relayer/transfer", relayerLimiter, async (req, res) => {
   const {
     proof,
     nullifier_1,
@@ -179,7 +189,7 @@ app.post("/api/relayer/transfer", async (req, res) => {
 });
 
 // Submits client private pool-to-public withdrawal with change to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/withdraw", async (req, res) => {
+app.post("/api/relayer/withdraw", relayerLimiter, async (req, res) => {
   const {
     proof,
     nullifier_1,

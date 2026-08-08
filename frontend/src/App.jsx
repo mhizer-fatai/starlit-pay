@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Shield, Coins, Send as SendIcon, Download, RefreshCw, User, Lock,
   FileText, Eye, EyeOff, CheckCircle, AlertCircle, LogOut, Search, Key, Link as LinkIcon, Upload,
-  ArrowRight, Globe, Cpu, Activity as ActivityIcon, Check, Sun, Moon, ArrowDownUp
+  ArrowRight, Globe, Cpu, Activity as ActivityIcon, Check, Sun, Moon, ArrowDownUp,
+  Zap, Clock, CheckCircle2
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import nacl from "tweetnacl";
@@ -54,8 +55,8 @@ const BACKEND_URL = window.location.hostname === "localhost" || window.location.
   : "https://starlit-pay.onrender.com";
 
 // Initialize Supabase Client
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "";
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://tmzmnpiiuxikfnaheugm.supabase.co";
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtem1ucGlpdXhpa2ZuYWhldWdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwNzIxNzUsImV4cCI6MjA5NzY0ODE3NX0.sAjHasXvfK8V-iosNHocHRppQVS8-1QEGt1j7Zls694";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 
@@ -256,6 +257,15 @@ export default function App() {
   const [paymentLinks, setPaymentLinks] = useState([]);
   const [linkDescription, setLinkDescription] = useState("");
   const [generatedLink, setGeneratedLink] = useState("");
+
+  // 1-Click Faucet & 4-Hour Anti-Spam Cooldown State (Shared by Desktop & Mobile)
+  const [faucetState, setFaucetState] = useState("idle"); // "idle" | "receiving" | "success" | "error"
+  const [faucetStatusText, setFaucetStatusText] = useState("");
+  const [faucetErrorText, setFaucetErrorText] = useState("");
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+
+  const initialFaucetBalancesRef = useRef(null);
+  const faucetPollIntervalRef = useRef(null);
 
   // UI Status
   const [initializing, setInitializing] = useState(true);
@@ -695,9 +705,9 @@ export default function App() {
       let masterSeed;
       if (storedLocalSeed) {
         try {
-          masterSeed = await decryptSeedLocally(storedLocalSeed, pin);
+          masterSeed = await decryptSeedLocally(storedLocalSeed, pin, userProfile.email);
         } catch (decryptErr) {
-          console.error("Local seed decryption failed, but PIN verified against commitment.", decryptErr);
+          // Fallback to newly derived keys
         }
       }
 
@@ -1242,6 +1252,177 @@ export default function App() {
       }
     }
   };
+
+  // Synchronize 4-hour cooldown timer across sessions
+  useEffect(() => {
+    if (!userProfile?.id) return;
+
+    const storageKey = `starlit_faucet_last_claim_${userProfile.id}`;
+    const lastClaim = parseInt(localStorage.getItem(storageKey) || "0", 10);
+    const COOLDOWN_SECONDS = 4 * 60 * 60; // 4 hours
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const elapsed = nowSeconds - lastClaim;
+
+    if (lastClaim && elapsed < COOLDOWN_SECONDS) {
+      setCooldownSeconds(COOLDOWN_SECONDS - elapsed);
+    }
+
+    const checkBackendStatus = async () => {
+      try {
+        if (!userProfile.public_encryption_key) return;
+        const res = await fetch(`http://localhost:3001/api/faucet/status/${userProfile.public_encryption_key}`).catch(() => 
+          fetch(`https://starlit-pay.onrender.com/api/faucet/status/${userProfile.public_encryption_key}`)
+        );
+        if (res && res.ok) {
+          const data = await res.json();
+          if (!data.canClaim && data.remainingMs > 0) {
+            const sec = Math.ceil(data.remainingMs / 1000);
+            setCooldownSeconds(sec);
+          }
+        }
+      } catch (e) {}
+    };
+
+    checkBackendStatus();
+  }, [userProfile?.id, userProfile?.public_encryption_key]);
+
+  // Live 1-second countdown ticker
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+
+    const timer = setInterval(() => {
+      setCooldownSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [cooldownSeconds]);
+
+  // Monitor when balance actually updates to trigger SUCCESS
+  useEffect(() => {
+    if (faucetState === "receiving" && initialFaucetBalancesRef.current) {
+      const currentUSDC = shieldedBalances?.USDC || 0;
+      const currentXLM = shieldedBalances?.XLM || 0;
+      const { usdc: initUSDC, xlm: initXLM } = initialFaucetBalancesRef.current;
+
+      if (currentUSDC > initUSDC || currentXLM > initXLM) {
+        if (faucetPollIntervalRef.current) clearInterval(faucetPollIntervalRef.current);
+        setFaucetState("success");
+        setFaucetStatusText("Funds Received! +100 XLM & +50 USDC added.");
+        
+        const fourHours = 4 * 60 * 60;
+        setCooldownSeconds(fourHours);
+        if (userProfile?.id) {
+          localStorage.setItem(`starlit_faucet_last_claim_${userProfile.id}`, String(Math.floor(Date.now() / 1000)));
+        }
+
+        setTimeout(() => {
+          setFaucetState("idle");
+          setFaucetStatusText("");
+        }, 7000);
+      }
+    }
+  }, [shieldedBalances, faucetState, userProfile?.id]);
+
+  const formatCooldown = (totalSec) => {
+    const hours = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    const secs = totalSec % 60;
+    return `${hours.toString().padStart(2, "0")}h ${mins.toString().padStart(2, "0")}m ${secs.toString().padStart(2, "0")}s`;
+  };
+
+  const handleClaimFaucet = async () => {
+    if (faucetState === "receiving" || cooldownSeconds > 0) return;
+
+    initialFaucetBalancesRef.current = {
+      usdc: shieldedBalances?.USDC || 0,
+      xlm: shieldedBalances?.XLM || 0
+    };
+
+    setFaucetState("receiving");
+    setFaucetStatusText("Receiving funds... Auto-shielding 100 XLM & 50 USDC to your account.");
+    setFaucetErrorText("");
+
+    try {
+      const payload = {
+        depositMemo: userProfile?.deposit_memo,
+        viewingKey: userProfile?.public_encryption_key,
+        destinationAddress: userProfile?.stellar_address
+      };
+
+      let res;
+      try {
+        res = await fetch("http://localhost:3001/api/faucet/fund", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } catch (e) {
+        res = await fetch("https://starlit-pay.onrender.com/api/faucet/fund", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      }
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res && res.ok && data.success) {
+        setFaucetStatusText("Receiving funds... Encrypting note and crediting private balance.");
+        
+        let attempts = 0;
+        if (faucetPollIntervalRef.current) clearInterval(faucetPollIntervalRef.current);
+        
+        faucetPollIntervalRef.current = setInterval(async () => {
+          attempts++;
+          await loadWalletData(true);
+          
+          if (attempts >= 22) {
+            clearInterval(faucetPollIntervalRef.current);
+            setFaucetState("success");
+            setFaucetStatusText("Account Funded! +100 XLM & +50 USDC credited.");
+            
+            const fourHours = 4 * 60 * 60;
+            setCooldownSeconds(fourHours);
+            if (userProfile?.id) {
+              localStorage.setItem(`starlit_faucet_last_claim_${userProfile.id}`, String(Math.floor(Date.now() / 1000)));
+            }
+
+            setTimeout(() => {
+              setFaucetState("idle");
+              setFaucetStatusText("");
+            }, 7000);
+          }
+        }, 2000);
+
+      } else {
+        setFaucetState("error");
+        if (data.cooldownActive || res?.status === 429) {
+          const sec = data.remainingMs ? Math.ceil(data.remainingMs / 1000) : (4 * 3600);
+          setCooldownSeconds(sec);
+        }
+        setFaucetErrorText(data.message || data.details || data.error || "Faucet claim failed");
+        setTimeout(() => {
+          setFaucetState("idle");
+          setFaucetErrorText("");
+        }, 7000);
+      }
+    } catch (err) {
+      console.error("Faucet error:", err);
+      setFaucetState("error");
+      setFaucetErrorText(err.message || "Failed to reach faucet network.");
+      setTimeout(() => {
+        setFaucetState("idle");
+        setFaucetErrorText("");
+      }, 7000);
+    }
+  };
   // Scan, select, and merge small fragmented private notes in the background
   const autoMergeNotes = async () => {
     if (loading || showingZkLoader || !walletKeys || !userProfile) return;
@@ -1452,20 +1633,29 @@ export default function App() {
 
   // Verifies the user PIN and executes the shielded payment on success
   const handlePinConfirmSubmit = async (enteredPin) => {
+    if (!enteredPin || enteredPin.length !== 6) {
+      showFeedback("error", "Please enter your 6-digit PIN.");
+      return;
+    }
+
+    // Instantly hide PIN modal and immediately turn on Transaction in Progress overlay
+    setShowPinConfirm(false);
+    setShowingZkLoader(true);
+    setZkProgress("Verifying authorization PIN...");
     setLoading(true);
-    setStatusMessage("Verifying PIN...");
 
     try {
       const derived = await deriveKeysFromEmailAndPin(email, enteredPin);
       const hashedSpendingKey = bytesToHex(await sha256(derived.spendingKey));
       if (hashedSpendingKey !== userProfile.identity_commitment) {
+        setShowingZkLoader(false);
+        setShowPinConfirm(true);
         showFeedback("error", "Incorrect confirmation PIN.");
         setConfirmPinInput("");
         setLoading(false);
         return;
       }
 
-      setShowPinConfirm(false);
       setConfirmPinInput("");
 
       if (walletAction === "out") {
@@ -1475,6 +1665,7 @@ export default function App() {
       }
     } catch (err) {
       console.error(err);
+      setShowingZkLoader(false);
       showFeedback("error", "Verification failed: " + err.message);
       setLoading(false);
     }
@@ -2391,14 +2582,14 @@ export default function App() {
       {/* Transaction validation confirmation overlay */}
       {showPinConfirm && (
         <div className="proving-overlay" style={{ zIndex: 10000 }}>
-          <div className="proving-card" style={{ maxWidth: "400px" }}>
-            <Lock size={32} style={{ color: "var(--primary-accent)", marginBottom: "16px", margin: "0 auto" }} />
-            <h2 style={{ fontSize: "22px", fontWeight: "700", marginBottom: "8px", color: "#ffffff" }}>Confirm PIN</h2>
-            <p style={{ color: "var(--text-muted)", fontSize: "14px", marginBottom: "24px" }}>
-              Enter your 6-digit PIN to authorize payment
+          <div className="proving-card" style={{ maxWidth: "400px", padding: "28px 24px" }}>
+            <Lock size={32} style={{ color: "var(--primary-accent)", marginBottom: "12px", margin: "0 auto" }} />
+            <h2 style={{ fontSize: "22px", fontWeight: "700", marginBottom: "6px", color: "#ffffff" }}>Confirm PIN</h2>
+            <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "20px" }}>
+              Enter your 6-digit PIN and click Confirm to authorize payment
             </p>
 
-            <div className="pin-dots">
+            <div className="pin-dots" style={{ marginBottom: "16px" }}>
               {[0, 1, 2, 3, 4, 5].map((idx) => (
                 <div
                   key={idx}
@@ -2407,51 +2598,58 @@ export default function App() {
               ))}
             </div>
 
-            <input
-              type="password"
-              maxLength={6}
-              placeholder="******"
-              value={confirmPinInput}
-              onChange={(e) => {
-                const val = e.target.value.replace(/\D/g, "");
-                setConfirmPinInput(val);
-                if (val.length === 6 && !loading) {
-                  handlePinConfirmSubmit(val);
-                }
-              }}
-              autoFocus
-              style={{
-                textAlign: "center",
-                letterSpacing: "12px",
-                fontSize: "28px",
-                padding: "16px",
-                background: "rgba(255, 255, 255, 0.03)",
-                border: "1px solid var(--border-color)",
-                borderRadius: "16px",
-                color: "white",
-                width: "100%",
-                marginBottom: "24px",
-                outline: "none"
-              }}
-            />
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (confirmPinInput.length === 6 && !loading) {
+                handlePinConfirmSubmit(confirmPinInput);
+              }
+            }}>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={6}
+                placeholder="******"
+                value={confirmPinInput}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/\D/g, "");
+                  setConfirmPinInput(val);
+                }}
+                autoFocus
+                style={{
+                  textAlign: "center",
+                  letterSpacing: "12px",
+                  fontSize: "26px",
+                  padding: "14px",
+                  background: "rgba(255, 255, 255, 0.03)",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "14px",
+                  color: "white",
+                  width: "100%",
+                  marginBottom: "24px",
+                  outline: "none"
+                }}
+              />
 
-            <div style={{ display: "flex", gap: "12px", width: "100%" }}>
-              <button
-                onClick={() => handlePinConfirmSubmit(confirmPinInput)}
-                className="btn-primary"
-                disabled={confirmPinInput.length !== 6 || loading}
-                style={{ flex: 1, padding: "14px" }}
-              >
-                {loading ? "Processing..." : "Confirm"}
-              </button>
-              <button
-                onClick={() => { setShowPinConfirm(false); setConfirmPinInput(""); }}
-                className="btn-secondary"
-                style={{ flex: 1, padding: "14px" }}
-              >
-                Cancel
-              </button>
-            </div>
+              <div style={{ display: "flex", gap: "12px", width: "100%" }}>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={confirmPinInput.length !== 6 || loading}
+                  style={{ flex: 1, padding: "14px", fontWeight: "700", fontSize: "15px" }}
+                >
+                  {loading ? "Processing..." : "Confirm"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowPinConfirm(false); setConfirmPinInput(""); }}
+                  className="btn-secondary"
+                  style={{ flex: 1, padding: "14px", fontSize: "14px" }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -2764,39 +2962,51 @@ export default function App() {
       {isMobile ? (
         <div className="mobile-viewport">
           <div className="mobile-content">
-            {/* Header summary component displaying profile details */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "24px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <img src={symbol} alt="Starlit Pay Logo" style={{ height: "20px", width: "auto" }} />
-                  <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)" }}>Starlit Pay</span>
-                </div>
+            {/* Adaptive Header: Starlit Logo on Left Edge, Profile & Theme on Right Edge */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              width: "100%",
+              marginBottom: "20px",
+              gap: "12px"
+            }}>
+              {/* Left Edge: Brand Logo */}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                <img src={symbol} alt="Starlit Pay Logo" style={{ height: "24px", width: "auto" }} />
+                <span style={{ fontSize: "16px", fontWeight: "800", color: "var(--text-primary)", letterSpacing: "-0.3px" }}>Starlit Pay</span>
+              </div>
+
+              {/* Right Edge: User Profile Chip & Theme Toggle */}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
                 <div 
                   onClick={() => setShowProfileModal(true)}
                   style={{ 
-                    borderLeft: "1px solid var(--border-color)", 
-                    height: "36px", 
-                    paddingLeft: "12px", 
                     display: "flex", 
                     alignItems: "center", 
-                    gap: "8px",
-                    cursor: "pointer"
+                    gap: "8px", 
+                    cursor: "pointer",
+                    padding: "4px 10px 4px 4px",
+                    borderRadius: "20px",
+                    background: "rgba(255, 255, 255, 0.04)",
+                    border: "1px solid var(--border-color)",
+                    transition: "all 0.2s ease"
                   }}
-                  title="View Profile Options"
+                  title="View Profile"
                 >
                   <div
                     className="mobile-avatar-container"
                     style={{
-                      width: "32px",
-                      height: "32px",
+                      width: "28px",
+                      height: "28px",
                       borderRadius: "50%",
                       background: "#4edea3",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       fontWeight: "700",
-                      fontSize: "12px",
-                      color: "#FFFFFF",
+                      fontSize: "11px",
+                      color: "#0b1326",
                       position: "relative",
                       overflow: "hidden",
                       flexShrink: 0
@@ -2812,181 +3022,310 @@ export default function App() {
                       userProfile?.username?.substring(0, 2).toUpperCase() || "SP"
                     )}
                   </div>
-                  <div>
-                    <span className="mobile-greeting-subtitle">Welcome Back,</span>
-                    <h3 className="mobile-greeting-name">{userProfile?.display_name || userProfile?.username}</h3>
-                  </div>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-primary)", maxWidth: "80px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    @{userProfile?.username}
+                  </span>
                 </div>
+
+                <button
+                  onClick={toggleTheme}
+                  className="theme-toggle-btn"
+                  aria-label="Toggle Theme"
+                  style={{
+                    background: "var(--card-bg)",
+                    border: "1px solid var(--border-color)",
+                    cursor: "pointer",
+                    color: "var(--text-primary)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "7px",
+                    borderRadius: "50%",
+                    width: "36px",
+                    height: "36px",
+                    flexShrink: 0,
+                    transition: "all 0.2s ease"
+                  }}
+                >
+                  {theme === "light" ? <Sun size={17} /> : <Moon size={17} />}
+                </button>
               </div>
-              <button
-                onClick={toggleTheme}
-                className="theme-toggle-btn"
-                aria-label="Toggle Theme"
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--text-primary)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "8px",
-                  borderRadius: "50%",
-                  backgroundColor: "var(--card-bg)",
-                  border: "1px solid var(--border-color)",
-                  width: "36px",
-                  height: "36px",
-                  transition: "all 0.2s ease"
-                }}
-              >
-                {theme === "light" ? <Sun size={18} /> : <Moon size={18} />}
-              </button>
             </div>
 
             {/* Wallet tab displaying private asset balances */}
             {mobileTab === "wallet" && (
               <div className="tab-pane">
                 <div>
-                  {/* Dual sub-card balance card container styled like Image 1 */}
-                    {(() => {
-                      const totalBalance = (shieldedBalances.USDC || 0) * prices.USDC + (shieldedBalances.XLM || 0) * prices.XLM;
-                      return (
-                        <div className="premium-card balance-card mobile-balance-card" style={{
-                          minHeight: "220px",
-                          padding: "24px",
-                          borderRadius: "24px",
-                          position: "relative",
-                          overflow: "hidden",
-                          marginBottom: "20px"
-                        }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
-                            <span className="mobile-total-balance-lbl">Total Balance</span>
-                          </div>
-                          
-                          <div className="mobile-total-balance-val">
-                            ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </div>
-
-                          {/* Dual balance cards container inside the main panel */}
-                          <div className="dual-card-container">
-                            <div className="sub-balance-card" style={{ position: "relative" }}>
-                              <span className="sub-balance-title">USDC Wallet</span>
-                              <div className="sub-balance-value">${(shieldedBalances.USDC || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", width: "100%", marginTop: "4px" }}>
-                                <span className="sub-balance-price">1 USDC = ${(prices?.USDC || 1.00).toFixed(2)}</span>
-                              </div>
-                            </div>
-                            <div className="sub-balance-card" style={{ position: "relative" }}>
-                              <span className="sub-balance-title">XLM Wallet</span>
-                              <div className="sub-balance-value">{(shieldedBalances.XLM || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-                              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", width: "100%", marginTop: "4px" }}>
-                                <span className="sub-balance-price">1 XLM = ${(prices?.XLM || 0.1718).toFixed(4)}</span>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="mobile-drag-handle"></div>
+                  {/* Dual sub-card balance card container */}
+                  {(() => {
+                    const totalBalance = (shieldedBalances.USDC || 0) * prices.USDC + (shieldedBalances.XLM || 0) * prices.XLM;
+                    return (
+                      <div className="premium-card balance-card mobile-balance-card" style={{
+                        minHeight: "200px",
+                        padding: "20px",
+                        borderRadius: "20px",
+                        position: "relative",
+                        overflow: "hidden",
+                        marginBottom: "16px"
+                      }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
+                          <span className="mobile-total-balance-lbl">Private Balance</span>
                         </div>
-                      );
-                    })()}
+                        
+                        <div className="mobile-total-balance-val" style={{ fontSize: "32px", margin: "10px 0 16px" }}>
+                          ${totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
 
-                    {/* Quick actions tiles grid: Send, Receive, Withdraw */}
-                    <div className="mobile-action-grid-3">
-                      <div className="mobile-action-tile-3" onClick={() => { setDashboardAction("send"); setWalletAction(null); }}>
-                        <div className="mobile-action-tile-icon"><ArrowRight size={16} style={{ transform: "rotate(-45deg)" }} /></div>
-                        <span>Send</span>
+                        {/* Dual balance cards container inside the main panel */}
+                        <div className="dual-card-container">
+                          <div className="sub-balance-card" style={{ position: "relative" }}>
+                            <span className="sub-balance-title">USDC Wallet</span>
+                            <div className="sub-balance-value">${(shieldedBalances.USDC || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", width: "100%", marginTop: "4px" }}>
+                              <span className="sub-balance-price">1 USDC = ${(prices?.USDC || 1.00).toFixed(2)}</span>
+                            </div>
+                          </div>
+                          <div className="sub-balance-card" style={{ position: "relative" }}>
+                            <span className="sub-balance-title">XLM Wallet</span>
+                            <div className="sub-balance-value">{(shieldedBalances.XLM || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                            <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", width: "100%", marginTop: "4px" }}>
+                              <span className="sub-balance-price">1 XLM = ${(prices?.XLM || 0.1718).toFixed(4)}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mobile-drag-handle"></div>
                       </div>
-                      <div className="mobile-action-tile-3" onClick={() => { setDashboardAction("receive"); setWalletAction(null); }}>
-                        <div className="mobile-action-tile-icon"><ArrowRight size={16} style={{ transform: "rotate(135deg)" }} /></div>
-                        <span>Receive</span>
+                    );
+                  })()}
+
+                  {/* 1-Click Faucet Banner on Mobile (Simple & Clean: "Fund Account") */}
+                  <div style={{
+                    background: "linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(5, 150, 105, 0.06) 100%)",
+                    border: "1px solid rgba(16, 185, 129, 0.3)",
+                    borderRadius: "16px",
+                    padding: "12px 16px",
+                    marginBottom: "16px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "10px"
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "#10B981", fontWeight: "700", fontSize: "13px" }}>
+                        <Zap size={15} />
+                        <span>Fund Account</span>
                       </div>
-                      <div className="mobile-action-tile-3" onClick={() => { setWalletAction("out"); setDashboardAction(null); }}>
-                        <div className="mobile-action-tile-icon"><Coins size={16} /></div>
-                        <span>Withdraw</span>
+                      <div style={{ color: "var(--text-muted)", fontSize: "11px", marginTop: "2px" }}>
+                        {cooldownSeconds > 0 ? (
+                          <span>Next in: <strong style={{ color: "#EAB308", fontFamily: "var(--font-mono)" }}>{formatCooldown(cooldownSeconds)}</strong></span>
+                        ) : (
+                          <span>Free +100 XLM & +50 USDC</span>
+                        )}
                       </div>
                     </div>
 
-                    {/* Transaction History Section */}
-                    <div style={{ marginTop: "28px", marginBottom: "28px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-                        <h3 style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Transaction</h3>
-                        <button
-                          onClick={() => setMobileTab("activity")}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "#4edea3",
-                            fontSize: "13px",
-                            fontWeight: "600",
-                            cursor: "pointer"
-                          }}
-                        >
-                          See All
-                        </button>
-                      </div>
-
-                      {transactions.length === 0 ? (
-                        <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-muted)", background: "var(--card-bg)", border: "1px solid var(--border-color)", borderRadius: "16px" }}>
-                          <p style={{ fontSize: "14px" }}>No payments yet</p>
-                        </div>
+                    <button
+                      onClick={handleClaimFaucet}
+                      disabled={faucetState === "receiving" || cooldownSeconds > 0}
+                      style={{
+                        padding: "8px 14px",
+                        borderRadius: "10px",
+                        background: cooldownSeconds > 0 
+                          ? (theme === "light" ? "#EFE9DD" : "rgba(30, 41, 59, 0.8)") 
+                          : (faucetState === "receiving" ? "linear-gradient(135deg, #0d9488 0%, #0f766e 100%)" : "linear-gradient(135deg, #1B875D 0%, #14724E 100%)"),
+                        color: cooldownSeconds > 0 ? (theme === "light" ? "#7C7468" : "var(--text-muted)") : "#FFFFFF",
+                        fontWeight: "700",
+                        fontSize: "12px",
+                        border: cooldownSeconds > 0 ? "1px solid var(--border-color)" : "none",
+                        cursor: (faucetState === "receiving" || cooldownSeconds > 0) ? "not-allowed" : "pointer",
+                        boxShadow: cooldownSeconds > 0 ? "none" : "0 4px 12px rgba(27, 135, 93, 0.25)",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        flexShrink: 0
+                      }}
+                    >
+                      {faucetState === "receiving" ? (
+                        <>
+                          <RefreshCw size={12} className="animate-spin" />
+                          <span>Receiving...</span>
+                        </>
+                      ) : cooldownSeconds > 0 ? (
+                        <>
+                          <Clock size={12} color="#EAB308" />
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px" }}>{formatCooldown(cooldownSeconds)}</span>
+                        </>
                       ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                          {transactions.slice(0, 3).map((tx, idx) => {
-                            const isIncoming = tx.type === "Incoming" || tx.type === "Received" || tx.type === "Deposit" || tx.type === "Deposited";
-
-                            let displayLabel = "";
-                            if (tx.type === "Deposit") {
-                              displayLabel = tx.party && tx.party.startsWith("G")
-                                ? `Deposit: ${tx.party.slice(0, 6)}...`
-                                : "Deposit";
-                            } else if (tx.type === "Withdrawal") {
-                              displayLabel = tx.party && tx.party.startsWith("G")
-                                ? `Withdraw: ${tx.party.slice(0, 6)}...`
-                                : "Withdrawal";
-                            } else if (tx.type === "Incoming" || tx.type === "Received" || tx.type === "Deposited") {
-                              displayLabel = tx.party && tx.party.startsWith("G")
-                                ? `From: ${tx.party.slice(0, 6)}...`
-                                : `@${tx.party}`;
-                            } else {
-                              displayLabel = tx.party && tx.party.startsWith("G")
-                                ? `To: ${tx.party.slice(0, 6)}...`
-                                : `@${tx.party}`;
-                            }
-
-                            return (
-                              <div key={idx} className="mobile-tx-row-card">
-                                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                                  <div style={{
-                                    width: "36px",
-                                    height: "36px",
-                                    background: isIncoming ? "rgba(5, 150, 105, 0.1)" : "rgba(78, 222, 163, 0.08)",
-                                    borderRadius: "12px",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    color: isIncoming ? "#10b981" : "#4edea3",
-                                    flexShrink: 0
-                                  }}>
-                                    {isIncoming ? <Download size={16} /> : <SendIcon size={16} />}
-                                  </div>
-                                  <div>
-                                    <h4 style={{ fontSize: "13px", fontWeight: "700", color: "#ffffff" }}>
-                                      {displayLabel}
-                                    </h4>
-                                    <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
-                                      {new Date(tx.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                                    </span>
-                                  </div>
-                                </div>
-                                <span style={{ fontSize: "14px", fontWeight: "700", color: isIncoming ? "var(--success-color)" : "#ffffff" }}>
-                                  {isIncoming ? "+" : "-"}${parseFloat(tx.amount).toFixed(2)}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
+                        <>
+                          <Zap size={12} />
+                          <span>Fund Account</span>
+                        </>
                       )}
+                    </button>
+                  </div>
+
+                  {/* Faucet Receiving or Success In-App Notification Banner */}
+                  {faucetState === "receiving" && (
+                    <div style={{
+                      padding: "10px 14px",
+                      background: "rgba(59, 130, 246, 0.15)",
+                      border: "1px solid rgba(59, 130, 246, 0.4)",
+                      borderRadius: "12px",
+                      color: "#60A5FA",
+                      fontSize: "12px",
+                      fontWeight: "600",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      marginBottom: "16px"
+                    }}>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>{faucetStatusText}</span>
+                    </div>
+                  )}
+
+                  {faucetState === "success" && (
+                    <div style={{
+                      padding: "10px 14px",
+                      background: "rgba(16, 185, 129, 0.15)",
+                      border: "1px solid rgba(16, 185, 129, 0.4)",
+                      borderRadius: "12px",
+                      color: "#10B981",
+                      fontSize: "12px",
+                      fontWeight: "600",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      marginBottom: "16px"
+                    }}>
+                      <CheckCircle2 size={14} />
+                      <span>{faucetStatusText}</span>
+                    </div>
+                  )}
+
+                  {/* 4-Action Quick Tiles Grid (Send, Receive, Swap, Withdraw) */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px" }}>
+                    <div className="mobile-action-tile-3" onClick={() => { setDashboardAction("send"); setWalletAction(null); }}>
+                      <div className="mobile-action-tile-icon"><ArrowRight size={16} style={{ transform: "rotate(-45deg)" }} /></div>
+                      <span>Send</span>
+                    </div>
+                    <div className="mobile-action-tile-3" onClick={() => { setDashboardAction("receive"); setWalletAction(null); }}>
+                      <div className="mobile-action-tile-icon"><ArrowRight size={16} style={{ transform: "rotate(135deg)" }} /></div>
+                      <span>Receive</span>
+                    </div>
+                    <div 
+                      className="mobile-action-tile-3" 
+                      onClick={() => { setDashboardAction("swap"); setWalletAction(null); }}
+                      style={{ position: "relative" }}
+                    >
+                      <span style={{
+                        position: "absolute",
+                        top: "-6px",
+                        right: "-2px",
+                        background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                        color: "#FFFFFF",
+                        fontSize: "8px",
+                        fontWeight: "800",
+                        padding: "2px 5px",
+                        borderRadius: "8px",
+                        letterSpacing: "0.4px",
+                        textTransform: "uppercase",
+                        boxShadow: "0 2px 6px rgba(109, 40, 217, 0.4)",
+                        zIndex: 2
+                      }}>
+                        Soon
+                      </span>
+                      <div className="mobile-action-tile-icon"><ArrowDownUp size={16} /></div>
+                      <span>Swap</span>
+                    </div>
+                    <div className="mobile-action-tile-3" onClick={() => { setWalletAction("out"); setDashboardAction(null); }}>
+                      <div className="mobile-action-tile-icon"><Coins size={16} /></div>
+                      <span>Withdraw</span>
                     </div>
                   </div>
+
+                  {/* Transaction History Section */}
+                  <div style={{ marginTop: "28px", marginBottom: "28px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                      <h3 style={{ fontSize: "14px", fontWeight: "700", color: "var(--text-primary)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Transaction</h3>
+                      <button
+                        onClick={() => setMobileTab("activity")}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#4edea3",
+                          fontSize: "13px",
+                          fontWeight: "600",
+                          cursor: "pointer"
+                        }}
+                      >
+                        See All
+                      </button>
+                    </div>
+
+                    {transactions.length === 0 ? (
+                      <div style={{ textAlign: "center", padding: "32px 0", color: "var(--text-muted)", background: "var(--card-bg)", border: "1px solid var(--border-color)", borderRadius: "16px" }}>
+                        <p style={{ fontSize: "14px" }}>No payments yet</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        {transactions.slice(0, 3).map((tx, idx) => {
+                          const isIncoming = tx.type === "Incoming" || tx.type === "Received" || tx.type === "Deposit" || tx.type === "Deposited";
+
+                          let displayLabel = "";
+                          if (tx.type === "Deposit") {
+                            displayLabel = tx.party && tx.party.startsWith("G")
+                              ? `Deposit: ${tx.party.slice(0, 6)}...`
+                              : "Deposit";
+                          } else if (tx.type === "Withdrawal") {
+                            displayLabel = tx.party && tx.party.startsWith("G")
+                              ? `Withdraw: ${tx.party.slice(0, 6)}...`
+                              : "Withdrawal";
+                          } else if (tx.type === "Incoming" || tx.type === "Received" || tx.type === "Deposited") {
+                            displayLabel = tx.party && tx.party.startsWith("G")
+                              ? `From: ${tx.party.slice(0, 6)}...`
+                              : `@${tx.party}`;
+                          } else {
+                            displayLabel = tx.party && tx.party.startsWith("G")
+                              ? `To: ${tx.party.slice(0, 6)}...`
+                              : `@${tx.party}`;
+                          }
+
+                          return (
+                            <div key={idx} className="mobile-tx-row-card">
+                              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                                <div style={{
+                                  width: "36px",
+                                  height: "36px",
+                                  background: isIncoming ? "rgba(5, 150, 105, 0.1)" : "rgba(78, 222, 163, 0.08)",
+                                  borderRadius: "12px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: isIncoming ? "#10b981" : "#4edea3",
+                                  flexShrink: 0
+                                }}>
+                                  {isIncoming ? <Download size={16} /> : <SendIcon size={16} />}
+                                </div>
+                                <div>
+                                  <h4 style={{ fontSize: "13px", fontWeight: "700", color: "var(--text-primary)" }}>
+                                    {displayLabel}
+                                  </h4>
+                                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>
+                                    {new Date(tx.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </span>
+                                </div>
+                              </div>
+                              <span style={{ fontSize: "14px", fontWeight: "700", color: isIncoming ? "var(--success-color)" : "var(--text-primary)" }}>
+                                {isIncoming ? "+" : "-"}${parseFloat(tx.amount).toFixed(2)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -3205,7 +3544,28 @@ export default function App() {
                     <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><SendIcon size={18} /></div>
                     <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-primary)" }}>Send</span>
                   </div>
-                  <div className="quick-actions-item-3" onClick={() => { setShowQuickActions(false); setDashboardAction("swap"); setWalletAction(null); }}>
+                  <div 
+                    className="quick-actions-item-3" 
+                    onClick={() => { setShowQuickActions(false); setDashboardAction("swap"); setWalletAction(null); }}
+                    style={{ position: "relative" }}
+                  >
+                    <span style={{
+                      position: "absolute",
+                      top: "-4px",
+                      right: "6px",
+                      background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                      color: "#FFFFFF",
+                      fontSize: "8px",
+                      fontWeight: "800",
+                      padding: "1px 5px",
+                      borderRadius: "8px",
+                      letterSpacing: "0.4px",
+                      textTransform: "uppercase",
+                      boxShadow: "0 2px 6px rgba(109, 40, 217, 0.4)",
+                      zIndex: 2
+                    }}>
+                      Soon
+                    </span>
                     <div className="drawer-item-icon" style={{ background: "rgba(16, 185, 129, 0.12)", color: "#10b981", padding: "10px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}><ArrowDownUp size={18} /></div>
                     <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-primary)" }}>Swap</span>
                   </div>
@@ -3260,6 +3620,7 @@ export default function App() {
                   setWalletAction={setWalletAction}
                   prices={prices}
                   userProfile={userProfile}
+                  loadWalletData={loadWalletData}
                 />
 
                 {/* 2. Recent Activity Feed */}

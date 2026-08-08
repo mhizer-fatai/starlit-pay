@@ -37,24 +37,21 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON public.users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
 CREATE INDEX IF NOT EXISTS idx_payment_links_commitment ON public.payment_links(commitment);
 
--- Set up Row Level Security (RLS) if required
--- For simplicity in this real app backend-to-database connection, we bypass RLS or allow service role access.
--- If client-side direct access is desired, RLS policies can be defined here.
+-- Set up Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_links ENABLE ROW LEVEL SECURITY;
 
--- Simple public policies allowing read/write operations (since backend will authenticate via API keys)
-CREATE POLICY "Allow public read access to profiles" ON public.users
-    FOR SELECT USING (true);
+-- Restrict policies to backend service role to prevent unauthorized direct client queries via anon key
+DROP POLICY IF EXISTS "Allow public read access to profiles" ON public.users;
+DROP POLICY IF EXISTS "Allow service insert/update profiles" ON public.users;
+DROP POLICY IF EXISTS "Allow public select payment links" ON public.payment_links;
+DROP POLICY IF EXISTS "Allow service insert/update payment links" ON public.payment_links;
 
-CREATE POLICY "Allow service insert/update profiles" ON public.users
-    FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access to users" ON public.users
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
 
-CREATE POLICY "Allow public select payment links" ON public.payment_links
-    FOR SELECT USING (true);
-
-CREATE POLICY "Allow service insert/update payment links" ON public.payment_links
-    FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Service role full access to payment links" ON public.payment_links
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- Create Encrypted Transactions Table
 CREATE TABLE IF NOT EXISTS public.transactions (
@@ -67,9 +64,10 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 -- Enable RLS and create security policies
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Allow public select transactions" ON public.transactions
-    FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Allow public select transactions" ON public.transactions;
+DROP POLICY IF EXISTS "Allow service insert transactions" ON public.transactions;
 
-CREATE POLICY "Allow service insert transactions" ON public.transactions
-    FOR INSERT WITH CHECK (true);
+CREATE POLICY "Service role full access to transactions" ON public.transactions
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 

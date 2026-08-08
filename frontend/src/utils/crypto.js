@@ -138,7 +138,7 @@ export function decryptNote(encryptedPayload, myViewingSecretKeyHex) {
 /**
  * Encrypts the master seed locally with the user's PIN for browser local storage
  */
-export async function encryptSeedLocally(seedHex, pin) {
+export async function encryptSeedLocally(seedHex, pin, email = "") {
   const pinHash = await sha256(pin);
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -148,11 +148,16 @@ export async function encryptSeedLocally(seedHex, pin) {
     ["deriveKey"]
   );
   
+  // Use email-derived salt if provided, otherwise standard prefix salt
+  const saltBytes = email
+    ? await sha256(`starlit-salt:${email.toLowerCase().trim()}`)
+    : stringToBytes("starlit-salt");
+
   const aesKey = await crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt: stringToBytes("starlit-salt"),
-      iterations: 10000,
+      salt: saltBytes,
+      iterations: 600000,
       hash: "SHA-256"
     },
     keyMaterial,
@@ -177,43 +182,53 @@ export async function encryptSeedLocally(seedHex, pin) {
 /**
  * Decrypts the master seed from browser local storage using the user's PIN
  */
-export async function decryptSeedLocally(encryptedData, pin) {
+export async function decryptSeedLocally(encryptedData, pin, email = "") {
+  if (!encryptedData || !encryptedData.iv || !encryptedData.ciphertext) return null;
   const { iv, ciphertext } = encryptedData;
   const pinHash = await sha256(pin);
-  
-  try {
-    const keyMaterial = await crypto.subtle.importKey(
-      "raw",
-      pinHash,
-      { name: "PBKDF2" },
-      false,
-      ["deriveKey"]
-    );
-    
-    const aesKey = await crypto.subtle.deriveKey(
-      {
-        name: "PBKDF2",
-        salt: stringToBytes("starlit-salt"),
-        iterations: 10000,
-        hash: "SHA-256"
-      },
-      keyMaterial,
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["encrypt", "decrypt"]
-    );
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: hexToBytes(iv) },
-      aesKey,
-      hexToBytes(ciphertext)
-    );
-    
-    return new TextDecoder().decode(decrypted);
-  } catch (error) {
-    console.error("Local decryption failed: incorrect PIN");
-    return null;
+
+  const saltsToTry = [];
+  if (email) {
+    saltsToTry.push(await sha256(`starlit-salt:${email.toLowerCase().trim()}`));
   }
+  saltsToTry.push(stringToBytes("starlit-salt"));
+
+  for (const saltBytes of saltsToTry) {
+    try {
+      const keyMaterial = await crypto.subtle.importKey(
+        "raw",
+        pinHash,
+        { name: "PBKDF2" },
+        false,
+        ["deriveKey"]
+      );
+
+      const aesKey = await crypto.subtle.deriveKey(
+        {
+          name: "PBKDF2",
+          salt: saltBytes,
+          iterations: 600000,
+          hash: "SHA-256"
+        },
+        keyMaterial,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+      );
+
+      const decrypted = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv: hexToBytes(iv) },
+        aesKey,
+        hexToBytes(ciphertext)
+      );
+
+      return new TextDecoder().decode(decrypted);
+    } catch (e) {
+      // Continue to next salt candidate
+    }
+  }
+
+  return null;
 }
 
 /**

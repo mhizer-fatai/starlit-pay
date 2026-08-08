@@ -3,6 +3,7 @@ import { app, supabase } from "./config.js";
 // Retrieves symmetric encrypted transaction records for a specific user ID
 app.get("/api/transactions/:userId", async (req, res) => {
   const { userId } = req.params;
+
   try {
     const { data: txs, error } = await supabase
       .from("transactions")
@@ -11,10 +12,10 @@ app.get("/api/transactions/:userId", async (req, res) => {
       .order("created_at", { ascending: false });
 
     if (error) throw error;
-    res.status(200).json({ transactions: txs });
+    res.status(200).json({ transactions: txs || [] });
   } catch (error) {
     console.error("Fetch transactions error:", error.message);
-    res.status(500).json({ error: "Failed to fetch transaction history" });
+    res.status(500).json({ error: "Failed to fetch transaction history", transactions: [] });
   }
 });
 
@@ -24,6 +25,7 @@ app.post("/api/transactions", async (req, res) => {
   if (!user_id || !encrypted_payload) {
     return res.status(400).json({ error: "Missing required parameters to log transaction." });
   }
+
   try {
     const { data: tx, error } = await supabase
       .from("transactions")

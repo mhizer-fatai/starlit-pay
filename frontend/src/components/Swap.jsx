@@ -117,9 +117,24 @@ export default function Swap({ shieldedBalances, prices, onClose, onExecuteSwap,
               <ArrowDownUp size={20} />
             </div>
             <div>
-              <h3 style={{ fontSize: "18px", fontWeight: "700", color: "var(--text-primary)", margin: 0 }}>
-                Private Asset Swap
-              </h3>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <h3 style={{ fontSize: "18px", fontWeight: "700", color: "var(--text-primary)", margin: 0 }}>
+                  Private Asset Swap
+                </h3>
+                <span style={{
+                  background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+                  color: "#FFFFFF",
+                  fontSize: "9px",
+                  fontWeight: "800",
+                  padding: "2px 7px",
+                  borderRadius: "10px",
+                  letterSpacing: "0.5px",
+                  textTransform: "uppercase",
+                  boxShadow: "0 2px 8px rgba(109, 40, 217, 0.4)"
+                }}>
+                  Coming Soon
+                </span>
+              </div>
               <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Instant XLM ↔ USDC Exchange</span>
             </div>
           </div>
@@ -343,7 +358,7 @@ export default function Swap({ shieldedBalances, prices, onClose, onExecuteSwap,
         {/* Submit Swap Button */}
         <button 
           onClick={handleConfirmSwap}
-          disabled={loading || !fromAmount}
+          disabled={true}
           className="btn-primary"
           style={{
             width: "100%",
@@ -351,25 +366,18 @@ export default function Swap({ shieldedBalances, prices, onClose, onExecuteSwap,
             borderRadius: "14px",
             fontSize: "15px",
             fontWeight: "700",
-            cursor: loading || !fromAmount ? "not-allowed" : "pointer",
-            opacity: loading || !fromAmount ? 0.6 : 1,
+            cursor: "not-allowed",
+            opacity: 0.65,
+            background: "linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%)",
+            border: "none",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             gap: "8px"
           }}
         >
-          {loading ? (
-            <>
-              <RefreshCw size={18} className="animate-spin" />
-              <span>Swapping Assets...</span>
-            </>
-          ) : (
-            <>
-              <ArrowDownUp size={18} />
-              <span>Swap {fromAsset} for {toAsset}</span>
-            </>
-          )}
+          <ArrowDownUp size={18} />
+          <span>Swap Feature Coming Soon</span>
         </button>
 
         {/* Security Notice */}

@@ -1,11 +1,16 @@
 import { app, supabase } from "./config.js";
+import { requireAuth } from "./auth.js";
 
 // Create a payment link record
-app.post("/api/payment-links", async (req, res) => {
+app.post("/api/payment-links", requireAuth, async (req, res) => {
   const { creator_id, amount, asset, commitment, description } = req.body;
 
   if (!creator_id || !amount || !commitment) {
     return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  if (req.user.id !== creator_id) {
+    return res.status(403).json({ error: "Forbidden: Cannot create payment link for another user." });
   }
 
   try {

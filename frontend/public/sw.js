@@ -32,29 +32,9 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Intercepts fetch requests and attempts to load from network first, falling back to cache if offline
+// Intercepts fetch requests (bypasses cache completely)
 self.addEventListener("fetch", (event) => {
-  // Only intercept GET requests of HTTP/HTTPS schemes from our own origin
-  if (event.request.method !== "GET" || !event.request.url.startsWith(self.location.origin)) {
-    return;
-  }
-
-  event.respondWith(
-    fetch(event.request)
-      .then((networkResponse) => {
-        // Cache the retrieved resource if it is a successful GET request
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      })
-      .catch(() => {
-        return caches.match(event.request);
-      })
-  );
+  return;
 });
 
 // Listens for push notification events and triggers native system display alerts

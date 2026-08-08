@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -8,6 +9,36 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// CORS Security Options
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim());
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== "production") {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS policy violation: Origin not allowed."));
+      }
+    },
+    credentials: true
+  })
+);
+
+// Global API Rate Limiter (Max 200 requests per 15 minutes per IP)
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests from this IP, please try again later." }
+});
+app.use("/api/", globalLimiter);
+
+app.use(express.json());
 
 // Configures Horizon and Soroban RPC clients
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org";
@@ -40,10 +71,6 @@ if (process.env.GATEWAY_SECRET_KEY) {
     console.error("Invalid GATEWAY_SECRET_KEY configured:", err.message);
   }
 }
-
-// Middlewares
-app.use(cors());
-app.use(express.json());
 
 // Initialize Supabase Client
 const supabaseUrl = process.env.SUPABASE_URL;

@@ -1,4 +1,37 @@
+import jwt from "jsonwebtoken";
 import { app, supabase } from "./config.js";
+
+const JWT_SECRET = process.env.JWT_SECRET || "starlit_secret_key_change_in_prod";
+
+/**
+ * Generates a signed JWT for authenticated user sessions
+ */
+export function generateToken(user) {
+  return jwt.sign(
+    { id: user.id, email: user.email, username: user.username },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+}
+
+/**
+ * Authentication middleware verifying Bearer JWT headers
+ */
+export function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized: Missing authentication token header." });
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "Unauthorized: Invalid or expired authentication token." });
+  }
+}
 
 // 1. Authenticate user by email (Login check)
 app.post("/api/auth/login", async (req, res) => {
@@ -22,7 +55,8 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(200).json({ exists: false });
     }
 
-    res.status(200).json({ exists: true, user });
+    const token = generateToken(user);
+    res.status(200).json({ exists: true, user, token });
   } catch (error) {
     console.error("Login error:", error.message);
     res.status(500).json({ error: "Failed to authenticate user" });
@@ -84,7 +118,8 @@ app.post("/api/users/register", async (req, res) => {
       throw error;
     }
 
-    res.status(201).json({ user: newUser });
+    const token = generateToken(newUser);
+    res.status(201).json({ user: newUser, token });
   } catch (error) {
     console.error("Registration error:", error.message);
     res.status(500).json({ error: "Failed to register user" });
