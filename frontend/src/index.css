@@ -1174,54 +1174,152 @@ input:focus, select:focus {
   }
 }
 
-/* Sliding toast banner for push notifications */
-.in-app-toast-container {
+/* Unified Floating Toast Notification System (Mobile & Desktop Responsive) */
+.unified-toast-container {
   position: fixed;
-  top: 24px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 90%;
-  max-width: 450px;
-  z-index: 2000;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  margin: 0 auto;
+  max-width: 440px;
+  width: calc(100% - 32px);
+  z-index: 10000;
   pointer-events: none;
+  display: flex;
+  justify-content: center;
 }
 
-.in-app-toast {
+.unified-toast {
   pointer-events: auto;
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px 20px;
-  background: rgba(13, 13, 17, 0.85);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(78, 222, 163, 0.3);
-  border-radius: 20px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 15px rgba(78, 222, 163, 0.15);
-  animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 18px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.15);
+  animation: toastSlideDown 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-sizing: border-box;
 }
 
-.in-app-toast-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: rgba(78, 222, 163, 0.15);
+.unified-toast.toast-success {
+  background: rgba(13, 22, 20, 0.95);
+  border: 1px solid rgba(78, 222, 163, 0.35);
+  color: #FFFFFF;
+}
+
+.unified-toast.toast-error {
+  background: rgba(26, 15, 20, 0.95);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+  color: #FFFFFF;
+}
+
+.unified-toast-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #6ffbbe;
   flex-shrink: 0;
 }
 
-.in-app-toast-body {
-  flex-grow: 1;
+.toast-success .unified-toast-icon {
+  background: rgba(16, 185, 129, 0.18);
+  color: #4edea3;
 }
 
-.in-app-toast-body h4 {
-  font-size: 14px;
+.toast-error .unified-toast-icon {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fb7185;
+}
+
+.unified-toast-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.unified-toast-title {
+  font-size: 13px;
   font-weight: 700;
-  color: #ffffff;
+  color: #FFFFFF;
   margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unified-toast-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.unified-toast-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.unified-toast-close:hover {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Light Theme overrides for Toast */
+.light-theme .unified-toast.toast-success {
+  background: rgba(252, 251, 247, 0.98);
+  border: 1px solid rgba(27, 135, 93, 0.35);
+  box-shadow: 0 10px 30px rgba(160, 145, 125, 0.15);
+  color: #38332D;
+}
+
+.light-theme .unified-toast.toast-error {
+  background: rgba(252, 251, 247, 0.98);
+  border: 1px solid rgba(220, 38, 38, 0.35);
+  box-shadow: 0 10px 30px rgba(160, 145, 125, 0.15);
+  color: #38332D;
+}
+
+.light-theme .unified-toast-title {
+  color: #38332D;
+}
+
+.light-theme .unified-toast-text {
+  color: #857C70;
+}
+
+.light-theme .toast-success .unified-toast-icon {
+  background: rgba(27, 135, 93, 0.12);
+  color: #1B875D;
+}
+
+.light-theme .toast-error .unified-toast-icon {
+  background: rgba(220, 38, 38, 0.12);
+  color: #DC2626;
+}
+
+@keyframes toastSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .in-app-toast-body p {
@@ -1237,21 +1335,6 @@ input:focus, select:focus {
   cursor: pointer;
   padding: 4px;
   transition: color 0.2s ease;
-}
-
-.in-app-toast-close:hover {
-  color: #ffffff;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-40px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* --- LIGHT THEME STYLING SYSTEM (WARM BEIGE & CREAM) --- */

@@ -54,6 +54,17 @@ const BACKEND_URL = window.location.hostname === "localhost" || window.location.
   ? "http://localhost:3001"
   : "https://starlit-pay.onrender.com";
 
+// Formats Stellar addresses to 4x4 format or prefixes username
+const formatParty = (party) => {
+  if (!party) return "Starlit";
+  const str = String(party).trim();
+  if (str.startsWith("G") && str.length >= 24) {
+    return `${str.slice(0, 4)}...${str.slice(-4)}`;
+  }
+  if (str.startsWith("@")) return str;
+  return `@${str}`;
+};
+
 // Initialize Supabase Client
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://tmzmnpiiuxikfnaheugm.supabase.co";
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtem1ucGlpdXhpa2ZuYWhldWdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwNzIxNzUsImV4cCI6MjA5NzY0ODE3NX0.sAjHasXvfK8V-iosNHocHRppQVS8-1QEGt1j7Zls694";
@@ -78,7 +89,7 @@ export default function App() {
     localStorage.setItem("theme", theme);
   }, [theme]);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [inAppNotification, setInAppNotification] = useState(null);
+  const feedbackTimeoutRef = useRef(null);
 
 
 
@@ -444,6 +455,9 @@ export default function App() {
     setWalletKeys(null);
     setEmail("");
     setPin("");
+    setCooldownSeconds(0);
+    setFaucetState("idle");
+    setFaucetStatusText("");
     notifiedCommitmentsRef.current.clear();
     isFirstLoadRef.current = true;
     window.location.hash = "";
@@ -1099,25 +1113,16 @@ export default function App() {
           if (!alreadyNotified) {
             // Only trigger notifications if it is NOT the first load of the session
             if (!isFirstLoadRef.current && decrypted.sender !== userProfile.username && decrypted.sender !== "auto-merge") {
-              showFeedback("success", `You received ${parsedAmount} ${tokenCode} from @${decrypted.sender}!`);
+              const senderLabel = formatParty(decrypted.sender);
+              showFeedback("success", `You received ${parsedAmount} ${tokenCode} from ${senderLabel}`);
 
               // Triggers a native system alert popup
               if ("Notification" in window && Notification.permission === "granted") {
                 new Notification("Payment Received", {
-                  body: `You received ${parsedAmount} ${tokenCode} from @${decrypted.sender}!`,
+                  body: `You received ${parsedAmount} ${tokenCode} from ${senderLabel}`,
                   icon: "/favicon.png"
                 });
               }
-
-              // Displays a temporary custom in-app frosted glass sliding card
-              setInAppNotification({
-                amount: parsedAmount,
-                asset: tokenCode,
-                sender: decrypted.sender
-              });
-              setTimeout(() => {
-                setInAppNotification(null);
-              }, 6000);
             }
 
             // Mark this commitment as notified/known
@@ -1253,35 +1258,44 @@ export default function App() {
     }
   };
 
-  // Synchronize 4-hour cooldown timer across sessions
+  // Synchronize 4-hour cooldown timer strictly per-account across all sessions and devices
   useEffect(() => {
-    if (!userProfile?.id) return;
+    if (!userProfile?.id || !userProfile?.public_encryption_key) {
+      setCooldownSeconds(0);
+      return;
+    }
 
     const storageKey = `starlit_faucet_last_claim_${userProfile.id}`;
-    const lastClaim = parseInt(localStorage.getItem(storageKey) || "0", 10);
     const COOLDOWN_SECONDS = 4 * 60 * 60; // 4 hours
+    const lastClaim = parseInt(localStorage.getItem(storageKey) || "0", 10);
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const elapsed = nowSeconds - lastClaim;
 
     if (lastClaim && elapsed < COOLDOWN_SECONDS) {
       setCooldownSeconds(COOLDOWN_SECONDS - elapsed);
+    } else {
+      setCooldownSeconds(0);
     }
 
     const checkBackendStatus = async () => {
       try {
-        if (!userProfile.public_encryption_key) return;
-        const res = await fetch(`http://localhost:3001/api/faucet/status/${userProfile.public_encryption_key}`).catch(() => 
-          fetch(`https://starlit-pay.onrender.com/api/faucet/status/${userProfile.public_encryption_key}`)
-        );
+        const res = await fetch(`${BACKEND_URL}/api/faucet/status/${userProfile.public_encryption_key}`);
         if (res && res.ok) {
           const data = await res.json();
           if (!data.canClaim && data.remainingMs > 0) {
             const sec = Math.ceil(data.remainingMs / 1000);
             setCooldownSeconds(sec);
+            const calculatedLastClaim = Math.floor(Date.now() / 1000) - (COOLDOWN_SECONDS - sec);
+            localStorage.setItem(storageKey, calculatedLastClaim.toString());
+          } else if (data.canClaim) {
+            setCooldownSeconds(0);
+            localStorage.removeItem(storageKey);
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn("Could not check faucet backend status:", e.message);
+      }
     };
 
     checkBackendStatus();
@@ -2225,8 +2239,11 @@ export default function App() {
 
   // Helpers
   const showFeedback = (type, message) => {
+    if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
     setFeedback({ type, message });
-    setTimeout(() => setFeedback({ type: "", message: "" }), 5000);
+    feedbackTimeoutRef.current = setTimeout(() => {
+      setFeedback({ type: "", message: "" });
+    }, 4500);
   };
 
   const handleLogout = async () => {
@@ -2492,68 +2509,30 @@ export default function App() {
 
   return (
     <div className="app-fullscreen">
-      {/* Global Floating Toast Feedback Banner */}
+      {/* Single Unified Floating Toast Notification Banner */}
       {feedback.message && (
-        <div style={{
-          position: "fixed",
-          top: "24px",
-          right: "24px",
-          display: "flex",
-          alignItems: "center",
-          gap: "12px",
-          padding: "16px 24px",
-          borderRadius: "16px",
-          border: `1px solid ${feedback.type === "error" ? "var(--error-color)" : "var(--primary-accent)"}`,
-          background: feedback.type === "error" ? "rgba(244, 63, 94, 0.95)" : "rgba(78, 222, 163, 0.95)",
-          boxShadow: "0 20px 40px -15px rgba(0, 0, 0, 0.5), 0 10px 15px -10px rgba(0, 0, 0, 0.5)",
-          color: "#ffffff",
-          zIndex: 9999,
-          backdropFilter: "blur(12px)",
-          minWidth: "300px",
-          maxWidth: "450px",
-          animation: "slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1 }}>
-            {feedback.type === "error" ? (
-              <AlertCircle size={20} style={{ color: "#ffffff", flexShrink: 0 }} />
-            ) : (
-              <CheckCircle size={20} style={{ color: "#ffffff", flexShrink: 0 }} />
-            )}
-            <span style={{ fontSize: "14px", fontWeight: "600", lineHeight: "1.4" }}>
-              {feedback.message}
-            </span>
-          </div>
-          <button
-            onClick={() => setFeedback({ type: "", message: "" })}
-            style={{
-              background: "none",
-              border: "none",
-              color: "rgba(255,255,255,0.7)",
-              cursor: "pointer",
-              fontSize: "16px",
-              padding: "4px 0 4px 12px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              alignSelf: "flex-start"
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-      {/* Renders the top sliding push notification toast banner when active */}
-      {inAppNotification && (
-        <div className="in-app-toast-container">
-          <div className="in-app-toast">
-            <div className="in-app-toast-icon">
-              <Coins size={20} />
+        <div className="unified-toast-container">
+          <div className={`unified-toast ${feedback.type === "error" ? "toast-error" : "toast-success"}`}>
+            <div className="unified-toast-icon">
+              {feedback.type === "error" ? (
+                <AlertCircle size={18} />
+              ) : (
+                <CheckCircle size={18} />
+              )}
             </div>
-            <div className="in-app-toast-body">
-              <h4>Payment Received</h4>
-              <p>@{inAppNotification.sender} sent you {inAppNotification.amount} {inAppNotification.asset}</p>
+            <div className="unified-toast-body">
+              <h4 className="unified-toast-title">
+                {feedback.type === "error" ? "Notice" : "Payment Received"}
+              </h4>
+              <p className="unified-toast-text">{feedback.message}</p>
             </div>
-            <button onClick={() => setInAppNotification(null)} className="in-app-toast-close">✕</button>
+            <button
+              onClick={() => setFeedback({ type: "", message: "" })}
+              className="unified-toast-close"
+              aria-label="Close notification"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}

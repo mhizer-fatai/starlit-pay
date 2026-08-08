@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { app, supabase, rpc } from "./config.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
@@ -181,15 +183,67 @@ async function getLiveSorobanBalances() {
   }
 }
 
-// 4-Hour Cooldown tracker (4 hours in milliseconds)
+// Persistent 4-Hour Cooldown tracker (4 hours in milliseconds)
 const FAUCET_COOLDOWN_MS = 4 * 60 * 60 * 1000;
 const faucetCooldownMap = new Map();
 
-// GET /api/faucet/status/:viewingKey - Returns cooldown status for an account
+// Helper to determine persistent storage path
+const FAUCET_STATE_FILE = path.resolve(process.cwd(), "faucet_state.json");
+
+// Load persistent claims on initialization
+try {
+  if (fs.existsSync(FAUCET_STATE_FILE)) {
+    const raw = fs.readFileSync(FAUCET_STATE_FILE, "utf8");
+    const data = JSON.parse(raw);
+    for (const [key, val] of Object.entries(data)) {
+      faucetCooldownMap.set(key, Number(val));
+    }
+  }
+} catch (e) {
+  console.warn("Could not load faucet_state.json:", e.message);
+}
+
+function saveFaucetState() {
+  try {
+    const obj = {};
+    for (const [k, v] of faucetCooldownMap.entries()) {
+      obj[k] = v;
+    }
+    fs.writeFileSync(FAUCET_STATE_FILE, JSON.stringify(obj, null, 2), "utf8");
+  } catch (e) {
+    console.warn("Could not save faucet_state.json:", e.message);
+  }
+}
+
+async function getAccountLastClaim(viewingKey) {
+  if (!viewingKey) return 0;
+  let lastClaim = faucetCooldownMap.get(viewingKey) || 0;
+
+  if (!lastClaim) {
+    try {
+      const { data: user } = await supabase
+        .from("users")
+        .select("id, stellar_address")
+        .eq("public_encryption_key", viewingKey)
+        .maybeSingle();
+
+      if (user) {
+        if (user.id && faucetCooldownMap.get(user.id)) {
+          lastClaim = faucetCooldownMap.get(user.id);
+        } else if (user.stellar_address && faucetCooldownMap.get(user.stellar_address)) {
+          lastClaim = faucetCooldownMap.get(user.stellar_address);
+        }
+      }
+    } catch (e) {}
+  }
+  return lastClaim || 0;
+}
+
+// GET /api/faucet/status/:viewingKey - Returns cooldown status strictly for this account
 app.get("/api/faucet/status/:viewingKey", async (req, res) => {
   const { viewingKey } = req.params;
 
-  const lastClaim = faucetCooldownMap.get(viewingKey) || 0;
+  const lastClaim = await getAccountLastClaim(viewingKey);
   const now = Date.now();
   const elapsed = now - lastClaim;
 
@@ -240,9 +294,9 @@ app.post("/api/faucet/fund", async (req, res) => {
       }
     }
 
-    // 3. Enforce 4-Hour Cooldown strictly per account (by viewing key & user ID)
+    // 3. Enforce 4-Hour Cooldown strictly per account
     const now = Date.now();
-    const lastClaim = faucetCooldownMap.get(viewingKey) || (user.id ? faucetCooldownMap.get(user.id) : 0) || 0;
+    const lastClaim = await getAccountLastClaim(viewingKey);
     const elapsed = now - lastClaim;
 
     if (lastClaim && elapsed < FAUCET_COOLDOWN_MS) {
@@ -323,6 +377,7 @@ app.post("/api/faucet/fund", async (req, res) => {
     faucetCooldownMap.set(viewingKey, now);
     if (user?.id) faucetCooldownMap.set(user.id, now);
     if (user?.stellar_address) faucetCooldownMap.set(user.stellar_address, now);
+    saveFaucetState();
 
     res.status(200).json({
       success: true,
