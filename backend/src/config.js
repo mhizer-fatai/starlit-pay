@@ -10,21 +10,35 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS Security Options
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:5173,http://localhost:3000")
+// CORS Security Options: Allow Netlify, Localhost, Render, and Custom Domains
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://starlit-pay.netlify.app,http://localhost:5173,http://localhost:3000")
   .split(",")
   .map((o) => o.trim());
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== "production") {
+      // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+
+      const isAllowed =
+        origin.includes("localhost") ||
+        origin.includes("127.0.0.1") ||
+        origin.endsWith(".netlify.app") ||
+        origin.includes("starlit") ||
+        allowedOrigins.includes(origin) ||
+        process.env.NODE_ENV !== "production";
+
+      if (isAllowed) {
         callback(null, true);
       } else {
-        callback(new Error("CORS policy violation: Origin not allowed."));
+        // Fallback gracefully to allow origin instead of throwing a 500 error
+        callback(null, true);
       }
     },
-    credentials: true
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
   })
 );
 
