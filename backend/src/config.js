@@ -11,7 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // CORS Security Options: Allow Netlify, Localhost, Render, and Custom Domains
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://starlit-pay.netlify.app,http://localhost:5173,http://localhost:3000")
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://starlit-pay.netlify.app,http://localhost:5173,http://localhost:5175,http://localhost:3000")
   .split(",")
   .map((o) => o.trim());
 

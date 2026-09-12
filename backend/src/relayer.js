@@ -1,6 +1,30 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import rateLimit from "express-rate-limit";
-import { app, rpc, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
+import { app, rpc, horizon, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
+import { isAddressBlocked } from "./asp_service.js";
+
+// Minimum gas threshold before alerting (in XLM)
+const MIN_RELAYER_XLM_BALANCE = 10;
+
+// Checks relayer XLM balance and alerts if low
+export async function checkRelayerBalance() {
+  if (!relayerKeypair) return null;
+  try {
+    const account = await horizon.loadAccount(relayerKeypair.publicKey());
+    const nativeBalance = account.balances.find((b) => b.asset_type === "native");
+    const balance = nativeBalance ? parseFloat(nativeBalance.balance) : 0;
+
+    if (balance < MIN_RELAYER_XLM_BALANCE) {
+      console.warn(
+        `[RELAYER GAS ALERT] Relayer account ${relayerKeypair.publicKey()} balance is LOW: ${balance} XLM. Please top up.`
+      );
+    }
+    return balance;
+  } catch (err) {
+    console.error("Failed to check relayer balance:", err.message);
+    return null;
+  }
+}
 
 // Rate Limiter for Relayer Gas Endpoints (Max 20 requests per 15 minutes per IP)
 const relayerLimiter = rateLimit({
@@ -27,6 +51,10 @@ app.post("/api/relayer/submit", relayerLimiter, async (req, res) => {
 
   if (!proof || !nullifier || !recipient || !token || !amount || !root) {
     return res.status(400).json({ error: "Missing parameters for transaction submission." });
+  }
+
+  if (await isAddressBlocked(recipient)) {
+    return res.status(403).json({ error: "Recipient address is restricted under compliance policy." });
   }
 
   if (!relayerKeypair) {
@@ -221,6 +249,10 @@ app.post("/api/relayer/withdraw", relayerLimiter, async (req, res) => {
     return res.status(400).json({ error: "Missing parameters for withdraw transaction submission." });
   }
 
+  if (await isAddressBlocked(recipient)) {
+    return res.status(403).json({ error: "Recipient address is restricted under compliance policy." });
+  }
+
   if (!relayerKeypair) {
     return res.status(500).json({ error: "Relayer not initialized on the server." });
   }
@@ -284,6 +316,7 @@ app.post("/api/relayer/withdraw", relayerLimiter, async (req, res) => {
     }
 
     if (txResult.status === "SUCCESS") {
+      checkRelayerBalance().catch(() => {});
       res.status(200).json({ success: true, hash: response.hash, ledger: txResult.ledger });
     } else {
       throw new Error(`Transaction finished with status: ${txResult.status}`);
@@ -293,4 +326,20 @@ app.post("/api/relayer/withdraw", relayerLimiter, async (req, res) => {
     res.status(500).json({ error: error.message || "Failed to submit withdraw transaction via Relayer." });
   }
 });
+
+// Endpoint to monitor relayer health and gas balance
+app.get("/api/relayer/health", async (req, res) => {
+  if (!relayerKeypair) {
+    return res.status(503).json({ status: "unavailable", error: "Relayer keypair not configured." });
+  }
+
+  const balance = await checkRelayerBalance();
+  res.json({
+    status: "ok",
+    address: relayerKeypair.publicKey(),
+    balanceXlm: balance,
+    isLowGas: balance !== null && balance < MIN_RELAYER_XLM_BALANCE,
+  });
+});
+
 

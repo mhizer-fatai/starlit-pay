@@ -16,10 +16,11 @@ graph LR
     A[Phase 1.1: Core Protocol & Contracts] --> B[Phase 1.2: Client Cryptography & Key Management]
     B --> C[Phase 1.3: Gasless Relayer & Gateway]
     C --> D[Phase 1.4: Frontend UI & Polish]
-    D --> E[Phase 1.5: Production ZK Verifier & Audit]
+    D --> E[Phase 1.5: Nethermind SPP & ZK Proofs]
+    E --> F[Phase 1.6: Private Asset Swaps & Mainnet Launch]
 ```
 
-### Milestone 1.1: Core Protocol & Contracts (In Progress)
+### Milestone 1.1: Core Protocol & Contracts (Completed)
 - [x] Soroban Shielded Pool smart contract (`contracts/src/pool.rs`).
 - [x] Fixed depth-20 Merkle tree (up to 1,048,576 commitments).
 - [x] Double-spend prevention via on-chain nullifiers.
@@ -43,14 +44,20 @@ graph LR
 - [x] Smart receipts with live Stellar.expert explorer integration.
 - [x] Desktop Activities navigation tab and transaction feed.
 
-### Milestone 1.5: Private Asset Swaps (Active Focus)
+### Milestone 1.5: Nethermind SPP Integration & Production ZK Proofs (IMMEDIATE ACTIVE FOCUS)
+- [ ] Adopt and deploy Nethermind's **Stellar Private Payments (SPP)** contract suite:
+  - Deploy dedicated on-chain **Circom Groth16 Verifier** contract.
+  - Deploy modular **Shielded Pool Contract** with optimized Soroban storage & TTL management.
+  - Deploy **ASP (Association Set Provider)** contracts for KYC membership & Sparse Merkle Tree (SMT) exclusion safeguards.
+- [ ] Integrate Nethermind's `@stellar-private-payments` JS/TS SDK and Circom WASM artifacts into frontend (`frontend/src/utils/zk.js`).
+- [ ] Bridge Starlit's Web2-style Email & PIN key derivation with SPP's note commitment, nullifier, and proof inputs.
+- [ ] Update backend relayer and gateway to submit and sponsor transactions to the new modular SPP contracts.
+- [ ] Verify complete end-to-end deposit, transfer, and withdrawal flow with on-chain ZK verification on Stellar Testnet.
+
+### Milestone 1.6: Private Asset Swaps & Mainnet Launch (Upcoming)
 - [ ] Private asset swap interface (`Swap.jsx`) for XLM ↔ USDC exchange.
 - [ ] Real-time price calculation and slippage tolerance controls.
 - [ ] Direct liquidity execution via Stellar DEX / Soroban AMM pools while preserving note privacy.
-
-### Milestone 1.6: Production ZK Proofs & Mainnet Launch (Upcoming)
-- [ ] Replace prototype ZK module (`zk.js`) with production Circom / Groth16 circuits.
-- [ ] On-chain proof verification function inside Soroban pool contract.
 - [ ] Smart contract security audit and stress testing on Stellar Mainnet.
 
 ---
@@ -80,8 +87,9 @@ graph LR
 - **B2B Invoicing & Vendor Payouts:** Private settlement of supply chain contracts to protect sensitive commercial pricing.
 - **Multi-Sig & Role-Based Access Control (RBAC):** Enterprise team permissioning for treasury approvals.
 
-### Milestone 2.4: Identity Registries & Policy Engines
-- Pluggable identity engines enforcing mandatory KYC/AML allowlists for business counterparties.
+### Milestone 2.4: Identity Registries & Policy Engines (Nethermind ASP Model)
+- Pluggable Association Set Providers (ASPs) enforcing KYC/AML allowlists via Merkle membership trees.
+- Real-time address sanctions and freeze lists via Sparse Merkle Trees (SMTs).
 - Automated tax documentation export and regulatory compliance logging.
 
 ---
@@ -91,7 +99,7 @@ graph LR
 | Metric | Starlit Pay (Phase 1) | Starlit Business (Phase 2) |
 | :--- | :--- | :--- |
 | **Primary Audience** | Individual Consumers / P2P | Enterprises, Startups, B2B |
-| **Privacy Scope** | **Full Anonymity** (Sender, Receiver, Amount hidden) | **Confidentiality** (Amount hidden, Identities verified) |
-| **Underlying Cryptography** | Soroban Shielded Merkle Pool (Groth16) | OpenZeppelin Confidential Tokens (UltraHonk / Pedersen) |
-| **Auditability** | Personal viewing keys | Institutional Auditor View Keys & Selective Disclosure |
+| **Privacy Scope** | **Confidential & Anonymous P2P** (Sender, Receiver, Amount hidden) | **Confidential Enterprise** (Amount hidden, Identities verified) |
+| **Underlying Cryptography** | Nethermind SPP Modular Pool (Circom + Groth16) | OpenZeppelin Confidential Tokens / Nethermind ASPs |
+| **Compliance & Controls** | Personal viewing keys & non-membership proof | Institutional ASP allowlists, Auditor View Keys, & SMT freeze |
 | **Status** | **Active Development** | **Planned Future Horizon** |

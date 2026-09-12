@@ -18,10 +18,13 @@ On-chain, it looks like a single large pool of assets. No one can see your balan
 
 ## 🛠️ Tech Stack & Architecture
 
-*   **Smart Contracts**: Rust (`soroban-sdk` v25.0.1) utilizing native BN254 and SHA256 host functions.
-*   **ZK Prover**: Noir Lang (UltraHonk on BN254) running in browser WebAssembly.
+*   **Smart Contracts**: Rust (`soroban-sdk` v25+) implementing the **Nethermind Stellar Private Payments (SPP)** modular architecture:
+    *   `pool`: Shielded UTXO note pool with TTL state management.
+    *   `verifier`: Dedicated on-chain Circom Groth16 Verifier.
+    *   `asp`: Association Set Providers (Merkle membership & SMT exclusion trees).
+*   **ZK Prover**: Circom + Groth16 (compiled to WASM via snarkjs / `@stellar-private-payments` SDK) running in-browser.
 *   **Frontend**: React + Vite + Vanilla CSS (Glassmorphism design system).
-*   **Backend Database Router**: Node.js + Express + Supabase Client (managing user registries and profile lookups).
+*   **Backend Database Router**: Node.js + Express + Supabase Client (managing user registries, gasless transaction relaying, and note indexing).
 
 ---
 

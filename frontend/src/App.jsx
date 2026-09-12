@@ -1030,10 +1030,23 @@ export default function App() {
     try {
 
 
-      // Fetch transaction history
-      const txsRes = await fetch(`${BACKEND_URL}/api/transactions/${userProfile.id}`);
-      const txsData = await txsRes.json();
+      // Parallelize transaction history and shielded notes fetches
+      const timestamp = Date.now().toString();
+      const signatureBytes = walletKeys.stellar.keypair.sign(new TextEncoder().encode(timestamp));
+      const signature = bytesToHex(signatureBytes);
+
+      const [txsRes, notesRes] = await Promise.all([
+        fetch(`${BACKEND_URL}/api/transactions/${userProfile.id}`),
+        fetch(`${BACKEND_URL}/api/notes/${walletKeys.viewing.publicKey}?timestamp=${timestamp}&signature=${signature}`)
+      ]);
+
+      const [txsData, notesData] = await Promise.all([
+        txsRes.json(),
+        notesRes.json()
+      ]);
+
       const dbTxs = txsData.transactions || [];
+      const cachedNotes = notesData.notes || [];
 
       const decryptedTxs = [];
       const loggedCommitments = new Set();
@@ -1048,15 +1061,6 @@ export default function App() {
           }
         }
       }
-
-      // Fetch unspent commitments from backend database notes cache
-      const timestamp = Date.now().toString();
-      const signatureBytes = walletKeys.stellar.keypair.sign(new TextEncoder().encode(timestamp));
-      const signature = bytesToHex(signatureBytes);
-
-      const notesRes = await fetch(`${BACKEND_URL}/api/notes/${walletKeys.viewing.publicKey}?timestamp=${timestamp}&signature=${signature}`);
-      const notesData = await notesRes.json();
-      const cachedNotes = notesData.notes || [];
 
       const decryptedNotes = [];
       const balanceSum = { XLM: 0, USDC: 0 };
@@ -1073,19 +1077,18 @@ export default function App() {
 
         if (decrypted) {
           const tokenCode = decrypted.asset || "USDC";
-
           const parsedAmount = parseFloat(decrypted.amount);
           const noteRoot = note.root;
 
-          // Add to balance immediately, even if pending indexer confirmation
+          // Add to balance immediately
           balanceSum[tokenCode] += parsedAmount;
 
-          // Log received transaction if not already done
+          // Log received transaction in background if not already recorded
           if (decrypted.sender !== userProfile.username && decrypted.sender !== "auto-merge") {
             if (!loggedCommitments.has(note.commitment)) {
               const isDeposit = decrypted.sender === "deposit" || decrypted.sender.startsWith("G");
               const txType = isDeposit ? "Deposit" : "Deposited";
-              await logTransaction(
+              logTransaction(
                 txType,
                 parsedAmount,
                 tokenCode,
@@ -1093,7 +1096,8 @@ export default function App() {
                 "",
                 note.commitment,
                 new Date(note.created_at).getTime()
-              );
+              ).catch(() => {});
+
               decryptedTxs.unshift({
                 type: txType,
                 amount: parsedAmount,
@@ -1177,22 +1181,29 @@ export default function App() {
          console.error("Failed to cache wallet data:", e);
        }
 
-      // Populate Recently Contacted list from transaction history
+       // Unblock UI immediately so user sees their private balance with zero delay
+       if (!isSilent) {
+         setLoading(false);
+       }
+
+      // Populate Recently Contacted list ONLY from users the current user has sent money to
       const recentUsernames = [];
       const seenUsernames = new Set();
 
       for (const tx of uniqueTxs) {
-        const party = tx.party;
-        if (
-          party &&
-          party !== "deposit" &&
-          !party.startsWith("G") &&
-          party.toLowerCase() !== userProfile.username.toLowerCase()
-        ) {
-          const lowerParty = party.toLowerCase();
-          if (!seenUsernames.has(lowerParty)) {
-            seenUsernames.add(lowerParty);
-            recentUsernames.push(party);
+        if (tx.type === "Sent" && tx.party) {
+          const party = tx.party.trim();
+          if (
+            party &&
+            party !== "deposit" &&
+            !party.startsWith("G") &&
+            party.toLowerCase() !== userProfile.username.toLowerCase()
+          ) {
+            const lowerParty = party.toLowerCase();
+            if (!seenUsernames.has(lowerParty)) {
+              seenUsernames.add(lowerParty);
+              recentUsernames.push(party);
+            }
           }
         }
         if (recentUsernames.length >= 10) break;
@@ -1211,36 +1222,11 @@ export default function App() {
             const profile = profileMap.get(username.toLowerCase());
             if (profile) {
               recentContacts.push(profile);
+            } else {
+              recentContacts.push({ username, display_name: username });
             }
           }
         }
-      }
-
-      // If we don't have enough recent contacts, fill the rest with registered users
-      const { data: dbUsers } = await supabase
-        .from("users")
-        .select("username, display_name, avatar_url, stellar_address")
-        .neq("username", userProfile.username)
-        .limit(20);
-
-      if (dbUsers && dbUsers.length > 0) {
-        const existingUsernames = new Set(recentContacts.map(c => c.username.toLowerCase()));
-        for (const user of dbUsers) {
-          if (!existingUsernames.has(user.username.toLowerCase())) {
-            recentContacts.push(user);
-            existingUsernames.add(user.username.toLowerCase());
-          }
-          if (recentContacts.length >= 10) break;
-        }
-      }
-
-      // Fallback to static users if database is empty/inaccessible
-      if (recentContacts.length === 0) {
-        recentContacts = [
-          { username: "alice", display_name: "Alice Vance", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=alice" },
-          { username: "bob", display_name: "Bob Stone", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=bob" },
-          { username: "charlie", display_name: "Charlie Day", avatar_url: "https://api.dicebear.com/7.x/bottts/svg?seed=charlie" }
-        ];
       }
 
       setContacts(recentContacts);
@@ -3384,23 +3370,25 @@ export default function App() {
                   </button>
                 </div>
 
-                <div>
-                  <h4 style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", marginBottom: "12px", paddingLeft: "4px" }}>Recently Contacted</h4>
-                  <div className="contact-list">
-                    {contacts.map((contact, idx) => (
-                      <div
-                        key={idx}
-                        className="contact-item"
-                        onClick={() => setSendRecipient(contact.username)}
-                      >
-                        <div className="contact-avatar">
-                          {contact.display_name?.substring(0, 2).toUpperCase() || contact.username.substring(0, 2).toUpperCase()}
+                {contacts && contacts.length > 0 && (
+                  <div>
+                    <h4 style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", marginBottom: "12px", paddingLeft: "4px" }}>Recently Contacted</h4>
+                    <div className="contact-list">
+                      {contacts.map((contact, idx) => (
+                        <div
+                          key={idx}
+                          className="contact-item"
+                          onClick={() => setSendRecipient(contact.username)}
+                        >
+                          <div className="contact-avatar">
+                            {contact.display_name?.substring(0, 2).toUpperCase() || contact.username.substring(0, 2).toUpperCase()}
+                          </div>
+                          <div className="contact-name">{contact.display_name || contact.username}</div>
                         </div>
-                        <div className="contact-name">{contact.display_name || contact.username}</div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
 

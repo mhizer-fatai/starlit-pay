@@ -91,23 +91,25 @@ export default function Send({
       </button>
 
       {/* Renders horizontal scroll of frequently used contact shortcuts */}
-      <div style={{ marginTop: "24px" }}>
-        <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", display: "block", marginBottom: "12px" }}>Recently Contacted</span>
-        <div className="contact-list">
-          {contacts.map((contact, idx) => (
-            <div 
-              key={idx} 
-              className="contact-item" 
-              onClick={() => setSendRecipient(contact.username)}
-            >
-              <div className="contact-avatar">
-                {contact.display_name?.substring(0, 2).toUpperCase() || contact.username.substring(0, 2).toUpperCase()}
+      {contacts && contacts.length > 0 && (
+        <div style={{ marginTop: "24px" }}>
+          <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)", display: "block", marginBottom: "12px" }}>Recently Contacted</span>
+          <div className="contact-list">
+            {contacts.map((contact, idx) => (
+              <div 
+                key={idx} 
+                className="contact-item" 
+                onClick={() => setSendRecipient(contact.username)}
+              >
+                <div className="contact-avatar">
+                  {contact.display_name?.substring(0, 2).toUpperCase() || contact.username.substring(0, 2).toUpperCase()}
+                </div>
+                <div className="contact-name">{contact.display_name || contact.username}</div>
               </div>
-              <div className="contact-name">{contact.display_name || contact.username}</div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

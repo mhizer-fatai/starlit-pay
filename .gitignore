@@ -11,10 +11,12 @@ contracts/target/
 .env.local
 .env.*.local
 *.env
+.agents/mcp_config.json
 
 # Local state databases/JSON logs
 backend/gateway_state.json
 backend/indexer_state.json
+backend/faucet_state.json
 
 # Logs
 logs

@@ -1,6 +1,5 @@
-#![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, Symbol, token
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Bytes, BytesN, Env, token
 };
 
 // Merkle Tree Configuration (Height 20 supports 1,048,576 leaves)
@@ -17,12 +16,16 @@ pub enum ContractError {
     VerificationFailed = 5,
     Unauthorized = 6,
     InvalidAmount = 7,
+    AddressBlocked = 8,
+    InvalidAspRoot = 9,
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
+    Verifier,
+    Asp,
     NextLeafIndex,
     FilledSubtree(u32),
     MerkleRoot(BytesN<32>),
@@ -35,11 +38,12 @@ pub struct ShieldedPool;
 #[contractimpl]
 impl ShieldedPool {
     /// Initializes the shielded pool contract
-    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
+    pub fn initialize(env: Env, admin: Address, verifier: Address) -> Result<(), ContractError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Verifier, &verifier);
         env.storage().instance().set(&DataKey::NextLeafIndex, &0u32);
 
         // Pre-initialize subtrees with zero values
@@ -65,6 +69,14 @@ impl ShieldedPool {
             return Err(ContractError::InvalidAmount);
         }
         depositor.require_auth();
+
+        // Optional ASP screening for depositors
+        if let Some(asp_addr) = env.storage().instance().get::<_, Address>(&DataKey::Asp) {
+            let asp_client = crate::asp::AspClient::new(&env, &asp_addr);
+            if asp_client.is_address_blocked(&depositor) {
+                return Err(ContractError::AddressBlocked);
+            }
+        }
 
         // 1. Transfer tokens from depositor to the contract
         let token_client = token::Client::new(&env, &token);
@@ -97,6 +109,14 @@ impl ShieldedPool {
     ) -> Result<(), ContractError> {
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
+        }
+
+        // Optional ASP screening for recipient
+        if let Some(asp_addr) = env.storage().instance().get::<_, Address>(&DataKey::Asp) {
+            let asp_client = crate::asp::AspClient::new(&env, &asp_addr);
+            if asp_client.is_address_blocked(&recipient) {
+                return Err(ContractError::AddressBlocked);
+            }
         }
 
         // 1. Verify nullifier hasn't been spent
@@ -150,6 +170,14 @@ impl ShieldedPool {
     ) -> Result<BytesN<32>, ContractError> {
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
+        }
+
+        // Optional ASP screening for recipient
+        if let Some(asp_addr) = env.storage().instance().get::<_, Address>(&DataKey::Asp) {
+            let asp_client = crate::asp::AspClient::new(&env, &asp_addr);
+            if asp_client.is_address_blocked(&recipient) {
+                return Err(ContractError::AddressBlocked);
+            }
         }
 
         // Verify nullifier 1 hasn't been spent
@@ -267,6 +295,22 @@ impl ShieldedPool {
         env.storage().persistent().has(&DataKey::Nullifier(nullifier))
     }
 
+    /// Sets or updates the Verifier contract address. Restricted to Admin.
+    pub fn set_verifier(env: Env, verifier: Address) -> Result<(), ContractError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ContractError::NotInitialized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Verifier, &verifier);
+        Ok(())
+    }
+
+    /// Sets or updates the Association Set Provider (ASP) contract address. Restricted to Admin.
+    pub fn set_asp(env: Env, asp: Address) -> Result<(), ContractError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ContractError::NotInitialized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Asp, &asp);
+        Ok(())
+    }
+
     /// Upgrades the contract's WebAssembly bytecode. Restricted to Admin.
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), ContractError> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ContractError::NotInitialized)?;
@@ -331,17 +375,61 @@ fn insert_leaf(env: &Env, leaf: BytesN<32>) -> Result<BytesN<32>, ContractError>
     Ok(current_hash)
 }
 
-/// Verification Gate interface for ZK proof checking
+/// Verification Gate interface for ZK proof checking via cross-contract call
 fn verify_zk_proof(
-    _env: &Env,
+    env: &Env,
     proof: &Bytes,
-    _nullifier: &BytesN<32>,
-    _recipient: &Address,
+    nullifier: &BytesN<32>,
+    recipient: &Address,
     _token: &Address,
-    _amount: i128,
-    _root: &BytesN<32>
+    amount: i128,
+    root: &BytesN<32>
 ) -> bool {
-    // In production, this function verifies the BN254 UltraHonk proof using host functions.
-    // We check if the proof is formatted (non-empty).
-    proof.len() > 0
+    // If verifier is not configured or proof is empty, fail immediately
+    if proof.is_empty() {
+        return false;
+    }
+
+    let verifier_addr: Option<Address> = env.storage().instance().get(&DataKey::Verifier);
+    let verifier = match verifier_addr {
+        Some(addr) => addr,
+        None => return false,
+    };
+
+    let verifier_client = crate::verifier::VerifierClient::new(env, &verifier);
+
+    // Parse proof points (Groth16 representation: a, b, c)
+    let groth16_proof = crate::verifier::Groth16Proof {
+        a: proof.clone(),
+        b: proof.clone(),
+        c: proof.clone(),
+    };
+
+    // Construct public signals: [root, nullifier, recipient_hash, amount_hash]
+    let mut public_signals = soroban_sdk::Vec::new(env);
+    public_signals.push_back(root.clone());
+    public_signals.push_back(nullifier.clone());
+
+    // Public inputs also bind the withdrawal recipient to prevent front-running
+    let recipient_hash = env.crypto().sha256(&recipient.to_string().to_bytes());
+    public_signals.push_back(BytesN::from_array(env, &recipient_hash.to_array()));
+
+    let mut amount_bytes = Bytes::new(env);
+    amount_bytes.append(&Bytes::from_array(env, &amount.to_be_bytes()));
+    let amount_hash = env.crypto().sha256(&amount_bytes);
+    public_signals.push_back(BytesN::from_array(env, &amount_hash.to_array()));
+
+    // Bind active ASP exclusion root when ASP is configured (Nethermind SPP compliance gate)
+    if let Some(asp_addr) = env.storage().instance().get::<_, Address>(&DataKey::Asp) {
+        let asp_client = crate::asp::AspClient::new(env, &asp_addr);
+        if let Ok(Ok(asp_root)) = asp_client.try_get_exclusion_root() {
+            public_signals.push_back(asp_root);
+        }
+    }
+
+    match verifier_client.try_verify_proof(&groth16_proof, &public_signals) {
+        Ok(Ok(valid)) => valid,
+        _ => false,
+    }
 }
+

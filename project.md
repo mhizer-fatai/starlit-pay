@@ -62,18 +62,20 @@ A note is a JSON payload: `{"amount": "100", "asset": "USDC", "secret": "hex..."
 
 ---
 
-## 🛠️ Soroban Smart Contract (`contracts/src/pool.rs`)
+## 🛠️ Soroban Smart Contract Architecture (Nethermind SPP Suite)
 
-The contract maintains the ledger state of the private pool.
+The smart contract layer transitions to Nethermind's modular **Stellar Private Payments (SPP)** suite, splitting state, verification, and compliance policies across dedicated contracts:
 
-*   **Merkle Tree Configuration:** `TREE_DEPTH = 20`, supporting up to **1,048,576 leaf commitments**.
-*   **Nullifiers:** A unique hash derived from a note that is published on-chain when a note is spent. Prevents double-spending.
+1.  **Shielded Pool Contract:** Maintains the core UTXO state machine, incremental Merkle tree of note commitments (`TREE_DEPTH = 20`), and double-spend nullifier records with automated Soroban TTL state management.
+2.  **Circom Groth16 Verifier Contract:** Independent verifier contract utilizing native Soroban host functions to verify ZK proofs on-chain.
+3.  **ASP Membership Contract (Allow-list):** Maintained by Association Set Providers to enforce verified user participation without revealing individual addresses.
+4.  **ASP Exclusion Contract (Freeze / Block-list):** Employs Sparse Merkle Trees (SMTs) to freeze sanctioned or illicit accounts at the identity level.
 
-### Core Entry Points
-1.  `deposit(env, depositor, asset, amount, commitment)`: Transfer tokens from public depositor to the pool, and append the commitment to the Merkle tree.
-2.  `withdraw(env, proof, nullifier, recipient, token, amount, root)`: Verify ZK proof, ensure nullifier is unspent, mark it spent, and release public tokens from the pool to the recipient.
-3.  `transfer(env, proof, nullifiers, output_commitments, root)`: Verify ZK proof, verify root, mark input nullifiers as spent, and append new output commitments to the Merkle tree.
-4.  `upgrade(env, new_wasm_hash)`: Upgrade contract bytecode in-place. Requires signature from the contract `Admin` account.
+### Core Entry Points (Shielded Pool)
+1.  `deposit(env, depositor, asset, amount, commitment, encrypted_note)`: Transfers public tokens into the pool and appends the commitment leaf.
+2.  `withdraw(env, proof, nullifier, recipient, token, amount, root, asp_roots...)`: Verifies Groth16 proof and ASP membership, marks nullifier spent, and releases public tokens to the recipient.
+3.  `transfer(env, proof, nullifiers, output_commitments, root, asp_roots...)`: Verifies ZK proof and ASP compliance, marks input nullifiers spent, and inserts output note commitments.
+4.  `upgrade(env, new_wasm_hash)`: In-place bytecode upgrades authorized by the Admin account.
 
 ---
 

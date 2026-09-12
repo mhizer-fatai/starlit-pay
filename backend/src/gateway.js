@@ -4,6 +4,7 @@ import crypto from "crypto";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { rpc, horizon, supabase, gatewayKeypair, NETWORK_PASSPHRASE } from "./config.js";
 import { calculateCommitment, encryptNoteForUser } from "./crypto.js";
+import { isAddressBlocked } from "./asp_service.js";
 
 const GATEWAY_STATE_FILE = path.join(process.cwd(), "gateway_state.json");
 let lastProcessedTxToken = "0";
@@ -141,6 +142,13 @@ async function runGatewayDaemon() {
             const assetName = isNative ? "XLM" : "USDC";
 
             console.log(`Gateway processing incoming deposit of ${amount} ${assetName} for @${user.username} (Memo: ${memoId})`);
+
+            // Screen sender address against ASP compliance policy
+            const isBlocked = await isAddressBlocked(tx.source);
+            if (isBlocked) {
+              console.warn(`[ASP COMPLIANCE BLOCK] Deposit from sanctioned address ${tx.source} rejected for @${user.username}.`);
+              continue;
+            }
 
             // Derive noteSecret deterministically from transaction hash to prevent duplicate processing on server restarts
             const noteSecret = crypto.createHmac("sha256", gatewayKeypair.secret()).update(txRecord.hash).digest("hex");
