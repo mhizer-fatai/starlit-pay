@@ -19,6 +19,7 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { getUser, signOut } from "@/lib/auth";
 import { fetchStats, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
+import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { usePrices } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
 import {
@@ -55,6 +56,8 @@ function DashboardPage() {
   const [usdcBalance, setUsdcBalance] = useState(0);
   const [xlmBalance, setXlmBalance] = useState(0);
   const [tvl, setTvl] = useState<string | null>(null);
+  const [balancesLoading, setBalancesLoading] = useState(true);
+  const [activityLoading, setActivityLoading] = useState(true);
   // Live prices via the backend CoinGecko proxy (static fallback until loaded).
   const prices = usePrices();
   const totalUsd = usdcBalance * prices.USDC + xlmBalance * prices.XLM;
@@ -78,7 +81,10 @@ function DashboardPage() {
           if (cancelled) return;
           setAllTxs(txs);
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setActivityLoading(false);
+        });
       // Real private balance from decrypted unspent shielded notes (read).
       void loadPrivateBalances(user)
         .then((balances) => {
@@ -87,7 +93,10 @@ function DashboardPage() {
           setXlmBalance(balances.xlm);
           setBalanceNotes(balances.notes);
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setBalancesLoading(false);
+        });
     });
     void fetchStats()
       .then((s) => {
@@ -188,9 +197,8 @@ function DashboardPage() {
     setHoverBalance(null);
   }
 
-  if (checking) return null;
-
   const { dollars, cents } = splitDollarsCents(totalUsd);
+  const chartLoading = balancesLoading || activityLoading;
 
   return (
     <div className="dashboard-frame">
@@ -222,7 +230,13 @@ function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.35, ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number], delay: 0.05 }}
           >
-            <h1>Welcome, {displayName}</h1>
+            <h1>
+              {checking ? (
+                <Skeleton className="inline-block h-8 w-56 align-middle" label="Loading greeting" />
+              ) : (
+                <>Welcome, {displayName}</>
+              )}
+            </h1>
 
             <div className="action-row">
             <Button
@@ -277,12 +291,21 @@ function DashboardPage() {
               <div className="balance">
                 {balanceHidden ? (
                   "$ ••••••"
+                ) : balancesLoading ? (
+                  <Skeleton className="h-9 w-52" label="Loading balance" />
                 ) : (
                   <>
                     ${dollars}<sup>{cents}</sup>
                   </>
                 )}
               </div>
+              {chartLoading ? (
+                <Skeleton
+                  className="h-[210px] w-full"
+                  label="Loading chart"
+                  style={{ marginTop: 8 }}
+                />
+              ) : (
               <div
                 className="chart-wrap"
                 ref={chartRef}
@@ -337,6 +360,7 @@ function DashboardPage() {
                   </div>
                 )}
               </div>
+              )}
               <div className="balance-filters">
                 {[
                   "1M",
@@ -367,16 +391,24 @@ function DashboardPage() {
               <div className="holdings-list">
                 <div className="holding-row">
                   <span className="holding-label">USDC</span>
-                  <strong className={balanceHidden ? "holding-masked" : ""}>
-                    {balanceHidden ? "••••••" : formatGrouped(usdcBalance)}
-                  </strong>
+                  {balancesLoading ? (
+                    <Skeleton className="h-5 w-24" label="Loading USDC balance" />
+                  ) : (
+                    <strong className={balanceHidden ? "holding-masked" : ""}>
+                      {balanceHidden ? "••••••" : formatGrouped(usdcBalance)}
+                    </strong>
+                  )}
                 </div>
                 <div className="holding-divider" />
                 <div className="holding-row">
                   <span className="holding-label">XLM</span>
-                  <strong className={balanceHidden ? "holding-masked" : ""}>
-                    {balanceHidden ? "••••••" : formatGrouped(xlmBalance)}
-                  </strong>
+                  {balancesLoading ? (
+                    <Skeleton className="h-5 w-24" label="Loading XLM balance" />
+                  ) : (
+                    <strong className={balanceHidden ? "holding-masked" : ""}>
+                      {balanceHidden ? "••••••" : formatGrouped(xlmBalance)}
+                    </strong>
+                  )}
                 </div>
               </div>
             </section>
@@ -394,38 +426,47 @@ function DashboardPage() {
               </Button>
             </div>
             <ul className="activity-list">
-              {recentActivity.map((item) => {
-                const incoming = item.direction === "in";
-                return (
-                  <li
-                    key={item.key}
-                    role="button"
-                    tabIndex={0}
-                    style={{ cursor: "pointer" }}
-                    onClick={() => setSelected(item)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setSelected(item);
-                      }
-                    }}
-                    aria-label={`View ${activityTitle(item)} receipt`}
-                  >
-                    <span className={`activity-icon ${incoming ? "icon-green" : "icon-blue"}`}>
-                      {incoming ? <ArrowDownLeft /> : <Send />}
-                    </span>
-                    <div className="activity-copy">
-                      <b>{activityTitle(item)}</b>
-                      <small>
-                        {item.date ? new Date(item.date).toLocaleString() : "Recorded"}
-                      </small>
-                    </div>
-                    <strong className={incoming ? "amount-positive" : "amount-negative"}>
-                      {incoming ? `+${item.amount} ${item.asset}` : `−${item.amount} ${item.asset}`}
-                    </strong>
-                  </li>
-                );
-              })}
+              {activityLoading ? (
+                <>
+                  <ActivitySkeletonRow />
+                  <ActivitySkeletonRow />
+                  <ActivitySkeletonRow />
+                  <ActivitySkeletonRow />
+                </>
+              ) : (
+                <>
+                  {recentActivity.map((item) => {
+                    const incoming = item.direction === "in";
+                    return (
+                      <li
+                        key={item.key}
+                        role="button"
+                        tabIndex={0}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => setSelected(item)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelected(item);
+                          }
+                        }}
+                        aria-label={`View ${activityTitle(item)} receipt`}
+                      >
+                        <span className={`activity-icon ${incoming ? "icon-green" : "icon-blue"}`}>
+                          {incoming ? <ArrowDownLeft /> : <Send />}
+                        </span>
+                        <div className="activity-copy">
+                          <b>{activityTitle(item)}</b>
+                          <small>
+                            {item.date ? new Date(item.date).toLocaleString() : "Recorded"}
+                          </small>
+                        </div>
+                        <strong className={incoming ? "amount-positive" : "amount-negative"}>
+                          {incoming ? `+${item.amount} ${item.asset}` : `−${item.amount} ${item.asset}`}
+                        </strong>
+                      </li>
+                    );
+                  })}
               {recentActivity.length === 0 && (
                 <li>
                   <span className="activity-icon icon-blue">
@@ -437,6 +478,8 @@ function DashboardPage() {
                   </div>
                   <strong className="amount-negative">—</strong>
                 </li>
+              )}
+                </>
               )}
             </ul>
           </section>

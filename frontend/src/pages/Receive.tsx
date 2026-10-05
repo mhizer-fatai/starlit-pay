@@ -8,10 +8,12 @@ import { Button } from "@/components/ui/button";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { getUser, type SessionUser } from "@/lib/auth";
+import { fetchGatewayAddress } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
 
-// Gateway address funds land at; the memo routes to the user (see backend gateway.js).
-const GATEWAY_ADDRESS = "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
+// Fallback shown until the live address loads (or if the backend is down);
+// the backend resolves env override → daemon key → this same value.
+const GATEWAY_FALLBACK = "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -42,6 +44,8 @@ function ReceivePage() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
   const [user, setUser] = useState<SessionUser | null>(null);
+  // Live gateway deposit address from the backend; the memo routes to the user.
+  const [gatewayAddress, setGatewayAddress] = useState(GATEWAY_FALLBACK);
 
   useEffect(() => {
     document.title = "Receive — Starlit Pay";
@@ -55,6 +59,11 @@ function ReceivePage() {
       setUser(current);
       setChecking(false);
     });
+    void fetchGatewayAddress()
+      .then((res) => {
+        if (!cancelled && res.address) setGatewayAddress(res.address);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -64,6 +73,7 @@ function ReceivePage() {
 
   const username = user?.username ?? "";
   const memo = user?.deposit_memo ?? "—";
+  const memoValue = user?.deposit_memo != null ? String(user.deposit_memo) : "";
   const companyName = username ? `@${username}` : "Starlit Pay";
 
   return (
@@ -91,8 +101,8 @@ function ReceivePage() {
 
               <p className="receive-label">Starlit Deposit Address (gateway)</p>
               <div className="receive-row">
-                <code>{GATEWAY_ADDRESS}</code>
-                <CopyButton value={GATEWAY_ADDRESS} label="Copy Address" />
+                <code>{gatewayAddress}</code>
+                <CopyButton value={gatewayAddress} label="Copy Address" />
               </div>
 
               <p className="receive-label">Your Deposit Memo (MEMO ID)</p>
@@ -106,11 +116,24 @@ function ReceivePage() {
                 Deposits sent without a Memo are lost and cannot be retrieved.
               </p>
             </section>
-            <section className="dash-card qr-card">
-              <div className="qr-wrap">
-                <QRCodeSVG value={`starlit:${GATEWAY_ADDRESS}?memo=${memo}`} size={150} />
-              </div>
-            </section>
+            <div className="qr-stack">
+              <section className="dash-card qr-card">
+                <span className="qr-label">Deposit Address</span>
+                <div className="qr-wrap">
+                  <QRCodeSVG value={gatewayAddress} size={140} />
+                </div>
+              </section>
+              <section className="dash-card qr-card">
+                <span className="qr-label">Deposit Memo</span>
+                <div className="qr-wrap">
+                  {memoValue ? (
+                    <QRCodeSVG value={memoValue} size={140} />
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Memo unavailable</p>
+                  )}
+                </div>
+              </section>
+            </div>
           </div>
         </main>
         </PageTransition>

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
+import { Skeleton } from "@/components/Skeleton";
 import { useSidebar } from "@/lib/sidebar";
 import { getUser } from "@/lib/auth";
 import { fetchTransactions, type BackendTransaction } from "@/lib/backend";
@@ -156,30 +157,53 @@ function TransactionsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageItems.map((tx, i) => (
-                    <tr key={tx.id ?? i}>
-                      <td>
-                        <div className="tx-row">
-                          <span className="activity-icon icon-blue">
-                            <Send />
-                          </span>
-                          <div className="activity-copy">
-                            <b>Shielded transaction</b>
-                            <small>#{tx.id ?? i}</small>
+                  {loading ? (
+                    <>
+                      {[0, 1, 2, 3, 4].map((i) => (
+                        <tr key={i} aria-hidden="true">
+                          <td>
+                            <div className="tx-row">
+                              <Skeleton className="size-[38px] shrink-0 rounded-full" />
+                              <div style={{ display: "grid", gap: 6, flex: 1 }}>
+                                <Skeleton className="h-3.5 w-2/5" />
+                                <Skeleton className="h-3 w-1/4" />
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <Skeleton className="h-3 w-28" />
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <Skeleton className="ml-auto h-4 w-20" />
+                          </td>
+                        </tr>
+                      ))}
+                    </>
+                  ) : (
+                    pageItems.map((tx, i) => (
+                      <tr key={tx.id ?? i}>
+                        <td>
+                          <div className="tx-row">
+                            <span className="activity-icon icon-blue">
+                              <Send />
+                            </span>
+                            <div className="activity-copy">
+                              <b>Shielded transaction</b>
+                              <small>#{tx.id ?? i}</small>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="transactions-date">
-                        {tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong className="amount-negative">—</strong>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="transactions-date">
+                          {tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <strong className="amount-negative">—</strong>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
-              {loading && <p className="text-sm text-muted-foreground" style={{ padding: 12 }}>Loading transactions…</p>}
               {!loading && pageItems.length === 0 && (
                 <p className="text-sm text-muted-foreground" style={{ padding: 12 }}>No transactions yet.</p>
               )}

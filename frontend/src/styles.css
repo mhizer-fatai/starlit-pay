@@ -1567,20 +1567,36 @@
 
 @utility receive-grid {
   display: flex;
+  flex-wrap: wrap;
   gap: 20px;
   align-items: flex-start;
 }
 
 @utility qr-card {
   flex: 0 0 240px;
-  aspect-ratio: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
   gap: 12px;
   padding: 24px 16px 16px;
-  overflow: hidden;
+}
+
+@utility qr-label {
+  color: var(--color-muted-foreground);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+@utility qr-stack {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
 }
 
 @utility qr-wrap {
@@ -1797,6 +1813,9 @@
     height: auto;
     min-height: 340px;
     padding-inline: 18px;
+  }
+  .qr-card {
+    min-height: 0;
   }
   .chart-wrap {
     margin-inline: -18px;

@@ -196,6 +196,7 @@ export const fetchStats = () =>
     status: string;
   }>("/api/stats");
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
+export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
 export const complianceCheck = (address: string) =>
   req<{ address: string; blocked: boolean; status: string }>(
     `/api/compliance/check/${encodeURIComponent(address)}`,

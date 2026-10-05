@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { app, supabase, rpc } from "./config.js";
+import { app, supabase, rpc, GATEWAY_ADDRESS } from "./config.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 // Helper to verify cryptographic signatures of current requests
@@ -314,10 +314,9 @@ app.post("/api/faucet/fund", async (req, res) => {
     const cleanSecret = rawSecret.replace(/['"\s]/g, "").trim();
     const faucetKeypair = StellarSdk.Keypair.fromSecret(cleanSecret);
 
-    const gatewayAddress = process.env.GATEWAY_PUBLIC_KEY || "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
-
-    // Target is ALWAYS the Gateway Address so funds are auto-shielded for the user memo
-    const targetRecipient = gatewayAddress;
+    // Target is ALWAYS the Gateway Address so funds are auto-shielded for the user memo.
+    // Resolved from the shared config so faucet, daemon, and frontend agree.
+    const targetRecipient = GATEWAY_ADDRESS;
     
     // Safely construct Stellar Memo (Text or ID)
     const memoVal = (depositMemo !== undefined && depositMemo !== null && depositMemo !== "")

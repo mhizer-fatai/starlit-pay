@@ -2,9 +2,15 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { rpc, horizon, supabase, gatewayKeypair, NETWORK_PASSPHRASE } from "./config.js";
+import { app, rpc, horizon, supabase, gatewayKeypair, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "./config.js";
 import { calculateCommitment, encryptNoteForUser } from "./crypto.js";
 import { isAddressBlocked } from "./asp_service.js";
+
+// Public endpoint exposing the deposit address the gateway daemon watches,
+// so the frontend never shows a stale hardcoded copy.
+app.get("/api/gateway/address", (_req, res) => {
+  res.status(200).json({ address: GATEWAY_ADDRESS });
+});
 
 const GATEWAY_STATE_FILE = path.join(process.cwd(), "gateway_state.json");
 let lastProcessedTxToken = "0";
