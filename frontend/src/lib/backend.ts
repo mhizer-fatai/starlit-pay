@@ -87,13 +87,22 @@ export interface BackendUser {
 
 export interface AuthResponse {
   exists?: boolean;
-  user: BackendUser;
-  token: string;
+  user?: BackendUser;
+  token?: string;
 }
 
 // --- Auth / users (read + write) ---
-export const login = (email: string) =>
-  req<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify({ email }) });
+// Lookup mode (no identity_commitment): returns { exists, user? } WITHOUT a
+// token so a JWT is never issued before the PIN is verified.
+// Unlock mode (with identity_commitment): backend verifies the PIN-derived
+// commitment and only then returns { exists: true, user, token }.
+export const login = (email: string, identity_commitment?: string) =>
+  req<AuthResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(
+      identity_commitment ? { email, identity_commitment } : { email },
+    ),
+  });
 
 export const register = (body: {
   email: string;
@@ -140,6 +149,7 @@ export interface ShieldedNote {
   status?: string;
   root?: string;
   ledger?: number;
+  created_at?: string;
 }
 export const fetchNotes = (viewingKey: string, timestamp: string, signature: string) =>
   req<{ notes: ShieldedNote[] }>(

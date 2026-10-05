@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail } from "lucide-react";
+import { Lock, Mail, User } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { getUser, signInWithGoogle } from "@/lib/auth";
+import {
+  getUser,
+  lookupByEmail,
+  registerWithPin,
+  signOut,
+  unlockWithPin,
+} from "@/lib/auth";
+import { isValidPin } from "@/lib/keys";
 import { supabase } from "@/lib/supabase";
 
 function GoogleIcon() {
@@ -30,44 +37,127 @@ function GoogleIcon() {
   );
 }
 
+type Phase = "google" | "checking" | "pin-entry" | "pin-setup";
+
+const PIN_INPUT_STYLE = {
+  textAlign: "center",
+  letterSpacing: "8px",
+  fontSize: "20px",
+} as const;
+
 function AuthPage() {
   const navigate = useNavigate();
+  const [phase, setPhase] = useState<Phase>("google");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
+
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const [username, setUsername] = useState("");
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
 
   useEffect(() => {
     document.title = "Sign in — Starlit Pay";
-    void getUser().then((user) => {
-      if (user) navigate("/dashboard", { replace: true });
-    });
-    // Returning from Google OAuth: bridge Supabase session -> backend JWT session.
+    let cancelled = false;
     void (async () => {
+      // Returning from Google OAuth: resolve the Supabase session, then ask
+      // for the payment PIN (or create one for new accounts) before any
+      // backend session is issued.
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      const hash = window.location.hash;
+      const hasHashToken = hash.includes("access_token") || hash.includes("code=");
+      let oauthPending = false;
       try {
-        // PKCE flow returns ?code= — exchange it for a session first.
-        const params = new URLSearchParams(window.location.search);
-        if (params.has("code")) {
-          await supabase.auth.exchangeCodeForSession(window.location.search);
-          window.history.replaceState(null, "", "/auth");
-        }
-        const { data } = await supabase.auth.getSession();
-        const email = data.session?.user.email;
-        if (!email) return;
-        setBusy(true);
-        await signInWithGoogle(email, {
-          displayName:
-            (data.session?.user.user_metadata?.full_name as string | undefined) ||
-            (data.session?.user.user_metadata?.name as string | undefined),
-          avatarUrl:
-            (data.session?.user.user_metadata?.avatar_url as string | undefined) ||
-            (data.session?.user.user_metadata?.picture as string | undefined),
-        });
-        navigate("/dashboard", { replace: true });
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Google sign-in failed.");
-      } finally {
-        setBusy(false);
+        oauthPending = sessionStorage.getItem("starlit_oauth") === "1";
+      } catch {
+        /* ignore */
       }
+      const isOAuthReturn = Boolean(code) || hasHashToken || oauthPending;
+      if (isOAuthReturn) {
+        try {
+          if (!cancelled) {
+            setPhase("checking");
+            setBusy(true);
+            setError("");
+            setStatus("Completing sign-in…");
+          }
+          // PKCE flow returns ?code= — exchange just the code (not the full
+          // query string) for a session.
+          if (code) {
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeError) throw exchangeError;
+            window.history.replaceState(null, "", "/auth");
+          }
+          const { data } = await supabase.auth.getSession();
+          const googleEmail = data.session?.user.email;
+          if (!googleEmail) {
+            throw new Error("Google sign-in returned without a session. Please try again.");
+          }
+          if (hasHashToken) window.history.replaceState(null, "", "/auth");
+          try {
+            sessionStorage.removeItem("starlit_oauth");
+          } catch {
+            /* ignore */
+          }
+          const meta = data.session?.user.user_metadata ?? {};
+          const name =
+            (meta.full_name as string | undefined) ||
+            (meta.name as string | undefined) ||
+            "";
+          const avatar =
+            (meta.avatar_url as string | undefined) || (meta.picture as string | undefined);
+          if (!cancelled) {
+            setEmail(googleEmail);
+            setDisplayName(name);
+            setAvatarUrl(avatar);
+            setStatus("Checking account…");
+          }
+          const { exists, user } = await lookupByEmail(googleEmail);
+          if (cancelled) return;
+          setPin("");
+          setPinConfirm("");
+          if (exists) {
+            setUsername(user?.username ?? "");
+            setPhase("pin-entry");
+          } else {
+            const base =
+              googleEmail
+                .split("@")[0]!
+                .replace(/[^a-z0-9_]/g, "_")
+                .slice(0, 24) || "user";
+            setUsername(user?.username ?? base);
+            if (!name) setDisplayName(base);
+            setPhase("pin-setup");
+          }
+        } catch (e) {
+          if (!cancelled) {
+            setError(e instanceof Error ? e.message : "Google sign-in failed.");
+            setPhase("google");
+          }
+          try {
+            sessionStorage.removeItem("starlit_oauth");
+          } catch {
+            /* ignore */
+          }
+        } finally {
+          if (!cancelled) {
+            setBusy(false);
+            setStatus("");
+          }
+        }
+        return;
+      }
+      // Plain visit: only redirect when a valid backend session already exists.
+      const user = await getUser();
+      if (!cancelled && user) navigate("/dashboard", { replace: true });
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [navigate]);
 
   useEffect(() => {
@@ -76,69 +166,313 @@ function AuthPage() {
 
   async function handleGoogle() {
     setError("");
+    setStatus("");
     setBusy(true);
     try {
+      try {
+        sessionStorage.setItem("starlit_oauth", "1");
+      } catch {
+        /* ignore */
+      }
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${window.location.origin}/auth` },
+        options: {
+          redirectTo: `${window.location.origin}/auth`,
+          // Force Google to show the account chooser every time instead of
+          // silently reusing the existing Google session.
+          queryParams: { prompt: "select_account" },
+        },
       });
       if (error) throw error;
     } catch (e) {
+      try {
+        sessionStorage.removeItem("starlit_oauth");
+      } catch {
+        /* ignore */
+      }
       setError(e instanceof Error ? e.message : "Google sign-in failed.");
       setBusy(false);
     }
   }
+
+  async function handleSwitchAccount() {
+    await signOut();
+    setPhase("google");
+    setEmail("");
+    setDisplayName("");
+    setAvatarUrl(undefined);
+    setUsername("");
+    setPin("");
+    setPinConfirm("");
+    setError("");
+    setStatus("");
+  }
+
+  async function handlePinUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isValidPin(pin)) {
+      setError("PIN must be exactly 6 digits.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    setStatus("Unlocking wallet…");
+    try {
+      await unlockWithPin(email, pin);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Incorrect PIN.");
+      setPin("");
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  async function handlePinSetup(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanUsername = username.toLowerCase().trim().replace(/^@/, "");
+    if (cleanUsername.length < 3 || !/^[a-z0-9_]+$/.test(cleanUsername)) {
+      setError("Username must be at least 3 characters (letters, numbers, _).");
+      return;
+    }
+    if (!isValidPin(pin) || !isValidPin(pinConfirm)) {
+      setError("PIN must be exactly 6 digits.");
+      return;
+    }
+    if (pin !== pinConfirm) {
+      setError("PINs do not match.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    setStatus("Creating secure account…");
+    try {
+      await registerWithPin({
+        email,
+        username: cleanUsername,
+        displayName: displayName || cleanUsername,
+        pin,
+        avatarUrl,
+      });
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create account.");
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  const digitsOnly = (value: string) => value.replace(/\D/g, "").slice(0, 6);
 
   return (
     <main className="auth-stage">
       <div className="auth-shell">
         <section className="auth-panel">
           <div className="auth-form-wrap">
-            <div className="text-center">
-              <h1 className="text-[32px] font-medium text-foreground">Welcome to Starlit Pay</h1>
-              <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
-                Start your experience with Starlit Pay by signing in or
-                <br className="hidden sm:block" /> signing up.
-              </p>
-            </div>
-
-            <div className="mt-8 space-y-6">
-              <Button
-                type="button"
-                onClick={handleGoogle}
-                disabled={busy}
-                className="h-16 w-full rounded-lg bg-background text-[18px] font-semibold text-foreground shadow-md shadow-primary/10 hover:bg-white/50"
-              >
-                <GoogleIcon /> {busy ? "Please wait…" : "Continue with Google"}
-              </Button>
-
-              {error && (
-                <p className="text-sm text-red-500" role="alert">
-                  {error}
-                </p>
-              )}
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[15px] font-semibold text-foreground">Login with Email</span>
-                  <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                    Coming Soon
-                  </span>
+            {(phase === "google" || phase === "checking") && (
+              <>
+                <div className="text-center">
+                  <h1 className="text-[32px] font-medium text-foreground">Welcome to Starlit Pay</h1>
+                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
+                    Start your experience with Starlit Pay by signing in or
+                    <br className="hidden sm:block" /> signing up.
+                  </p>
                 </div>
-                <div className="auth-input" aria-disabled="true">
-                  <Mail />
-                  <Input type="email" placeholder="Enter your email address" disabled />
-                </div>
-              </div>
 
-              <Button
-                className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
-                disabled
-                type="button"
-              >
-                Sign In
-              </Button>
-            </div>
+                <div className="mt-8 space-y-6">
+                  <Button
+                    type="button"
+                    onClick={handleGoogle}
+                    disabled={busy}
+                    className="h-16 w-full rounded-lg bg-background text-[18px] font-semibold text-foreground shadow-md shadow-primary/10 hover:bg-white/50"
+                  >
+                    <GoogleIcon /> {busy ? status || "Please wait…" : "Continue with Google"}
+                  </Button>
+
+                  {status && !error && (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {status}
+                    </p>
+                  )}
+                  {error && (
+                    <p className="text-sm text-red-500" role="alert">
+                      {error}
+                    </p>
+                  )}
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[15px] font-semibold text-foreground">
+                        Login with Email
+                      </span>
+                      <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                        Coming Soon
+                      </span>
+                    </div>
+                    <div className="auth-input" aria-disabled="true">
+                      <Mail />
+                      <Input type="email" placeholder="Enter your email address" disabled />
+                    </div>
+                  </div>
+
+                  <Button
+                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
+                    disabled
+                    type="button"
+                  >
+                    Sign In
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {phase === "pin-entry" && (
+              <>
+                <div className="text-center">
+                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
+                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Unlock Wallet</h1>
+                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
+                    Enter the 6-digit payment PIN for{" "}
+                    <span className="font-semibold text-foreground">{email}</span>
+                  </p>
+                </div>
+
+                <form onSubmit={handlePinUnlock} className="mt-8 space-y-6">
+                  <Input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={6}
+                    placeholder="••••••"
+                    value={pin}
+                    onChange={(e) => setPin(digitsOnly(e.target.value))}
+                    required
+                    autoFocus
+                    disabled={busy}
+                    style={PIN_INPUT_STYLE}
+                  />
+                  {status && !error && (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {status}
+                    </p>
+                  )}
+                  {error && (
+                    <p className="text-sm text-red-500" role="alert">
+                      {error}
+                    </p>
+                  )}
+                  <Button
+                    type="submit"
+                    disabled={busy}
+                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
+                  >
+                    {busy ? status || "Unlocking…" : "Unlock"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleSwitchAccount}
+                    disabled={busy}
+                    className="h-12 w-full rounded-lg text-[15px]"
+                  >
+                    Switch Account
+                  </Button>
+                </form>
+              </>
+            )}
+
+            {phase === "pin-setup" && (
+              <>
+                <div className="text-center">
+                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
+                  <h1 className="mt-4 text-[28px] font-medium text-foreground">
+                    Secure your wallet
+                  </h1>
+                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
+                    <span className="font-semibold text-foreground">{email}</span> is new here.
+                    Create a 6-digit payment PIN — it derives your wallet keys.
+                  </p>
+                </div>
+
+                <form onSubmit={handlePinSetup} className="mt-8 space-y-6">
+                  <div>
+                    <span className="text-[15px] font-semibold text-foreground">Username</span>
+                    <div className="auth-input">
+                      <User />
+                      <Input
+                        type="text"
+                        placeholder="e.g. alice"
+                        value={username}
+                        onChange={(e) =>
+                          setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))
+                        }
+                        required
+                        disabled={busy}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-[15px] font-semibold text-foreground">
+                      6-digit payment PIN
+                    </span>
+                    <div className="mt-2 space-y-3">
+                      <Input
+                        type="password"
+                        inputMode="numeric"
+                        autoComplete="new-password"
+                        maxLength={6}
+                        placeholder="Enter 6-digit PIN"
+                        value={pin}
+                        onChange={(e) => setPin(digitsOnly(e.target.value))}
+                        required
+                        disabled={busy}
+                        style={PIN_INPUT_STYLE}
+                      />
+                      <Input
+                        type="password"
+                        inputMode="numeric"
+                        autoComplete="new-password"
+                        maxLength={6}
+                        placeholder="Confirm 6-digit PIN"
+                        value={pinConfirm}
+                        onChange={(e) => setPinConfirm(digitsOnly(e.target.value))}
+                        required
+                        disabled={busy}
+                        style={PIN_INPUT_STYLE}
+                      />
+                    </div>
+                  </div>
+                  {status && !error && (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {status}
+                    </p>
+                  )}
+                  {error && (
+                    <p className="text-sm text-red-500" role="alert">
+                      {error}
+                    </p>
+                  )}
+                  <Button
+                    type="submit"
+                    disabled={busy}
+                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
+                  >
+                    {busy ? status || "Creating…" : "Create Account"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleSwitchAccount}
+                    disabled={busy}
+                    className="h-12 w-full rounded-lg text-[15px]"
+                  >
+                    Switch Account
+                  </Button>
+                </form>
+              </>
+            )}
           </div>
         </section>
       </div>

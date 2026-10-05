@@ -1,8 +1,14 @@
 import { StrictMode, useEffect } from "react";
+import { Buffer } from "buffer";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 
 import { SidebarProvider } from "./lib/sidebar";
+
+// stellar-sdk uses the Node `Buffer` global internally; polyfill it for browsers.
+if (typeof globalThis.Buffer === "undefined") {
+  globalThis.Buffer = Buffer;
+}
 
 import Faqs from "./pages/Faqs";
 import Index from "./pages/Index";

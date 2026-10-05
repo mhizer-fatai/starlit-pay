@@ -33,9 +33,13 @@ export function requireAuth(req, res, next) {
   }
 }
 
-// 1. Authenticate user by email (Login check)
+// 1. Authenticate user by email (Login check / PIN unlock)
+// Lookup mode `{ email }` → returns { exists, user? } WITHOUT a token (used to
+// decide between PIN-entry and PIN-setup; no session is created).
+// Unlock mode `{ email, identity_commitment }` → verifies the PIN-derived
+// commitment against the stored one and only then issues a JWT.
 app.post("/api/auth/login", async (req, res) => {
-  const { email } = req.body;
+  const { email, identity_commitment } = req.body;
   if (!email) {
     return res.status(400).json({ error: "Email is required" });
   }
@@ -53,6 +57,14 @@ app.post("/api/auth/login", async (req, res) => {
 
     if (!user) {
       return res.status(200).json({ exists: false });
+    }
+
+    if (!identity_commitment) {
+      return res.status(200).json({ exists: true, user });
+    }
+
+    if (identity_commitment !== user.identity_commitment) {
+      return res.status(401).json({ error: "Incorrect PIN." });
     }
 
     const token = generateToken(user);

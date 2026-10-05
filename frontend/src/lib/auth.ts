@@ -1,110 +1,122 @@
-import * as StellarSdk from "@stellar/stellar-sdk";
 import {
   clearSession,
   getStoredUser,
+  getToken,
   login,
   register,
   setSession,
   type BackendUser,
 } from "@/lib/backend";
+import { supabase } from "@/lib/supabase";
+import {
+  deriveKeysFromEmailAndPin,
+  identityCommitment,
+  type DerivedKeys,
+} from "@/lib/keys";
 
 export type SessionUser = BackendUser;
 
-const SECRET_SUFFIX = (email: string) => `starlit_secret:${email.toLowerCase()}`;
+// Derived wallet keys are cached in memory and mirrored to sessionStorage so a
+// same-tab reload keeps working. They are never written to localStorage and
+// are cleared on sign-out / tab close. Re-derived from email + PIN on unlock.
+const KEYS_KEY = "starlit_keys";
+let unlockedKeys: DerivedKeys | null = null;
 
-function randomHex(bytes = 32): string {
-  const arr = new Uint8Array(bytes);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+function persistKeys(keys: DerivedKeys | null) {
+  unlockedKeys = keys;
+  try {
+    if (keys) sessionStorage.setItem(KEYS_KEY, JSON.stringify(keys));
+    else sessionStorage.removeItem(KEYS_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
-function ensureKeys(email: string): { identity_commitment: string; public_encryption_key: string } {
-  const existing = getStoredUser<BackendUser>();
-  if (existing?.identity_commitment && existing?.public_encryption_key) {
-    return {
-      identity_commitment: existing.identity_commitment,
-      public_encryption_key: existing.public_encryption_key,
-    };
-  }
-  // Deterministic-ish per browser: reuse stored secret if present, else create Stellar keypair.
-  let secret = localStorage.getItem(SECRET_SUFFIX(email));
-  let keypair: StellarSdk.Keypair;
-  if (secret) {
-    try {
-      keypair = StellarSdk.Keypair.fromSecret(secret);
-    } catch {
-      keypair = StellarSdk.Keypair.random();
-      secret = keypair.secret();
-      localStorage.setItem(SECRET_SUFFIX(email), secret);
+export function getUnlockedKeys(): DerivedKeys | null {
+  if (unlockedKeys) return unlockedKeys;
+  try {
+    const raw = sessionStorage.getItem(KEYS_KEY);
+    if (raw) {
+      unlockedKeys = JSON.parse(raw) as DerivedKeys;
+      return unlockedKeys;
     }
-  } else {
-    keypair = StellarSdk.Keypair.random();
-    secret = keypair.secret();
-    try {
-      localStorage.setItem(SECRET_SUFFIX(email), secret);
-    } catch {
-      /* ignore */
-    }
+  } catch {
+    /* ignore */
   }
-  return { identity_commitment: randomHex(), public_encryption_key: keypair.publicKey() };
+  return null;
 }
 
 export async function getUser(): Promise<SessionUser | null> {
+  // A stored user object alone is not a session — require the backend JWT too,
+  // otherwise a stale `starlit_user` entry auto-"authenticates" every visit.
+  if (!getToken()) return null;
   return getStoredUser<SessionUser>();
 }
 
-export async function signInWithEmail(email: string): Promise<{ registered: boolean; user: SessionUser }> {
+/** Lookup mode: checks whether a backend user row exists. Issues NO token. */
+export async function lookupByEmail(
+  email: string,
+): Promise<{ exists: boolean; user: SessionUser | null }> {
   const res = await login(email.toLowerCase().trim());
-  if (res.exists === false || !res.user) return { registered: false, user: null as unknown as SessionUser };
-  setSession(res.token, res.user);
-  return { registered: true, user: res.user };
+  if (res.exists === false || !res.user) return { exists: false, user: null };
+  return { exists: true, user: res.user };
 }
 
-export async function registerWithEmail(args: {
+/**
+ * New account: derives wallet keys from email + PIN and registers.
+ * Stores `identity_commitment = sha256(spendingKey)` so the PIN can be
+ * verified later without ever persisting the keys.
+ */
+export async function registerWithPin(args: {
   email: string;
   username: string;
   displayName: string;
+  pin: string;
+  avatarUrl?: string;
 }): Promise<SessionUser> {
-  const keys = ensureKeys(args.email);
+  const clean = args.email.toLowerCase().trim();
+  const derived = await deriveKeysFromEmailAndPin(clean, args.pin);
   const res = await register({
-    email: args.email.toLowerCase().trim(),
+    email: clean,
     username: args.username.toLowerCase().trim().replace(/^@/, ""),
     display_name: args.displayName.trim() || args.username.trim(),
-    identity_commitment: keys.identity_commitment,
-    public_encryption_key: keys.public_encryption_key,
+    identity_commitment: await identityCommitment(derived.spendingKey),
+    public_encryption_key: derived.viewing.publicKey,
+    avatar_url: args.avatarUrl,
+    stellar_address: derived.stellar.publicKey,
   });
+  if (!res.token || !res.user) throw new Error("Registration failed.");
   setSession(res.token, res.user);
+  persistKeys(derived);
   return res.user;
 }
 
-// Google OAuth bridge: Supabase gives us a verified email (+ profile); the
-// Express backend owns the user row + JWT session. First login auto-registers.
-export async function signInWithGoogle(
-  email: string,
-  profile?: { displayName?: string; avatarUrl?: string },
-): Promise<SessionUser> {
+/**
+ * Existing account: re-derives keys from email + PIN and lets the backend
+ * verify the commitment before it issues a JWT (401 on wrong PIN).
+ */
+export async function unlockWithPin(email: string, pin: string): Promise<SessionUser> {
   const clean = email.toLowerCase().trim();
-  const res = await login(clean);
-  if (res.exists !== false && res.user) {
-    setSession(res.token, res.user);
-    return res.user;
+  const derived = await deriveKeysFromEmailAndPin(clean, pin);
+  const res = await login(clean, await identityCommitment(derived.spendingKey));
+  if (res.exists === false || !res.user || !res.token) {
+    throw new Error("Account not found. Please create a PIN first.");
   }
-  const base = clean.split("@")[0]!.replace(/[^a-z0-9_]/g, "_").slice(0, 24) || "user";
-  const keys = ensureKeys(clean);
-  const reg = await register({
-    email: clean,
-    username: `${base}_${Math.floor(100 + Math.random() * 900)}`,
-    display_name: profile?.displayName || base,
-    identity_commitment: keys.identity_commitment,
-    public_encryption_key: keys.public_encryption_key,
-    avatar_url: profile?.avatarUrl,
-  });
-  setSession(reg.token, reg.user);
-  return reg.user;
+  setSession(res.token, res.user);
+  persistKeys(derived);
+  return res.user;
 }
 
 export async function signOut(): Promise<void> {
   clearSession();
+  persistKeys(null);
+  // Supabase persists its own session (sb-*-auth-token in localStorage).
+  // If left behind, /auth would see it and silently sign the user back in.
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function updateUserProfile(

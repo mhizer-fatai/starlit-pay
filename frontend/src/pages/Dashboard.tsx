@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
@@ -17,10 +17,30 @@ import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { getUser, signOut } from "@/lib/auth";
-import { fetchStats, fetchTransactions, type BackendTransaction } from "@/lib/backend";
+import { fetchStats, type BackendTransaction } from "@/lib/backend";
+import { ReceiptModal } from "@/components/ReceiptModal";
+import { usePrices } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
+import {
+  activityTitle,
+  assetToUsd,
+  buildActivityFeed,
+  decodeTransactionPayload,
+  formatGrouped,
+  loadPrivateBalances,
+  loadUserTransactions,
+  splitDollarsCents,
+  type ActivityItem,
+  type BalanceNote,
+} from "@/lib/wallet";
 
 const actionButtonClass = "hover:bg-dashboard-blue hover:text-primary-foreground";
+
+interface ChartPoint {
+  x: number;
+  y: number;
+  balance: string;
+}
 
 function DashboardPage() {
   const navigate = useNavigate();
@@ -29,8 +49,15 @@ function DashboardPage() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [displayName, setDisplayName] = useState("Jane");
   const [companyName, setCompanyName] = useState("Starlit Pay");
-  const [recentTxs, setRecentTxs] = useState<BackendTransaction[]>([]);
+  const [allTxs, setAllTxs] = useState<BackendTransaction[]>([]);
+  const [balanceNotes, setBalanceNotes] = useState<BalanceNote[]>([]);
+  const [selected, setSelected] = useState<ActivityItem | null>(null);
+  const [usdcBalance, setUsdcBalance] = useState(0);
+  const [xlmBalance, setXlmBalance] = useState(0);
   const [tvl, setTvl] = useState<string | null>(null);
+  // Live prices via the backend CoinGecko proxy (static fallback until loaded).
+  const prices = usePrices();
+  const totalUsd = usdcBalance * prices.USDC + xlmBalance * prices.XLM;
 
   useEffect(() => {
     document.title = "Dashboard — Starlit Pay";
@@ -45,9 +72,20 @@ function DashboardPage() {
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
       setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
-      void fetchTransactions(user.id)
-        .then((res) => {
-          if (!cancelled) setRecentTxs(res.transactions.slice(0, 4));
+      // Real transaction history (read).
+      void loadUserTransactions(user.id)
+        .then((txs) => {
+          if (cancelled) return;
+          setAllTxs(txs);
+        })
+        .catch(() => {});
+      // Real private balance from decrypted unspent shielded notes (read).
+      void loadPrivateBalances(user)
+        .then((balances) => {
+          if (cancelled || !balances) return;
+          setUsdcBalance(balances.usdc);
+          setXlmBalance(balances.xlm);
+          setBalanceNotes(balances.notes);
         })
         .catch(() => {});
     });
@@ -71,25 +109,64 @@ function DashboardPage() {
   const [hoverY, setHoverY] = useState<number | null>(null);
   const [hoverBalance, setHoverBalance] = useState<string | null>(null);
 
-  const chartPoints = [
-    { x: 0, y: 84, balance: "$1,142,300" },
-    { x: 48, y: 55, balance: "$1,148,500" },
-    { x: 82, y: 15, balance: "$1,155,200" },
-    { x: 114, y: 89, balance: "$1,149,800" },
-    { x: 160, y: 106, balance: "$1,147,400" },
-    { x: 203, y: 104, balance: "$1,148,100" },
-    { x: 250, y: 110, balance: "$1,146,900" },
-    { x: 294, y: 98, balance: "$1,148,700" },
-    { x: 335, y: 102, balance: "$1,148,200" },
-    { x: 369, y: 94, balance: "$1,149,500" },
-    { x: 402, y: 123, balance: "$1,145,600" },
-    { x: 443, y: 112, balance: "$1,147,200" },
-    { x: 481, y: 97, balance: "$1,149,100" },
-    { x: 520, y: 73, balance: "$1,152,400" },
-    { x: 564, y: 88, balance: "$1,150,200" },
-    { x: 596, y: 106, balance: "$1,147,800" },
-    { x: 620, y: 42, balance: "$1,156,908" },
-  ];
+  // Balance trend derived from real on-database events: shielded-note receipts
+  // (+) and recorded sends (−), ordered by time as a cumulative USD series
+  // converted at live prices.
+  const chartPoints: ChartPoint[] = useMemo(() => {
+    const events: { t: number; usd: number }[] = [];
+    for (const note of balanceNotes) {
+      events.push({ t: note.createdAt, usd: assetToUsd(note.asset, note.amount, prices) });
+    }
+    for (const tx of allTxs) {
+      const decoded = tx.encrypted_payload ? decodeTransactionPayload(tx.encrypted_payload) : null;
+      if (decoded?.amount) {
+        events.push({
+          t: tx.created_at ? new Date(tx.created_at).getTime() : Date.now(),
+          usd: -assetToUsd(decoded.asset ?? "USDC", decoded.amount, prices),
+        });
+      }
+    }
+    events.sort((a, b) => a.t - b.t);
+    let running = 0;
+    const cumulative = [0];
+    for (const event of events) {
+      running += event.usd;
+      cumulative.push(running);
+    }
+    // Downsample long histories so the path stays light.
+    let values = cumulative;
+    if (values.length > 40) {
+      const sampled: number[] = [];
+      for (let i = 0; i < 40; i++) {
+        sampled.push(values[Math.round((i * (values.length - 1)) / 39)]!);
+      }
+      values = sampled;
+    }
+    if (values.length < 2) values = [0, 0];
+    const lo = Math.min(0, ...values);
+    const hi = Math.max(0.01, ...values);
+    return values.map((value, i) => ({
+      x: values.length === 1 ? 620 : (i / (values.length - 1)) * 620,
+      y: 200 - ((value - lo) / (hi - lo)) * 190,
+      balance: `$${formatGrouped(value)}`,
+    }));
+  }, [balanceNotes, allTxs, prices]);
+
+  const chartLinePath = useMemo(
+    () => chartPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" "),
+    [chartPoints],
+  );
+  const chartAreaPath = useMemo(
+    () => `${chartLinePath} L620 210 L0 210 Z`,
+    [chartLinePath],
+  );
+
+  // Unified date-ordered feed: incoming shielded notes + outgoing records.
+  const activityFeed = useMemo(
+    () => buildActivityFeed(balanceNotes, allTxs),
+    [balanceNotes, allTxs],
+  );
+  const recentActivity = activityFeed.slice(0, 4);
 
   function onChartMove(event: React.MouseEvent<HTMLDivElement>) {
     const rect = chartRef.current?.getBoundingClientRect();
@@ -112,6 +189,8 @@ function DashboardPage() {
   }
 
   if (checking) return null;
+
+  const { dollars, cents } = splitDollarsCents(totalUsd);
 
   return (
     <div className="dashboard-frame">
@@ -200,7 +279,7 @@ function DashboardPage() {
                   "$ ••••••"
                 ) : (
                   <>
-                    $1,156,908<sup>27</sup>
+                    ${dollars}<sup>{cents}</sup>
                   </>
                 )}
               </div>
@@ -224,11 +303,11 @@ function DashboardPage() {
                   </defs>
                   <path
                     className="chart-area"
-                    d="M0 84 C18 40 33 77 48 55 S70 22 82 15 S92 107 114 89 S137 130 160 106 S181 123 203 104 S228 132 250 110 S275 121 294 98 S318 124 335 102 S350 142 369 94 S390 90 402 123 S425 105 443 112 S465 87 481 97 S505 112 520 73 S550 69 564 88 S596 106 620 42 L620 210 L0 210 Z"
+                    d={chartAreaPath}
                   />
                   <path
                     className="chart-line"
-                    d="M0 84 C18 40 33 77 48 55 S70 22 82 15 S92 107 114 89 S137 130 160 106 S181 123 203 104 S228 132 250 110 S275 121 294 98 S318 124 335 102 S350 142 369 94 S390 90 402 123 S425 105 443 112 S465 87 481 97 S505 112 520 73 S550 69 564 88 S596 106 620 42"
+                    d={chartLinePath}
                   />
                   {hoverX !== null && hoverY !== null && (
                     <line
@@ -289,14 +368,14 @@ function DashboardPage() {
                 <div className="holding-row">
                   <span className="holding-label">USDC</span>
                   <strong className={balanceHidden ? "holding-masked" : ""}>
-                    {balanceHidden ? "••••••" : "842,500.00"}
+                    {balanceHidden ? "••••••" : formatGrouped(usdcBalance)}
                   </strong>
                 </div>
                 <div className="holding-divider" />
                 <div className="holding-row">
                   <span className="holding-label">XLM</span>
                   <strong className={balanceHidden ? "holding-masked" : ""}>
-                    {balanceHidden ? "••••••" : "314,408.27"}
+                    {balanceHidden ? "••••••" : formatGrouped(xlmBalance)}
                   </strong>
                 </div>
               </div>
@@ -315,19 +394,39 @@ function DashboardPage() {
               </Button>
             </div>
             <ul className="activity-list">
-              {recentTxs.map((tx, i) => (
-                <li key={tx.id ?? i}>
-                  <span className="activity-icon icon-blue">
-                    <Send />
-                  </span>
-                  <div className="activity-copy">
-                    <b>Shielded transaction</b>
-                    <small>{tx.created_at ? new Date(tx.created_at).toLocaleString() : "Recorded"}</small>
-                  </div>
-                  <strong className="amount-negative">—</strong>
-                </li>
-              ))}
-              {recentTxs.length === 0 && (
+              {recentActivity.map((item) => {
+                const incoming = item.direction === "in";
+                return (
+                  <li
+                    key={item.key}
+                    role="button"
+                    tabIndex={0}
+                    style={{ cursor: "pointer" }}
+                    onClick={() => setSelected(item)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelected(item);
+                      }
+                    }}
+                    aria-label={`View ${activityTitle(item)} receipt`}
+                  >
+                    <span className={`activity-icon ${incoming ? "icon-green" : "icon-blue"}`}>
+                      {incoming ? <ArrowDownLeft /> : <Send />}
+                    </span>
+                    <div className="activity-copy">
+                      <b>{activityTitle(item)}</b>
+                      <small>
+                        {item.date ? new Date(item.date).toLocaleString() : "Recorded"}
+                      </small>
+                    </div>
+                    <strong className={incoming ? "amount-positive" : "amount-negative"}>
+                      {incoming ? `+${item.amount} ${item.asset}` : `−${item.amount} ${item.asset}`}
+                    </strong>
+                  </li>
+                );
+              })}
+              {recentActivity.length === 0 && (
                 <li>
                   <span className="activity-icon icon-blue">
                     <Receipt />
@@ -342,6 +441,7 @@ function DashboardPage() {
             </ul>
           </section>
         </motion.main>
+        {selected && <ReceiptModal item={selected} onClose={() => setSelected(null)} />}
       </div>
     </div>
   );
