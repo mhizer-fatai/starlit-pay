@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDownLeft, Send, X } from "lucide-react";
+import { ArrowDownLeft, Check, Copy, Send, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { activityTitle, partyLabel, type ActivityItem } from "@/lib/wallet";
+import type { ActivityItem } from "@/lib/wallet";
 
 function shortRef(ref: string): string {
   if (!ref) return "—";
@@ -11,14 +11,15 @@ function shortRef(ref: string): string {
   return `${ref.slice(0, 16)}…${ref.slice(-12)}`;
 }
 
-function CopyButton({ value }: { value: string }) {
+function CopyIconButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
       type="button"
-      className="export-option-btn"
-      style={{ padding: "4px 10px", fontSize: "12px" }}
-      disabled={!value}
+      className="modal-close"
+      style={{ width: 28, height: 28, flexShrink: 0 }}
+      title={`Copy ${label}`}
+      aria-label={`Copy ${label}`}
       onClick={() => {
         void navigator.clipboard.writeText(value).then(() => {
           setCopied(true);
@@ -26,10 +27,29 @@ function CopyButton({ value }: { value: string }) {
         });
       }}
     >
-      {copied ? "Copied" : "Copy"}
+      {copied ? <Check size={14} /> : <Copy size={14} />}
     </button>
   );
 }
+
+const fieldBoxStyle = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  background: "oklch(0.96 0.006 250)",
+  border: "1px solid var(--color-border)",
+  borderRadius: 8,
+  padding: "10px 8px 10px 12px",
+} as const;
+
+const fieldValueStyle = {
+  flex: 1,
+  minWidth: 0,
+  fontFamily: "monospace",
+  fontSize: 12,
+  wordBreak: "break-all",
+  lineHeight: 1.5,
+} as const;
 
 /** Full transaction receipt, mirroring the previous frontend's details modal. */
 export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: () => void }) {
@@ -42,7 +62,8 @@ export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: (
   }, [onClose]);
 
   const incoming = item.direction === "in";
-  const party = partyLabel(item.party);
+  const partyKind = incoming ? "sender" : "recipient";
+  const partyLabelText = incoming ? "Sender" : "Recipient";
 
   return createPortal(
     <div
@@ -109,7 +130,7 @@ export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: (
 
           <div className="modal-row">
             <span className="modal-label">Type</span>
-            <span className="modal-value">{activityTitle(item)}</span>
+            <span className="modal-value">{incoming ? "Incoming funds" : "Outgoing funds"}</span>
           </div>
           <div className="modal-row">
             <span className="modal-label">Date &amp; Time</span>
@@ -117,21 +138,21 @@ export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: (
               {item.date ? new Date(item.date).toLocaleString() : "—"}
             </span>
           </div>
-          <div className="modal-row">
-            <span className="modal-label">{incoming ? "Sender" : "Recipient"}</span>
-            <span
-              className="modal-value"
-              style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}
-            >
-              {party || "—"}
-            </span>
-          </div>
-          {item.party && (
-            <div className="modal-row">
-              <span className="modal-label">Full {incoming ? "sender" : "recipient"} value</span>
-              <CopyButton value={item.party} />
+          <div>
+            <div className="modal-row" style={{ marginBottom: 8 }}>
+              <span className="modal-label">{partyLabelText}</span>
             </div>
-          )}
+            {item.party ? (
+              <div style={fieldBoxStyle}>
+                <span style={fieldValueStyle}>{item.party}</span>
+                <CopyIconButton value={item.party} label={partyKind} />
+              </div>
+            ) : (
+              <div style={fieldBoxStyle}>
+                <span style={{ ...fieldValueStyle, fontFamily: "inherit" }}>—</span>
+              </div>
+            )}
+          </div>
           <div className="modal-row">
             <span className="modal-label">{item.referenceLabel}</span>
             <span
@@ -142,9 +163,14 @@ export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: (
             </span>
           </div>
           {item.reference && (
-            <div className="modal-row">
-              <span className="modal-label">Copy reference</span>
-              <CopyButton value={item.reference} />
+            <div>
+              <div className="modal-row" style={{ marginBottom: 8 }}>
+                <span className="modal-label">Reference</span>
+              </div>
+              <div style={fieldBoxStyle}>
+                <span style={fieldValueStyle}>{item.reference}</span>
+                <CopyIconButton value={item.reference} label="reference" />
+              </div>
             </div>
           )}
 
