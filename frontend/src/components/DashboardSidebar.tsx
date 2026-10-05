@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -21,7 +21,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/sidebar";
-import { signOut } from "@/lib/auth";
+import { getUser, signOut } from "@/lib/auth";
 import { Tooltip } from "@/components/Tooltip";
 
 const navItems = [
@@ -99,6 +99,13 @@ export function DashboardSidebar({
   const { pathname } = useLocation();
   const themeLabel = mode === "light" ? "Dark Mode" : "Light Mode";
   const ThemeIcon = mode === "light" ? Moon : Sun;
+  const [avatar, setAvatar] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getUser().then((user) => {
+      if (user?.avatar_url) setAvatar(user.avatar_url);
+    });
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -119,7 +126,16 @@ export function DashboardSidebar({
   return (
     <aside className={`dashboard-sidebar ${open ? "open" : ""} ${collapsed ? "collapsed" : ""}`}>
       <div className="company-switcher">
-        <div className="company-art" />
+        {avatar ? (
+          <img
+            className="company-art"
+            src={avatar}
+            alt=""
+            style={{ objectFit: "cover", background: "#fff" }}
+          />
+        ) : (
+          <div className="company-art" />
+        )}
         <strong>{companyName}</strong>
       </div>
       <nav aria-label="Main navigation">

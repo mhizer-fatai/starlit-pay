@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, Check, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { getUser } from "@/lib/auth";
+import {
+  buildActivityFeed,
+  loadPrivateBalances,
+  loadUserTransactions,
+  partyLabel,
+  type ActivityItem,
+} from "@/lib/wallet";
 
 type Notification = {
   id: string;
@@ -12,48 +20,42 @@ type Notification = {
   type: "success" | "error" | "info";
 };
 
-const initialNotifications: Notification[] = [
-  {
-    id: "1",
-    title: "Payment received",
-    message: "You received $12,500.00 USDC from Acme Corp",
-    time: "2 min ago",
-    read: false,
-    type: "success",
-  },
-  {
-    id: "2",
-    title: "Payment sent",
-    message: "You sent $3,240.00 USDC to @jane_doe",
-    time: "1 hour ago",
-    read: false,
-    type: "info",
-  },
-  {
-    id: "3",
-    title: "Invoice settled",
-    message: "Invoice #1042 for $8,120.00 XLM has been settled",
-    time: "3 hours ago",
-    read: false,
-    type: "success",
-  },
-  {
-    id: "4",
-    title: "Vault transfer failed",
-    message: "Transfer to Operating vault could not be completed",
-    time: "Yesterday",
-    read: true,
-    type: "error",
-  },
-  {
-    id: "5",
-    title: "Bill paid",
-    message: "Electricity bill of $1,905.20 USDC was paid",
-    time: "2 days ago",
-    read: true,
-    type: "info",
-  },
-];
+function timeAgo(timestamp: number): string {
+  if (!timestamp) return "Recently";
+  const diffMs = Date.now() - timestamp;
+  if (diffMs < 0) return "Just now";
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return days === 1 ? "Yesterday" : `${days} days ago`;
+  return new Date(timestamp).toLocaleDateString();
+}
+
+function getReadIds(userId: string): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(`starlit_notif_read_${userId}`) || "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+function toNotification(item: ActivityItem, read: boolean): Notification {
+  const label = partyLabel(item.party);
+  const incoming = item.direction === "in";
+  return {
+    id: item.key,
+    title: incoming ? "Payment received" : "Payment sent",
+    message: incoming
+      ? `You received ${item.amount} ${item.asset}${label ? ` from ${label}` : ""}`
+      : `You sent ${item.amount} ${item.asset}${label ? ` to ${label}` : ""}`,
+    time: timeAgo(item.date),
+    read,
+    type: incoming ? "success" : "info",
+  };
+}
 
 function NotificationModal({
   notifications,
@@ -160,14 +162,44 @@ function NotificationModal({
 }
 
 export function NotificationBell() {
-  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const bellRef = useRef<HTMLButtonElement>(null);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
+  useEffect(() => {
+    let cancelled = false;
+    void getUser().then((user) => {
+      if (cancelled || !user) return;
+      setUserId(user.id);
+      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user)])
+        .then(([txs, balances]) => {
+          if (cancelled) return;
+          const readIds = new Set(getReadIds(user.id));
+          const feed = buildActivityFeed(balances?.notes ?? [], txs).slice(0, 10);
+          setNotifications(feed.map((item) => toNotification(item, readIds.has(item.key))));
+        })
+        .catch(() => {});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function handleReadAll() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    if (userId) {
+      try {
+        localStorage.setItem(
+          `starlit_notif_read_${userId}`,
+          JSON.stringify(notifications.map((n) => n.id)),
+        );
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   return (

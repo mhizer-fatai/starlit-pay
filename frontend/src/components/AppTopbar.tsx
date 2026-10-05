@@ -5,18 +5,21 @@ import { Menu, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/NotificationBell";
 import { getUser } from "@/lib/auth";
-import { getAvatarUrl } from "@/lib/avatar";
 import { useSidebar } from "@/lib/sidebar";
 
 export function AppTopbar() {
   const navigate = useNavigate();
   const { collapsed, toggleCollapsed, setMobileOpen } = useSidebar();
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [avatar, setAvatar] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
     void getUser().then((user) => {
-      if (user) setDisplayName(user.display_name || user.username);
+      if (user) {
+        setDisplayName(user.display_name || user.username);
+        if (user.avatar_url) setAvatar(user.avatar_url);
+      }
     });
   }, []);
 
@@ -32,7 +35,6 @@ export function AppTopbar() {
     else toggleCollapsed();
   }
 
-  const avatarUrl = displayName ? getAvatarUrl(displayName, 64) : null;
   const initial = (displayName || "U").slice(0, 1).toUpperCase();
 
   return (
@@ -61,8 +63,8 @@ export function AppTopbar() {
               aria-label="Open profile"
               title="Profile"
             >
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="" className="avatar-button-img" />
+              {avatar ? (
+                <img src={avatar} alt="" className="avatar-button-img" />
               ) : (
                 initial
               )}

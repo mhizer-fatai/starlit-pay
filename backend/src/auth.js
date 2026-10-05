@@ -167,3 +167,52 @@ app.get("/api/users/lookup/:username", async (req, res) => {
     res.status(500).json({ error: "Failed to resolve user" });
   }
 });
+
+// 4. Update own profile (display name + avatar only — email/username are
+// identity and can never change here). Authenticated: users edit only self.
+app.patch("/api/users/me", requireAuth, async (req, res) => {
+  const { display_name, avatar_url } = req.body ?? {};
+  const updates = {};
+
+  if (display_name !== undefined) {
+    const clean = String(display_name).trim();
+    if (!clean) return res.status(400).json({ error: "Display name cannot be empty." });
+    if (clean.length > 100) return res.status(400).json({ error: "Display name is too long." });
+    updates.display_name = clean;
+  }
+
+  if (avatar_url !== undefined) {
+    if (typeof avatar_url !== "string" || !avatar_url) {
+      return res.status(400).json({ error: "Avatar URL is invalid." });
+    }
+    const isHttp = /^https?:\/\/.+/i.test(avatar_url);
+    const isDataImage = /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(avatar_url);
+    if (!isHttp && !isDataImage) {
+      return res.status(400).json({ error: "Avatar must be an https URL or image upload." });
+    }
+    if (isDataImage && avatar_url.length > 1024 * 1024) {
+      return res.status(413).json({ error: "Avatar image is too large (max 1MB)." });
+    }
+    updates.avatar_url = avatar_url;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: "Nothing to update." });
+  }
+
+  try {
+    const { data: user, error } = await supabase
+      .from("users")
+      .update(updates)
+      .eq("id", req.user.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!user) return res.status(404).json({ error: "User not found." });
+    res.status(200).json({ user });
+  } catch (error) {
+    console.error("Profile update error:", error.message);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
+});

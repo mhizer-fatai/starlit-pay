@@ -117,6 +117,10 @@ export const register = (body: {
 export const lookupUser = (username: string) =>
   req<{ user: BackendUser }>(`/api/users/lookup/${encodeURIComponent(username.replace(/^@/, ""))}`);
 
+// Authenticated self-profile update (display name + avatar only).
+export const updateProfile = (body: { display_name?: string; avatar_url?: string }) =>
+  req<{ user: BackendUser }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) }, true);
+
 // --- Payment links (read + write) ---
 export interface PaymentLink {
   id?: string;

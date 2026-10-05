@@ -5,6 +5,7 @@ import {
   login,
   register,
   setSession,
+  updateProfile,
   type BackendUser,
 } from "@/lib/backend";
 import { supabase } from "@/lib/supabase";
@@ -123,12 +124,13 @@ export async function updateUserProfile(
   _id: string,
   _updates: Partial<Pick<SessionUser, "display_name" | "email" | "avatar_url">>,
 ): Promise<void> {
-  // Backend has no profile-update endpoint; profile edits are local-only for now.
-  const user = await getUser();
-  if (!user) return;
-  try {
-    localStorage.setItem("starlit_user", JSON.stringify({ ...user, ..._updates }));
-  } catch {
-    /* ignore */
-  }
+  // Persist to the database first so every device/session sees the change,
+  // then refresh the local session copy. Only display name + avatar are
+  // editable (email/username are identity and never change here).
+  const body: { display_name?: string; avatar_url?: string } = {};
+  if (typeof _updates.display_name === "string") body.display_name = _updates.display_name;
+  if (typeof _updates.avatar_url === "string") body.avatar_url = _updates.avatar_url;
+  const res = await updateProfile(body);
+  const token = getToken();
+  if (token && res.user) setSession(token, res.user);
 }
