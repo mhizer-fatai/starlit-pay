@@ -121,6 +121,49 @@ export const lookupUser = (username: string) =>
 export const updateProfile = (body: { display_name?: string; avatar_url?: string }) =>
   req<{ user: BackendUser }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) }, true);
 
+export interface UserSettings {
+  user_id: string;
+  language: string;
+  currency: string;
+  notif_email: boolean;
+  notif_push: boolean;
+  notif_sms: boolean;
+  notif_marketing: boolean;
+  sec_passkey: boolean;
+  sec_google: boolean;
+  sec_email: boolean;
+  sec_phone: boolean;
+  sec_password: boolean;
+  updated_at?: string;
+}
+
+export type SettingsUpdate = Partial<
+  Pick<
+    UserSettings,
+    | "language"
+    | "currency"
+    | "notif_email"
+    | "notif_push"
+    | "notif_sms"
+    | "notif_marketing"
+    | "sec_passkey"
+    | "sec_google"
+    | "sec_email"
+    | "sec_phone"
+    | "sec_password"
+  >
+>;
+
+// Per-account settings (requires the user_settings table — see schema_settings.sql).
+export const fetchSettings = () =>
+  req<{ settings: UserSettings }>("/api/users/me/settings", {}, true);
+export const updateSettings = (body: SettingsUpdate) =>
+  req<{ settings: UserSettings }>(
+    "/api/users/me/settings",
+    { method: "PATCH", body: JSON.stringify(body) },
+    true,
+  );
+
 // --- Payment links (read + write) ---
 export interface PaymentLink {
   id?: string;

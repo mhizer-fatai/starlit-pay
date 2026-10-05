@@ -27,6 +27,7 @@ import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { getUser } from "@/lib/auth";
+import { fetchSettings, updateSettings, type SettingsUpdate } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
 
 const languages = [
@@ -171,6 +172,8 @@ function SettingsPage() {
   });
   const [referralCode] = useState("STARLIT-JANE-2024");
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
 
   useEffect(() => {
     document.title = "Settings — Starlit Pay";
@@ -183,6 +186,31 @@ function SettingsPage() {
       }
       setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
+      // Per-account settings follow the user across devices.
+      void fetchSettings()
+        .then(({ settings }) => {
+          if (cancelled) return;
+          setLanguage(settings.language);
+          setCurrency(settings.currency);
+          setNotifications({
+            email: settings.notif_email,
+            push: settings.notif_push,
+            sms: settings.notif_sms,
+            marketing: settings.notif_marketing,
+          });
+          setSecurity({
+            passkey: settings.sec_passkey,
+            google: settings.sec_google,
+            email: settings.sec_email,
+            phone: settings.sec_phone,
+            password: settings.sec_password,
+          });
+          setSettingsReady(true);
+        })
+        .catch(() => {
+          if (!cancelled)
+            setSettingsError("Couldn't load your settings — changes won't be saved yet.");
+        });
     });
     return () => {
       cancelled = true;
@@ -199,11 +227,46 @@ function SettingsPage() {
   }
 
   function toggleNotification(key: NotificationKey) {
-    setNotifications((prev) => ({ ...prev, [key]: !prev[key] }));
+    const next = !notifications[key];
+    setNotifications((prev) => ({ ...prev, [key]: next }));
+    void persistSetting({ [`notif_${key}`]: next } as SettingsUpdate, () =>
+      setNotifications((prev) => ({ ...prev, [key]: !next })),
+    );
   }
 
   function toggleSecurity(key: SecurityKey) {
-    setSecurity((prev) => ({ ...prev, [key]: !prev[key] }));
+    const next = !security[key];
+    setSecurity((prev) => ({ ...prev, [key]: next }));
+    void persistSetting({ [`sec_${key}`]: next } as SettingsUpdate, () =>
+      setSecurity((prev) => ({ ...prev, [key]: !next })),
+    );
+  }
+
+  function changeLanguage(value: string) {
+    const prev = language;
+    setLanguage(value);
+    void persistSetting({ language: value }, () => setLanguage(prev));
+  }
+
+  function changeCurrency(value: string) {
+    const prev = currency;
+    setCurrency(value);
+    void persistSetting({ currency: value }, () => setCurrency(prev));
+  }
+
+  async function persistSetting(patch: SettingsUpdate, revert: () => void) {
+    if (!settingsReady) {
+      revert();
+      setSettingsError("Settings are still loading — try again in a moment.");
+      return;
+    }
+    try {
+      await updateSettings(patch);
+      setSettingsError("");
+    } catch {
+      revert();
+      setSettingsError("Couldn't save settings — check your connection.");
+    }
   }
 
   if (checking) return null;
@@ -231,6 +294,11 @@ function SettingsPage() {
           <section className="dash-card settings-card">
             <h1 className="settings-title">Settings</h1>
             <p className="settings-subtitle">Manage your account preferences and security</p>
+            {settingsError && (
+              <p className="text-sm text-red-500" role="alert" style={{ marginTop: 8 }}>
+                {settingsError}
+              </p>
+            )}
 
             <div className="settings-section">
               <button
@@ -250,11 +318,11 @@ function SettingsPage() {
                 <div className="settings-grid">
                   <label className="settings-field">
                     <span className="settings-field-label">Language</span>
-                    <SettingsSelect value={language} onChange={setLanguage} options={languages} />
+                    <SettingsSelect value={language} onChange={changeLanguage} options={languages} />
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Currency</span>
-                    <SettingsSelect value={currency} onChange={setCurrency} options={currencies} />
+                    <SettingsSelect value={currency} onChange={changeCurrency} options={currencies} />
                   </label>
                 </div>
               </div>

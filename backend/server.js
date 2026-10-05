@@ -8,6 +8,7 @@ import "./src/asp_service.js";
 import "./src/links.js";
 import "./src/notes.js";
 import "./src/prices.js";
+import "./src/settings.js";
 import "./src/transactions.js";
 import { startIndexer } from "./src/indexer.js";
 import { startGateway } from "./src/gateway.js";
