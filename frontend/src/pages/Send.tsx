@@ -138,6 +138,7 @@ function SendPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [scanTarget, setScanTarget] = useState<"username" | "tagId">("username");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [errors, setErrors] = useState<{ username?: string; amount?: string }>({});
   const scanInputRef = useRef<HTMLInputElement>(null);
@@ -151,8 +152,12 @@ function SendPage() {
       const detector = new BarcodeDetector({ formats: ["qr_code"] });
       const codes = await detector.detect(bitmap);
       if (codes[0]?.rawValue) {
-        setUsername(codes[0].rawValue);
-        setErrors((prev) => ({ ...prev, username: undefined }));
+        if (scanTarget === "tagId") {
+          setTagId(codes[0].rawValue);
+        } else {
+          setUsername(codes[0].rawValue);
+          setErrors((prev) => ({ ...prev, username: undefined }));
+        }
       }
     } catch {
       // ignore scan errors
@@ -335,6 +340,7 @@ function SendPage() {
                           className="send-scan"
                           onClick={() => {
                             setScanning(true);
+                            setScanTarget("username");
                             scanInputRef.current?.click();
                           }}
                           aria-label="Scan QR code"
@@ -449,6 +455,18 @@ function SendPage() {
                         onChange={(event) => setTagId(event.target.value)}
                         placeholder="Enter Tag ID"
                       />
+                      <button
+                        type="button"
+                        className="send-scan"
+                        onClick={() => {
+                          setScanning(true);
+                          setScanTarget("tagId");
+                          scanInputRef.current?.click();
+                        }}
+                        aria-label="Scan QR code"
+                      >
+                        <QrCode />
+                      </button>
                     </div>
                   </label>
                 </div>

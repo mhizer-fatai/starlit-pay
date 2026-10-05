@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  ArrowDownLeft,
   ChevronLeft,
   ChevronRight,
   Download,
@@ -13,10 +14,17 @@ import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
+import { ReceiptModal } from "@/components/ReceiptModal";
 import { Skeleton } from "@/components/Skeleton";
 import { useSidebar } from "@/lib/sidebar";
 import { getUser } from "@/lib/auth";
-import { fetchTransactions, type BackendTransaction } from "@/lib/backend";
+import {
+  activityTitle,
+  buildActivityFeed,
+  loadPrivateBalances,
+  loadUserTransactions,
+  type ActivityItem,
+} from "@/lib/wallet";
 
 const PAGE_SIZE = 20;
 
@@ -30,13 +38,14 @@ function TransactionsPage() {
   );
   const [fileType, setFileType] = useState<"xls" | "pdf">("xls");
   const [checking, setChecking] = useState(true);
-  const [activities, setActivities] = useState<BackendTransaction[]>([]);
+  const [feed, setFeed] = useState<ActivityItem[]>([]);
+  const [selected, setSelected] = useState<ActivityItem | null>(null);
   const [loading, setLoading] = useState(false);
   const [companyName] = useState("Starlit Pay");
-  const totalPages = Math.max(1, Math.ceil(activities.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(feed.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const start = (safePage - 1) * PAGE_SIZE;
-  const pageItems = activities.slice(start, start + PAGE_SIZE);
+  const pageItems = feed.slice(start, start + PAGE_SIZE);
 
   useEffect(() => {
     document.title = "Transactions — Starlit Pay";
@@ -49,9 +58,12 @@ function TransactionsPage() {
       }
       setChecking(false);
       setLoading(true);
-      void fetchTransactions(user.id)
-        .then((res) => {
-          if (!cancelled) setActivities(res.transactions);
+      // Merge outgoing records with incoming shielded notes (same feed as
+      // the dashboard's Recent Activity).
+      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user)])
+        .then(([txs, balances]) => {
+          if (cancelled) return;
+          setFeed(buildActivityFeed(balances?.notes ?? [], txs));
         })
         .catch(() => {})
         .finally(() => {
@@ -79,11 +91,14 @@ function TransactionsPage() {
   }
 
   function buildExportContent() {
+    const dateOf = (a: ActivityItem) => (a.date ? new Date(a.date).toLocaleString() : "");
+    const amountOf = (a: ActivityItem) =>
+      `${a.direction === "in" ? "+" : "-"}${a.amount} ${a.asset}`;
     if (fileType === "xls") {
-      const rows = activities
+      const rows = feed
         .map(
           (a) =>
-            `<tr><td>Transaction ${a.id ?? ""}</td><td>${a.created_at ?? ""}</td><td style="text-align:right">—</td></tr>`,
+            `<tr><td>${activityTitle(a)}</td><td>${dateOf(a)}</td><td style="text-align:right">${amountOf(a)}</td></tr>`,
         )
         .join("");
       return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><table border="1" cellpadding="4" cellspacing="0"><thead><tr><th>Transaction</th><th>Date</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
@@ -91,7 +106,7 @@ function TransactionsPage() {
 
     const lines = [
       "Transaction,Date,Amount",
-      ...activities.map((a) => `"Transaction ${a.id ?? ""}","${a.created_at ?? ""}","—"`),
+      ...feed.map((a) => `"${activityTitle(a)}","${dateOf(a)}","${amountOf(a)}"`),
     ];
     return lines.join("\n");
   }
@@ -180,27 +195,47 @@ function TransactionsPage() {
                       ))}
                     </>
                   ) : (
-                    pageItems.map((tx, i) => (
-                      <tr key={tx.id ?? i}>
-                        <td>
-                          <div className="tx-row">
-                            <span className="activity-icon icon-blue">
-                              <Send />
-                            </span>
-                            <div className="activity-copy">
-                              <b>Shielded transaction</b>
-                              <small>#{tx.id ?? i}</small>
+                    pageItems.map((tx, i) => {
+                      const incoming = tx.direction === "in";
+                      return (
+                        <tr
+                          key={tx.key}
+                          role="button"
+                          tabIndex={0}
+                          style={{ cursor: "pointer" }}
+                          onClick={() => setSelected(tx)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              setSelected(tx);
+                            }
+                          }}
+                          aria-label={`View ${activityTitle(tx)} receipt`}
+                        >
+                          <td>
+                            <div className="tx-row">
+                              <span
+                                className={`activity-icon ${incoming ? "icon-green" : "icon-blue"}`}
+                              >
+                                {incoming ? <ArrowDownLeft /> : <Send />}
+                              </span>
+                              <div className="activity-copy">
+                                <b>{activityTitle(tx)}</b>
+                                <small>#{i + 1 + start}</small>
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="transactions-date">
-                          {tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <strong className="amount-negative">—</strong>
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="transactions-date">
+                            {tx.date ? new Date(tx.date).toLocaleString() : "—"}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <strong className={incoming ? "amount-positive" : "amount-negative"}>
+                              {incoming ? `+${tx.amount} ${tx.asset}` : `−${tx.amount} ${tx.asset}`}
+                            </strong>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -308,6 +343,7 @@ function TransactionsPage() {
             )}
           </main>
         </PageTransition>
+        {selected && <ReceiptModal item={selected} onClose={() => setSelected(null)} />}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@creit.tech/stellar-wallets-kit": "^2.5.0",
+    "@marsidev/react-turnstile": "^1.6.1",
     "@radix-ui/react-slot": "^1.2.4",
     "@stellar/stellar-sdk": "^16.0.1",
     "@supabase/supabase-js": "^2.108.2",
