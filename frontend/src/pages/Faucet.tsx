@@ -27,7 +27,6 @@ function FaucetPage() {
   const navigate = useNavigate();
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [me, setMe] = useState<SessionUser | null>(null);
   const [asset, setAsset] = useState("USDC");
   const [assetOpen, setAssetOpen] = useState(false);
@@ -50,7 +49,6 @@ function FaucetPage() {
         return;
       }
       setMe(user);
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
       // Seed the 4h cooldown from this browser (backup) then sync with backend.
       try {
@@ -182,7 +180,6 @@ function FaucetPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button

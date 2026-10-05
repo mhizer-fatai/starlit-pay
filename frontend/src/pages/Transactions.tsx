@@ -41,7 +41,6 @@ function TransactionsPage() {
   const [feed, setFeed] = useState<ActivityItem[]>([]);
   const [selected, setSelected] = useState<ActivityItem | null>(null);
   const [loading, setLoading] = useState(false);
-  const [companyName] = useState("Starlit Pay");
   const totalPages = Math.max(1, Math.ceil(feed.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const start = (safePage - 1) * PAGE_SIZE;
@@ -142,7 +141,6 @@ function TransactionsPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button

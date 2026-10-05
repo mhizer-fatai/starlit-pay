@@ -49,7 +49,6 @@ function DashboardPage() {
   const [checking, setChecking] = useState(true);
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [displayName, setDisplayName] = useState("Jane");
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [allTxs, setAllTxs] = useState<BackendTransaction[]>([]);
   const [balanceNotes, setBalanceNotes] = useState<BalanceNote[]>([]);
   const [selected, setSelected] = useState<ActivityItem | null>(null);
@@ -73,7 +72,6 @@ function DashboardPage() {
       }
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
       // Real transaction history (read).
       void loadUserTransactions(user.id)
@@ -207,7 +205,6 @@ function DashboardPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button

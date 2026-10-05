@@ -154,7 +154,6 @@ function SettingsPage() {
   const navigate = useNavigate();
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [language, setLanguage] = useState("en");
   const [currency, setCurrency] = useState("USD");
   const [notifications, setNotifications] = useState<Record<NotificationKey, boolean>>({
@@ -184,7 +183,6 @@ function SettingsPage() {
         navigate("/auth", { replace: true });
         return;
       }
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
       // Per-account settings follow the user across devices.
       void fetchSettings()
@@ -278,7 +276,6 @@ function SettingsPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button

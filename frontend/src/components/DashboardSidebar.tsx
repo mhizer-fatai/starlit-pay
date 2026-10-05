@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import {
   ArrowDownLeft,
   ArrowLeftRight,
@@ -21,7 +21,8 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/sidebar";
-import { getUser, signOut } from "@/lib/auth";
+import { signOut } from "@/lib/auth";
+import { BrandMark } from "@/components/BrandMark";
 import { Tooltip } from "@/components/Tooltip";
 
 const navItems = [
@@ -86,26 +87,17 @@ export function DashboardSidebar({
   collapsed,
   onToggle,
   onClose,
-  companyName,
 }: {
   open: boolean;
   collapsed: boolean;
   onToggle: () => void;
   onClose: () => void;
-  companyName: string;
 }) {
   const { mode, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const themeLabel = mode === "light" ? "Dark Mode" : "Light Mode";
   const ThemeIcon = mode === "light" ? Moon : Sun;
-  const [avatar, setAvatar] = useState<string | null>(null);
-
-  useEffect(() => {
-    void getUser().then((user) => {
-      if (user?.avatar_url) setAvatar(user.avatar_url);
-    });
-  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -126,17 +118,8 @@ export function DashboardSidebar({
   return (
     <aside className={`dashboard-sidebar ${open ? "open" : ""} ${collapsed ? "collapsed" : ""}`}>
       <div className="company-switcher">
-        {avatar ? (
-          <img
-            className="company-art"
-            src={avatar}
-            alt=""
-            style={{ objectFit: "cover", background: "#fff" }}
-          />
-        ) : (
-          <div className="company-art" />
-        )}
-        <strong>{companyName}</strong>
+        <BrandMark className="h-6 w-7" />
+        <strong>Starlit Pay</strong>
       </div>
       <nav aria-label="Main navigation">
         {navItems.map((item) => (

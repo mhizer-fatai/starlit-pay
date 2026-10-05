@@ -117,7 +117,6 @@ function SendPage() {
   const [checking, setChecking] = useState(true);
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [displayName, setDisplayName] = useState("Jane");
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [username, setUsername] = useState("");
   const [asset, setAsset] = useState("USDC");
   const [amount, setAmount] = useState("");
@@ -178,7 +177,6 @@ function SendPage() {
       }
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
     });
     return () => {
@@ -275,7 +273,6 @@ function SendPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button

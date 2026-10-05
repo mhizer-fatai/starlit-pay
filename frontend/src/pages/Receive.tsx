@@ -74,12 +74,10 @@ function ReceivePage() {
   const username = user?.username ?? "";
   const memo = user?.deposit_memo ?? "—";
   const memoValue = user?.deposit_memo != null ? String(user.deposit_memo) : "";
-  const companyName = username ? `@${username}` : "Starlit Pay";
 
   return (
     <div className="dashboard-frame">
       <DashboardSidebar
-        companyName={companyName}
         open={mobileOpen}
         collapsed={collapsed}
         onToggle={toggleCollapsed}

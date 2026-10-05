@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Camera, Check, Pencil, X } from "lucide-react";
+import { Camera, Check, Copy, Pencil, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
@@ -14,12 +14,12 @@ function ProfilePage() {
   const navigate = useNavigate();
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [user, setUser] = useState<SessionUser | null>(null);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [usernameCopied, setUsernameCopied] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -32,7 +32,6 @@ function ProfilePage() {
         return;
       }
       setUser(current);
-      setCompanyName(current.username ? `@${current.username}` : "Starlit Pay");
       setChecking(false);
     });
     return () => {
@@ -58,6 +57,14 @@ function ProfilePage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleCopyUsername() {
+    if (!user?.username) return;
+    void navigator.clipboard.writeText(`@${user.username}`).then(() => {
+      setUsernameCopied(true);
+      window.setTimeout(() => setUsernameCopied(false), 1500);
+    });
   }
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -86,7 +93,6 @@ function ProfilePage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button
@@ -152,10 +158,6 @@ function ProfilePage() {
                       <span className="settings-field-label">Username</span>
                       <Input value={user?.username ? `@${user.username}` : ""} disabled readOnly />
                     </label>
-                    <label className="settings-field">
-                      <span className="settings-field-label">Deposit Memo</span>
-                      <Input value={user?.deposit_memo ?? ""} disabled readOnly />
-                    </label>
                     {(message || error) && (
                       <p className={`profile-message ${error ? "profile-message-error" : "profile-message-success"}`}>
                         {error || message}
@@ -174,8 +176,33 @@ function ProfilePage() {
                   <>
                     <div className="profile-name">{user?.display_name || user?.username}</div>
                     <div className="profile-email">{user?.email}</div>
-                    {user?.username && <div className="profile-email">@{user.username}</div>}
-                    {user?.deposit_memo && <div className="profile-email">Memo: {user.deposit_memo}</div>}
+                    {user?.username && (
+                      <div
+                        className="profile-email"
+                        style={{ display: "flex", alignItems: "center", gap: 8 }}
+                      >
+                        <span>@{user.username}</span>
+                        <button
+                          type="button"
+                          onClick={handleCopyUsername}
+                          aria-label="Copy username"
+                          title="Copy username"
+                          style={{
+                            display: "grid",
+                            placeItems: "center",
+                            width: 28,
+                            height: 28,
+                            border: 0,
+                            borderRadius: 6,
+                            background: "transparent",
+                            color: "var(--color-muted-foreground)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {usernameCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                        </button>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
