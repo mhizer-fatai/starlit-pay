@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 
 import { FaqItem } from "@/components/FaqItem";
 import { SectionHeader } from "@/components/SectionHeader";
+import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
 import { container } from "@/lib/utils";
@@ -89,6 +90,7 @@ function Faqs() {
         </div>
       </section>
       <SiteFooter />
+      <ScrollToTopButton />
     </div>
   );
 }

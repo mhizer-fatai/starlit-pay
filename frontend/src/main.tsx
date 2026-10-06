@@ -12,6 +12,12 @@ if (typeof globalThis.Buffer === "undefined") {
 
 import Faqs from "./pages/Faqs";
 import Index from "./pages/Index";
+import AboutPage from "./pages/About";
+import DocsPage from "./pages/Docs";
+import HelpPage from "./pages/Help";
+import PrivacyPage from "./pages/Privacy";
+import TermsPage from "./pages/Terms";
+import CookiesPage from "./pages/Cookies";
 import AuthPage from "./pages/Auth";
 import DashboardPage from "./pages/Dashboard";
 import FaucetPage from "./pages/Faucet";
@@ -71,6 +77,12 @@ createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/faqs" element={<Faqs />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/docs" element={<DocsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/cookies" element={<CookiesPage />} />
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/dashboard" element={<RequireUnlock><DashboardPage /></RequireUnlock>} />
           <Route path="/profile" element={<RequireUnlock><ProfilePage /></RequireUnlock>} />

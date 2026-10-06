@@ -44,13 +44,13 @@ const socials = [
 
 const legalLinks: { label: string; href: string }[] = [
   { label: "FAQ", href: "/faqs" },
-  { label: "Help & support", href: "#" },
-  { label: "Documentation", href: "#" },
+  { label: "Help & support", href: "/help" },
+  { label: "Documentation", href: "/docs" },
   { label: "Blog", href: "#" },
-  { label: "About Starlit Pay", href: "#" },
-  { label: "Privacy Policy", href: "#" },
-  { label: "Terms of Use", href: "#" },
-  { label: "Cookie Policy", href: "#" },
+  { label: "About Starlit Pay", href: "/about" },
+  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Terms of Use", href: "/terms" },
+  { label: "Cookie Policy", href: "/cookies" },
 ];
 
 export function SiteFooter() {

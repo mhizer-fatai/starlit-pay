@@ -11,6 +11,7 @@ const idleClass = "rounded px-6 py-2 transition-colors duration-200 hover:bg-whi
 export function SiteHeader() {
   const { pathname } = useLocation();
   const onHome = pathname === "/";
+  const onFaqs = pathname === "/faqs";
   const home = (path: string) => (onHome ? path : `/${path}`);
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -69,7 +70,7 @@ export function SiteHeader() {
           <a href={home("#security")} className={idleClass}>
             Security
           </a>
-          <Link to="/faqs" className={onHome ? idleClass : activeClass}>
+          <Link to="/faqs" className={onFaqs ? activeClass : idleClass}>
             FAQs
           </Link>
         </nav>
