@@ -264,6 +264,7 @@ function PaymentLinksPage() {
               </div>
             )}
 
+            <div className="table-scroll">
             <table className="payment-links-table">
               <thead>
                 <tr>
@@ -352,6 +353,7 @@ function PaymentLinksPage() {
                 ))}
               </tbody>
             </table>
+            </div>
 
             <div className="transactions-footer">
               <Button

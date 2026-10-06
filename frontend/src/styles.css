@@ -2686,3 +2686,115 @@
   justify-content: flex-end;
   margin-top: 4px;
 }
+
+@utility table-scroll {
+  width: 100%;
+  min-width: 0;
+}
+
+@utility statement-dates {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+@utility profile-copy-btn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  & svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* Mobile-only refinements. Everything above this block is the desktop
+ * layout and is intentionally untouched. */
+@media (max-width: 640px) {
+  .balance-grid {
+    flex-direction: column;
+  }
+  .balance-grid .holdings-card {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 560px) {
+  /* Tables scroll inside their cards instead of squeezing the page. */
+  .table-scroll {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .table-scroll table {
+    min-width: 540px;
+  }
+  /* Faucet card breathing room. */
+  .dash-card.faucet-card {
+    padding: 28px 20px 32px !important;
+  }
+  /* Settings stacking. */
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+  .settings-referral,
+  .settings-stores-row {
+    flex-wrap: wrap;
+  }
+  /* Keep notifications reachable on phones. */
+  .notification {
+    display: inline-flex;
+  }
+  /* Profile stacking. */
+  .profile-body {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  /* Statement date inputs. */
+  .statement-dates {
+    flex-direction: column;
+  }
+  /* Larger tap targets (desktop sizes unchanged). */
+  .balance-filters .range-btn {
+    min-width: 48px;
+    height: 40px;
+  }
+  .receive-row .copy-icon-btn,
+  .send-input .send-scan {
+    width: 36px;
+    height: 36px;
+  }
+  .modal-close {
+    width: 40px;
+    height: 40px;
+  }
+  .profile-copy-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .export-option-btn {
+    padding: 12px 14px;
+  }
+  /* Auth page de-zoom: smaller type, shorter buttons/inputs, smaller icon. */
+  .auth-form-wrap h1 {
+    font-size: 24px;
+  }
+  .auth-form-wrap .h-16 {
+    height: 56px;
+    font-size: 15px;
+  }
+  .auth-form-wrap .size-10 {
+    width: 32px;
+    height: 32px;
+  }
+  .auth-input input {
+    height: 48px;
+  }
+}

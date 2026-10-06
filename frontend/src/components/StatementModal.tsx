@@ -179,7 +179,7 @@ export function StatementModal({
               ))}
             </div>
             {range === "custom" && (
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <div className="statement-dates">
                 <label style={{ flex: 1 }}>
                   <span className="modal-label">From</span>
                   <Input

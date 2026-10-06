@@ -187,17 +187,7 @@ function ProfilePage() {
                           onClick={handleCopyUsername}
                           aria-label="Copy username"
                           title="Copy username"
-                          style={{
-                            display: "grid",
-                            placeItems: "center",
-                            width: 28,
-                            height: 28,
-                            border: 0,
-                            borderRadius: 6,
-                            background: "transparent",
-                            color: "var(--color-muted-foreground)",
-                            cursor: "pointer",
-                          }}
+                          className="profile-copy-btn"
                         >
                           {usernameCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
                         </button>

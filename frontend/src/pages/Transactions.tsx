@@ -103,6 +103,7 @@ function TransactionsPage() {
                   Export
                 </Button>
               </div>
+              <div className="table-scroll">
               <table className="transactions-table">
                 <thead>
                   <tr>
@@ -179,6 +180,7 @@ function TransactionsPage() {
                   )}
                 </tbody>
               </table>
+              </div>
               {!loading && pageItems.length === 0 && (
                 <p className="text-sm text-muted-foreground" style={{ padding: 12 }}>No transactions yet.</p>
               )}
