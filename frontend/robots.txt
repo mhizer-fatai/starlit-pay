@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+Disallow: /auth/
+Disallow: /send/
+Disallow: /receive/
+Disallow: /transactions/
+Disallow: /payment-links/
+Disallow: /faucet/
+Disallow: /profile/
+Disallow: /settings/
+Disallow: /admin/
+
+Sitemap: https://starlitpay.xyz//sitemap.xml
