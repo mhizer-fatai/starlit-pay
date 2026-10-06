@@ -1,3 +1,8 @@
+// Enforce official custom domain: bounce any visitor away from the default Netlify subdomain
+if (typeof window !== 'undefined' && window.location.hostname.endsWith('.netlify.app')) {
+  window.location.replace(`https://starlitpay.xyz${window.location.pathname}${window.location.search}${window.location.hash}`);
+}
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
