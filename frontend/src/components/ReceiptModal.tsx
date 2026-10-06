@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDownLeft, Check, Copy, Send, X } from "lucide-react";
+import { ArrowDownLeft, Check, Copy, Download, Send, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { downloadReceiptPdf } from "@/lib/receiptPdf";
 import type { ActivityItem } from "@/lib/wallet";
 
 function shortRef(ref: string): string {
@@ -188,9 +189,24 @@ export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: (
             ledger.
           </div>
 
-          <Button type="button" className="w-full" onClick={onClose}>
-            Close Receipt
-          </Button>
+          <div className="flex gap-2">
+            <Button type="button" className="flex-1" onClick={onClose}>
+              Close Receipt
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              aria-label="Download receipt as PDF"
+              title="Download receipt as PDF"
+              onClick={() => {
+                void downloadReceiptPdf(item);
+              }}
+            >
+              <Download />
+            </Button>
+          </div>
         </div>
       </div>
     </div>,

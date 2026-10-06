@@ -22,7 +22,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/sidebar";
 import { signOut } from "@/lib/auth";
-import { BrandMark } from "@/components/BrandMark";
 import { Tooltip } from "@/components/Tooltip";
 
 const navItems = [
@@ -118,7 +117,7 @@ export function DashboardSidebar({
   return (
     <aside className={`dashboard-sidebar ${open ? "open" : ""} ${collapsed ? "collapsed" : ""}`}>
       <div className="company-switcher">
-        <BrandMark className="h-6 w-7" />
+        <img src="/logo.png" alt="Starlit Pay" className="h-7 w-auto" />
         <strong>Starlit Pay</strong>
       </div>
       <nav aria-label="Main navigation">

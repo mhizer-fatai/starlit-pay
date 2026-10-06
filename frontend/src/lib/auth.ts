@@ -17,34 +17,32 @@ import {
 
 export type SessionUser = BackendUser;
 
-// Derived wallet keys are cached in memory and mirrored to sessionStorage so a
-// same-tab reload keeps working. They are never written to localStorage and
-// are cleared on sign-out / tab close. Re-derived from email + PIN on unlock.
-const KEYS_KEY = "starlit_keys";
+// Derived wallet keys live in memory ONLY — never in any storage. A page
+// reload wipes them, and the app treats that as locked until the PIN is
+// re-entered (see isUnlocked + RequireUnlock).
 let unlockedKeys: DerivedKeys | null = null;
 
-function persistKeys(keys: DerivedKeys | null) {
-  unlockedKeys = keys;
-  try {
-    if (keys) sessionStorage.setItem(KEYS_KEY, JSON.stringify(keys));
-    else sessionStorage.removeItem(KEYS_KEY);
-  } catch {
-    /* ignore */
-  }
+// True only if the PIN was entered during THIS page load. In-memory on
+// purpose: a tab refresh always resets it to false, forcing PIN re-entry.
+let unlockedThisLoad = false;
+
+export function isUnlocked(): boolean {
+  return unlockedThisLoad;
 }
 
 export function getUnlockedKeys(): DerivedKeys | null {
-  if (unlockedKeys) return unlockedKeys;
-  try {
-    const raw = sessionStorage.getItem(KEYS_KEY);
-    if (raw) {
-      unlockedKeys = JSON.parse(raw) as DerivedKeys;
-      return unlockedKeys;
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
+  if (!unlockedThisLoad) return null;
+  return unlockedKeys;
+}
+
+function markUnlocked(keys: DerivedKeys) {
+  unlockedKeys = keys;
+  unlockedThisLoad = true;
+}
+
+function lockSession() {
+  unlockedKeys = null;
+  unlockedThisLoad = false;
 }
 
 export async function getUser(): Promise<SessionUser | null> {
@@ -88,7 +86,7 @@ export async function registerWithPin(args: {
   });
   if (!res.token || !res.user) throw new Error("Registration failed.");
   setSession(res.token, res.user);
-  persistKeys(derived);
+  markUnlocked(derived);
   return res.user;
 }
 
@@ -104,13 +102,13 @@ export async function unlockWithPin(email: string, pin: string): Promise<Session
     throw new Error("Account not found. Please create a PIN first.");
   }
   setSession(res.token, res.user);
-  persistKeys(derived);
+  markUnlocked(derived);
   return res.user;
 }
 
 export async function signOut(): Promise<void> {
   clearSession();
-  persistKeys(null);
+  lockSession();
   // Supabase persists its own session (sb-*-auth-token in localStorage).
   // If left behind, /auth would see it and silently sign the user back in.
   try {

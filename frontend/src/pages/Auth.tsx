@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   getUser,
+  isUnlocked,
   lookupByEmail,
   registerWithPin,
   signOut,
@@ -151,9 +152,21 @@ function AuthPage() {
         }
         return;
       }
-      // Plain visit: only redirect when a valid backend session already exists.
+      // Plain visit: a valid backend session alone is not enough — the PIN
+      // must have been entered during this page load (RequireUnlock enforces
+      // this on every protected route and sends locked visits here).
       const user = await getUser();
-      if (!cancelled && user) navigate("/dashboard", { replace: true });
+      if (cancelled || !user) return;
+      if (isUnlocked()) {
+        navigate("/dashboard", { replace: true });
+        return;
+      }
+      // Locked after a refresh: skip Google, go straight to PIN re-entry.
+      setEmail(user.email);
+      setUsername(user.username ?? "");
+      setPin("");
+      setPinConfirm("");
+      setPhase("pin-entry");
     })();
     return () => {
       cancelled = true;

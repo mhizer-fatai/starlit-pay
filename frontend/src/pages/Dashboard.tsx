@@ -373,8 +373,8 @@ function DashboardPage() {
                   "1M",
                   "3M",
                   "1Y",
-                ].map((range) => (
-                  <button key={range} type="button" className="range-btn">
+                ].map((range, i) => (
+                  <button key={`${range}-${i}`} type="button" className="range-btn">
                     {range}
                   </button>
                 ))}
@@ -470,7 +470,7 @@ function DashboardPage() {
                     <Receipt />
                   </span>
                   <div className="activity-copy">
-                    <b>No activity yet</b>
+                    <b>Nothing to see here yet</b>
                     <small>{tvl ? `Network TVL: ${tvl}` : "Your transactions will appear here"}</small>
                   </div>
                   <strong className="amount-negative">—</strong>

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
-import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 
 const activeClass =
@@ -29,8 +28,13 @@ export function SiteHeader() {
       }`}
     >
       <div className="mx-auto grid w-full max-w-[1710px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center px-7 pt-3 pb-3 sm:px-12 lg:px-[104px] lg:pt-4 lg:pb-3">
-        <a href={home("#home")} aria-label="Starlit Pay home" className="shrink-0">
-          <BrandMark />
+        <a
+          href={home("#home")}
+          aria-label="Starlit Pay home"
+          className="flex shrink-0 items-center gap-3"
+        >
+          <img src="/logo.png" alt="Starlit Pay" className="h-11 w-auto" />
+          <span className="text-[17px] font-semibold text-foreground">Starlit Pay</span>
         </a>
         <nav
           aria-label="Primary navigation"
