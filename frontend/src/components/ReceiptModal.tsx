@@ -53,7 +53,15 @@ const fieldValueStyle = {
 } as const;
 
 /** Full transaction receipt, mirroring the previous frontend's details modal. */
-export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: () => void }) {
+export function ReceiptModal({
+  item,
+  userName = "user",
+  onClose,
+}: {
+  item: ActivityItem;
+  userName?: string;
+  onClose: () => void;
+}) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
@@ -201,7 +209,7 @@ export function ReceiptModal({ item, onClose }: { item: ActivityItem; onClose: (
               aria-label="Download receipt as PDF"
               title="Download receipt as PDF"
               onClick={() => {
-                void downloadReceiptPdf(item);
+                void downloadReceiptPdf(item, userName);
               }}
             >
               <Download />

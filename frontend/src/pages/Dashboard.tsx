@@ -20,6 +20,7 @@ import { getUser, signOut } from "@/lib/auth";
 import { fetchStats, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
+import { StatementModal } from "@/components/StatementModal";
 import { usePrices } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
 import {
@@ -52,6 +53,8 @@ function DashboardPage() {
   const [allTxs, setAllTxs] = useState<BackendTransaction[]>([]);
   const [balanceNotes, setBalanceNotes] = useState<BalanceNote[]>([]);
   const [selected, setSelected] = useState<ActivityItem | null>(null);
+  const [statementOpen, setStatementOpen] = useState(false);
+  const [email, setEmail] = useState("");
   const [usdcBalance, setUsdcBalance] = useState(0);
   const [xlmBalance, setXlmBalance] = useState(0);
   const [tvl, setTvl] = useState<string | null>(null);
@@ -72,6 +75,7 @@ function DashboardPage() {
       }
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
+      setEmail(user.email);
       setChecking(false);
       // Real transaction history (read).
       void loadUserTransactions(user.id)
@@ -265,7 +269,11 @@ function DashboardPage() {
               <Droplets />
               Faucet
             </Button>
-            <Button variant="secondary" className={actionButtonClass}>
+            <Button
+              variant="secondary"
+              className={actionButtonClass}
+              onClick={() => setStatementOpen(true)}
+            >
               <Download />
               Download Statement
             </Button>
@@ -481,7 +489,17 @@ function DashboardPage() {
             </ul>
           </section>
         </motion.main>
-        {selected && <ReceiptModal item={selected} onClose={() => setSelected(null)} />}
+        {selected && (
+          <ReceiptModal item={selected} userName={displayName} onClose={() => setSelected(null)} />
+        )}
+        {statementOpen && (
+          <StatementModal
+            feed={activityFeed}
+            email={email}
+            userName={displayName}
+            onClose={() => setStatementOpen(false)}
+          />
+        )}
       </div>
     </div>
   );

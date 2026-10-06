@@ -389,7 +389,7 @@ function SettingsPage() {
                     variant="secondary"
                     className="settings-referral-btn"
                     style={{ height: 44 }}
-                    onClick={() => navigator.clipboard.writeText(`https://starlitpay.com/ref/${referralCode}`)}
+                    onClick={() => navigator.clipboard.writeText(`https://starlitpay.xyz/ref/${referralCode}`)}
                   >
                     <Link2 /> Copy Link
                   </Button>

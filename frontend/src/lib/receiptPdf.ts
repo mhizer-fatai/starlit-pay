@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 
 import type { ActivityItem } from "@/lib/wallet";
+import { receiptFilename } from "@/lib/wallet";
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -11,11 +12,20 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
+/** Loads the brand logo, or null when unavailable (callers fall back to text). */
+export async function loadBrandLogo(): Promise<HTMLImageElement | null> {
+  try {
+    return await loadImage("/logo.png");
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Builds one watermark tile: the logo + "Starlit Pay" pre-rotated on a
  * transparent canvas, stamped at intervals across the page below.
  */
-function makeWatermarkTile(logo: HTMLImageElement): string {
+export function makeWatermarkTile(logo: HTMLImageElement): string {
   const tile = 360;
   const canvas = document.createElement("canvas");
   canvas.width = tile;
@@ -37,33 +47,38 @@ function makeWatermarkTile(logo: HTMLImageElement): string {
   return canvas.toDataURL("image/png");
 }
 
+/** Stamps a watermark tile across the full page at reduced opacity. */
+export function drawWatermark(doc: jsPDF, tile: string) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  doc.saveGraphicsState();
+  doc.setGState(doc.GState({ opacity: 0.07 }));
+  const tileSize = 170;
+  const stepX = 205;
+  const stepY = 195;
+  for (let x = -70; x < pageW + 70; x += stepX) {
+    for (let y = -50; y < pageH + 50; y += stepY) {
+      doc.addImage(tile, "PNG", x, y, tileSize, tileSize);
+    }
+  }
+  doc.restoreGraphicsState();
+}
+
 /** Downloads a single transaction receipt as a PDF file. */
-export async function downloadReceiptPdf(item: ActivityItem) {
+export async function downloadReceiptPdf(item: ActivityItem, userName = "user") {
   const incoming = item.direction === "in";
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const margin = 48;
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const width = pageW - margin * 2;
+  const width = doc.internal.pageSize.getWidth() - margin * 2;
   let y = 64;
 
   let logo: HTMLImageElement | null = null;
   try {
-    logo = await loadImage("/logo.png");
+    logo = await loadBrandLogo();
     // Patterned background first so all content sits above it.
-    const tile = makeWatermarkTile(logo);
-    if (tile) {
-      doc.saveGraphicsState();
-      doc.setGState(doc.GState({ opacity: 0.07 }));
-      const tileSize = 170;
-      const stepX = 205;
-      const stepY = 195;
-      for (let x = -70; x < pageW + 70; x += stepX) {
-        for (let yy = -50; yy < pageH + 50; yy += stepY) {
-          doc.addImage(tile, "PNG", x, yy, tileSize, tileSize);
-        }
-      }
-      doc.restoreGraphicsState();
+    if (logo) {
+      const tile = makeWatermarkTile(logo);
+      if (tile) drawWatermark(doc, tile);
     }
   } catch {
     logo = null;
@@ -131,5 +146,5 @@ export async function downloadReceiptPdf(item: ActivityItem) {
   doc.text(note, margin, y);
 
   const slug = (item.reference || item.key || "receipt").replace(/[^a-zA-Z0-9]+/g, "-").slice(0, 24);
-  doc.save(`starlit-receipt-${slug}.pdf`);
+  doc.save(receiptFilename(userName));
 }

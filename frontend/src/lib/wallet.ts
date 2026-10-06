@@ -123,6 +123,30 @@ export function splitDollarsCents(value: number): { dollars: string; cents: stri
   return { dollars: dollars ?? "0", cents: cents ?? "00" };
 }
 
+/** Makes a display name filename-safe: "Timothy Bayode" → "Timothy-Bayode". */
+export function slugifyName(name: string): string {
+  const clean = name
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9-_]+/g, "");
+  return clean || "user";
+}
+
+/** Unpadded local date stamp: 6-10-2026. */
+export function fileDateStamp(date: Date = new Date()): string {
+  return `${date.getMonth() + 1}-${date.getDate()}-${date.getFullYear()}`;
+}
+
+/** e.g. Timothy-Bayode-Account-Statement-6-10-2026.pdf */
+export function statementFilename(userName: string, ext: string, date: Date = new Date()): string {
+  return `${slugifyName(userName)}-Account-Statement-${fileDateStamp(date)}.${ext}`;
+}
+
+/** e.g. Timothy-Bayode-Transaction-Receipt-6-10-2026.pdf */
+export function receiptFilename(userName: string, date: Date = new Date()): string {
+  return `${slugifyName(userName)}-Transaction-Receipt-${fileDateStamp(date)}.pdf`;
+}
+
 export interface ActivityItem {
   key: string;
   direction: "in" | "out";
@@ -189,4 +213,61 @@ export function activityTitle(item: ActivityItem): string {
   }
   if (!label) return "Sent";
   return `Sent to ${label}`;
+}
+
+export type StatementRange = "last-month" | "last-2-months" | "custom";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Filters a feed to a statement period. Items with unknown dates are kept. */
+export function filterFeedByRange(
+  feed: ActivityItem[],
+  range: StatementRange,
+  from?: string,
+  to?: string,
+): ActivityItem[] {
+  const now = Date.now();
+  let start = 0;
+  let end = now;
+  if (range === "last-month") start = now - 30 * DAY_MS;
+  else if (range === "last-2-months") start = now - 60 * DAY_MS;
+  else {
+    if (from) {
+      const t = new Date(`${from}T00:00:00`).getTime();
+      if (Number.isFinite(t)) start = t;
+    }
+    if (to) {
+      const t = new Date(`${to}T23:59:59`).getTime();
+      if (Number.isFinite(t)) end = t;
+    }
+  }
+  return feed.filter((item) => !item.date || (item.date >= start && item.date <= end));
+}
+
+export function rangeLabel(range: StatementRange, from?: string, to?: string): string {
+  if (range === "last-month") return "Last month";
+  if (range === "last-2-months") return "Last 2 months";
+  return `${from || "…"} to ${to || "…"}`;
+}
+
+function formatDayMonthYear(timestamp: number): string {
+  const d = new Date(timestamp);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
+/** Concrete timeline for statements, e.g. "08/05/2026 - 10/05/2026". */
+export function statementPeriodLabel(range: StatementRange, from?: string, to?: string): string {
+  const now = Date.now();
+  if (range === "last-month") return `${formatDayMonthYear(now - 30 * DAY_MS)} - ${formatDayMonthYear(now)}`;
+  if (range === "last-2-months")
+    return `${formatDayMonthYear(now - 60 * DAY_MS)} - ${formatDayMonthYear(now)}`;
+  const parse = (value?: string) => {
+    if (!value) return null;
+    const t = new Date(`${value}T00:00:00`).getTime();
+    return Number.isFinite(t) ? t : null;
+  };
+  const start = parse(from);
+  const end = parse(to);
+  return `${start === null ? "…" : formatDayMonthYear(start)} - ${end === null ? "…" : formatDayMonthYear(end)}`;
 }

@@ -244,6 +244,19 @@ export const fetchStats = () =>
   }>("/api/stats");
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
 export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
+
+// Sends the generated statement file to the user's own inbox (server-side).
+export const emailStatement = (body: {
+  filename: string;
+  mime: string;
+  contentBase64: string;
+  subject?: string;
+}) =>
+  req<{ sent: boolean; to: string }>(
+    "/api/statements/email",
+    { method: "POST", body: JSON.stringify(body) },
+    true,
+  );
 export const complianceCheck = (address: string) =>
   req<{ address: string; blocked: boolean; status: string }>(
     `/api/compliance/check/${encodeURIComponent(address)}`,
