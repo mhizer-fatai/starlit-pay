@@ -11,9 +11,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // CORS Security Options: Allow Netlify, Localhost, Render, and Custom Domains
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "https://starlit-pay.netlify.app,http://localhost:5173,http://localhost:5175,http://localhost:3000")
-  .split(",")
-  .map((o) => o.trim());
+const allowedOrigins = [
+  ...(process.env.ALLOWED_ORIGINS || "https://starlit-pay.netlify.app,http://localhost:5173,http://localhost:5175,http://localhost:3000").split(","),
+  ...(process.env.CUSTOM_DOMAIN ? process.env.CUSTOM_DOMAIN.split(",") : [])
+]
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
@@ -42,6 +45,14 @@ app.use(
   })
 );
 
+// Standard Production Security Headers
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("X-XSS-Protection", "1; mode=block");
+  next();
+});
+
 // Global API Rate Limiter (Max 200 requests per 15 minutes per IP)
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -51,6 +62,34 @@ const globalLimiter = rateLimit({
   message: { error: "Too many requests from this IP, please try again later." }
 });
 app.use("/api/", globalLimiter);
+
+// Specific rate limiters for sensitive endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many authentication attempts, please try again later." }
+});
+app.use("/api/users/", authLimiter);
+
+const faucetLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many faucet requests from this IP, please try again later." }
+});
+app.use("/api/faucet/", faucetLimiter);
+
+const relayerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many transaction submissions from this IP, please try again later." }
+});
+app.use("/api/relayer/", relayerLimiter);
 
 app.use(express.json());
 
@@ -86,13 +125,67 @@ if (process.env.GATEWAY_SECRET_KEY) {
   }
 }
 
-// Initialize Supabase Client
+// Initialize Database Client with Connection Pooling Configuration
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("Warning: Supabase keys are not set in the environment.");
+  throw new Error("Critical security configuration error: SUPABASE_URL and SUPABASE_ANON_KEY must be configured in environment.");
 }
-const supabase = createClient(supabaseUrl || "", supabaseAnonKey || "");
+
+const DB_POOL_MAX_SOCKETS = parseInt(process.env.DB_POOL_MAX_SOCKETS || "50", 10);
+const DB_POOL_TIMEOUT_MS = parseInt(process.env.DB_POOL_TIMEOUT_MS || "30000", 10);
+const DB_POOL_MODE = process.env.DB_POOL_MODE || "transaction"; // transaction or session mode
+
+const dbPoolConfig = {
+  maxSockets: DB_POOL_MAX_SOCKETS,
+  timeoutMs: DB_POOL_TIMEOUT_MS,
+  poolMode: DB_POOL_MODE,
+  supabaseHost: supabaseUrl ? new URL(supabaseUrl).host : null,
+  poolerPort: process.env.SUPABASE_POOLER_PORT || "6543"
+};
+
+// Configures Supabase client with connection pooling, keepalive, and schema settings
+const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false
+  },
+  db: {
+    schema: "public"
+  },
+  global: {
+    headers: {
+      "x-application-name": "starlit-pay-backend",
+      "Connection": "keep-alive"
+    },
+    fetch: (url, options = {}) => {
+      return fetch(url, {
+        ...options,
+        keepalive: true
+      });
+    }
+  }
+});
+
+// Database connection and pool health check endpoint
+app.get("/api/health/db", async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { count, error } = await supabase.from("users").select("*", { count: "exact", head: true });
+    const latencyMs = Date.now() - startTime;
+    if (error) {
+      return res.status(500).json({ status: "error", error: error.message, latencyMs, pool: dbPoolConfig });
+    }
+    res.json({
+      status: "connected",
+      latencyMs,
+      pool: dbPoolConfig,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ status: "error", error: err.message, pool: dbPoolConfig });
+  }
+});
 
 export {
   app,
@@ -102,5 +195,6 @@ export {
   NETWORK_PASSPHRASE,
   relayerKeypair,
   gatewayKeypair,
-  supabase
+  supabase,
+  dbPoolConfig
 };

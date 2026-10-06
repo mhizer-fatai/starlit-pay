@@ -1,7 +1,10 @@
 import jwt from "jsonwebtoken";
 import { app, supabase } from "./config.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "starlit_secret_key_change_in_prod";
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? null : "starlit_secret_key_change_in_prod");
+if (!JWT_SECRET) {
+  throw new Error("Critical security configuration error: JWT_SECRET must be configured in environment.");
+}
 
 /**
  * Generates a signed JWT for authenticated user sessions
@@ -10,7 +13,7 @@ export function generateToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, username: user.username },
     JWT_SECRET,
-    { expiresIn: "7d" }
+    { algorithm: "HS256", expiresIn: "7d" }
   );
 }
 
@@ -25,7 +28,7 @@ export function requireAuth(req, res, next) {
 
   const token = authHeader.split(" ")[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
     req.user = decoded;
     next();
   } catch (error) {
@@ -155,3 +158,27 @@ app.get("/api/users/lookup/:username", async (req, res) => {
     res.status(500).json({ error: "Failed to resolve user" });
   }
 });
+
+// 4. Update user profile (display name, avatar)
+app.patch("/api/users/profile", requireAuth, async (req, res) => {
+  const { display_name, avatar_url } = req.body;
+  const updates = {};
+  if (display_name !== undefined) updates.display_name = display_name;
+  if (avatar_url !== undefined) updates.avatar_url = avatar_url;
+
+  try {
+    const { data: updated, error } = await supabase
+      .from("users")
+      .update(updates)
+      .eq("id", req.user.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.status(200).json({ user: updated });
+  } catch (error) {
+    console.error("Profile update error:", error.message);
+    res.status(500).json({ error: "Failed to update profile." });
+  }
+});
+

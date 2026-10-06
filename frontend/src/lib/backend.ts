@@ -32,6 +32,15 @@ export function clearSession() {
   try {
     localStorage.removeItem(JWT_KEY);
     localStorage.removeItem(USER_KEY);
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("starlit") || k.startsWith("sb-"))) {
+        keysToRemove.push(k);
+      }
+    }
+    keysToRemove.forEach((k) => localStorage.removeItem(k));
+    sessionStorage.clear();
   } catch {
     /* ignore */
   }
@@ -108,6 +117,9 @@ export const register = (body: {
 export const lookupUser = (username: string) =>
   req<{ user: BackendUser }>(`/api/users/lookup/${encodeURIComponent(username.replace(/^@/, ""))}`);
 
+export const updateProfile = (body: { display_name?: string; avatar_url?: string }) =>
+  req<{ user: BackendUser }>("/api/users/profile", { method: "PATCH", body: JSON.stringify(body) }, true);
+
 // --- Payment links (read + write) ---
 export interface PaymentLink {
   id?: string;
@@ -141,14 +153,20 @@ export interface ShieldedNote {
   root?: string;
   ledger?: number;
 }
-export const fetchNotes = (viewingKey: string, timestamp: string, signature: string) =>
-  req<{ notes: ShieldedNote[] }>(
-    `/api/notes/${encodeURIComponent(viewingKey)}?timestamp=${encodeURIComponent(timestamp)}&signature=${encodeURIComponent(signature)}`,
-  );
+export const fetchNotes = (viewingKey: string, timestamp?: string, signature?: string) => {
+  const query =
+    timestamp && signature
+      ? `?timestamp=${encodeURIComponent(timestamp)}&signature=${encodeURIComponent(signature)}`
+      : "";
+  return req<{ notes: ShieldedNote[] }>(`/api/notes/${encodeURIComponent(viewingKey)}${query}`, undefined, true);
+};
+
 export const postNote = (body: { commitment: string; encrypted_note: string; recipient_viewing_key: string }) =>
   req<{ note: ShieldedNote }>("/api/notes", { method: "POST", body: JSON.stringify(body) });
-export const spendNote = (body: { commitment: string; timestamp: string; signature: string }) =>
-  req<{ success: boolean }>("/api/notes/spend", { method: "POST", body: JSON.stringify(body) });
+
+export const spendNote = (body: { commitment: string; timestamp?: string; signature?: string }) =>
+  req<{ success: boolean }>("/api/notes/spend", { method: "POST", body: JSON.stringify(body) }, true);
+
 
 // --- Faucet (read + write) ---
 export const faucetStatus = (viewingKey: string) =>
@@ -190,3 +208,39 @@ export const complianceCheck = (address: string) =>
   req<{ address: string; blocked: boolean; status: string }>(
     `/api/compliance/check/${encodeURIComponent(address)}`,
   );
+
+export interface RelayerTransferPayload {
+  proof: string;
+  nullifier_1: string;
+  nullifier_2: string;
+  output_commitment_1: string;
+  encrypted_note_1: string;
+  output_commitment_2: string;
+  encrypted_note_2: string;
+  root: string;
+}
+
+export const submitRelayerTransfer = (body: RelayerTransferPayload) =>
+  req<{ success: boolean; hash: string; ledger?: number }>("/api/relayer/transfer", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export interface RelayerWithdrawPayload {
+  proof: string;
+  nullifier_1: string;
+  nullifier_2: string;
+  recipient: string;
+  token: string;
+  amount: number;
+  root: string;
+  change_commitment: string;
+  encrypted_change_note: string;
+}
+
+export const submitRelayerWithdraw = (body: RelayerWithdrawPayload) =>
+  req<{ success: boolean; hash: string; ledger?: number }>("/api/relayer/withdraw", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+

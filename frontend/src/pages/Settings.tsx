@@ -154,22 +154,44 @@ function SettingsPage() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
   const [companyName, setCompanyName] = useState("Starlit Pay");
-  const [language, setLanguage] = useState("en");
-  const [currency, setCurrency] = useState("USD");
-  const [notifications, setNotifications] = useState<Record<NotificationKey, boolean>>({
-    email: true,
-    push: true,
-    sms: false,
-    marketing: false,
+  const [referralCode, setReferralCode] = useState("STARLIT-2025");
+
+  const [language, setLanguage] = useState(() => {
+    try {
+      const saved = localStorage.getItem("starlit_lang");
+      return saved || "en";
+    } catch {
+      return "en";
+    }
   });
-  const [security, setSecurity] = useState<Record<SecurityKey, boolean>>({
-    passkey: true,
-    google: true,
-    email: true,
-    phone: false,
-    password: true,
+
+  const [currency, setCurrency] = useState(() => {
+    try {
+      const saved = localStorage.getItem("starlit_curr");
+      return saved || "USD";
+    } catch {
+      return "USD";
+    }
   });
-  const [referralCode] = useState("STARLIT-JANE-2024");
+
+  const [notifications, setNotifications] = useState<Record<NotificationKey, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem("starlit_notifications");
+      return saved ? JSON.parse(saved) : { email: true, push: true, sms: false, marketing: false };
+    } catch {
+      return { email: true, push: true, sms: false, marketing: false };
+    }
+  });
+
+  const [security, setSecurity] = useState<Record<SecurityKey, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem("starlit_security");
+      return saved ? JSON.parse(saved) : { passkey: true, google: true, email: true, phone: false, password: true };
+    } catch {
+      return { passkey: true, google: true, email: true, phone: false, password: true };
+    }
+  });
+
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -182,6 +204,7 @@ function SettingsPage() {
         return;
       }
       setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
+      if (user.username) setReferralCode(`STARLIT-${user.username.toUpperCase()}`);
       setChecking(false);
     });
     return () => {
@@ -198,13 +221,40 @@ function SettingsPage() {
     });
   }
 
+  function handleLanguageChange(val: string) {
+    setLanguage(val);
+    try {
+      localStorage.setItem("starlit_lang", val);
+    } catch {}
+  }
+
+  function handleCurrencyChange(val: string) {
+    setCurrency(val);
+    try {
+      localStorage.setItem("starlit_curr", val);
+    } catch {}
+  }
+
   function toggleNotification(key: NotificationKey) {
-    setNotifications((prev) => ({ ...prev, [key]: !prev[key] }));
+    setNotifications((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try {
+        localStorage.setItem("starlit_notifications", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   }
 
   function toggleSecurity(key: SecurityKey) {
-    setSecurity((prev) => ({ ...prev, [key]: !prev[key] }));
+    setSecurity((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try {
+        localStorage.setItem("starlit_security", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   }
+
 
   if (checking) return null;
 
@@ -250,11 +300,11 @@ function SettingsPage() {
                 <div className="settings-grid">
                   <label className="settings-field">
                     <span className="settings-field-label">Language</span>
-                    <SettingsSelect value={language} onChange={setLanguage} options={languages} />
+                    <SettingsSelect value={language} onChange={handleLanguageChange} options={languages} />
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Currency</span>
-                    <SettingsSelect value={currency} onChange={setCurrency} options={currencies} />
+                    <SettingsSelect value={currency} onChange={handleCurrencyChange} options={currencies} />
                   </label>
                 </div>
               </div>
@@ -359,7 +409,11 @@ function SettingsPage() {
                     <GooglePlayButton size="md" />
                     <span className="soon-badge">Soon</span>
                   </span>
-                  <Button variant="secondary" className="settings-action-btn settings-trustpilot-btn">
+                  <Button
+                    variant="secondary"
+                    className="settings-action-btn settings-trustpilot-btn"
+                    onClick={() => window.open("https://github.com/mhizer-fatai/starlit-pay", "_blank")}
+                  >
                     <ExternalLink /> Trustpilot
                   </Button>
                 </div>
@@ -382,10 +436,18 @@ function SettingsPage() {
               </button>
               <div className={`settings-section-body ${collapsedSections.has("feedback") ? "settings-section-body-collapsed" : ""}`}>
                 <div className="settings-grid">
-                  <Button variant="secondary" className="settings-action-btn">
+                  <Button
+                    variant="secondary"
+                    className="settings-action-btn"
+                    onClick={() => window.open("https://github.com/mhizer-fatai/starlit-pay/issues", "_blank")}
+                  >
                     <Share2 /> Share Feedback
                   </Button>
-                  <Button variant="secondary" className="settings-action-btn">
+                  <Button
+                    variant="secondary"
+                    className="settings-action-btn"
+                    onClick={() => window.open("https://discord.gg/stellar", "_blank")}
+                  >
                     <Users /> Join Community
                   </Button>
                 </div>

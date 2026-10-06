@@ -1,14 +1,20 @@
 import fs from "fs";
 import path from "path";
+import jwt from "jsonwebtoken";
 import { app, supabase, rpc } from "./config.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
+
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? null : "starlit_secret_key_change_in_prod");
+if (!JWT_SECRET) {
+  throw new Error("Critical security configuration error: JWT_SECRET must be configured in environment.");
+}
 
 // Helper to verify cryptographic signatures of current requests
 function verifyRequestSignature(timestampStr, signatureHex, publicKey) {
   try {
-    // 1. Verify timestamp is fresh (within 5 minutes) to prevent replay attacks
+    // 1. Verify timestamp is fresh (within 60 seconds) to prevent replay attacks
     const diff = Math.abs(Date.now() - parseInt(timestampStr));
-    if (isNaN(diff) || diff > 5 * 60 * 1000) {
+    if (isNaN(diff) || diff > 60 * 1000) {
       return false;
     }
     // 2. Verify signature using public Ed25519 key
@@ -24,15 +30,26 @@ app.get("/api/notes/:viewingKey", async (req, res) => {
   const { viewingKey } = req.params;
   const { timestamp, signature } = req.query;
 
-  if (!timestamp || !signature) {
-    return res.status(401).json({ error: "Authentication parameters (timestamp, signature) are required." });
+  const authHeader = req.headers.authorization;
+  let authViaJwt = false;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    try {
+      const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET, { algorithms: ["HS256"] });
+      if (decoded && decoded.id) authViaJwt = true;
+    } catch {
+      // fallback to signature verification
+    }
+  }
+
+  if (!authViaJwt && (!timestamp || !signature)) {
+    return res.status(401).json({ error: "Authentication parameters (timestamp, signature) or Bearer token are required." });
   }
 
   try {
     // 1. Lookup recipient's stellar address from users profile
     const { data: user, error: userError } = await supabase
       .from("users")
-      .select("stellar_address")
+      .select("id, stellar_address, public_encryption_key")
       .eq("public_encryption_key", viewingKey)
       .maybeSingle();
 
@@ -40,10 +57,16 @@ app.get("/api/notes/:viewingKey", async (req, res) => {
       return res.status(404).json({ error: "User profile matching this viewing key not found." });
     }
 
-    // 2. Cryptographically verify signature
-    const verified = verifyRequestSignature(timestamp, signature, user.stellar_address);
-    if (!verified) {
-      return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+    // 2. Cryptographically verify signature if not authenticated via JWT
+    if (!authViaJwt) {
+      const signer = user.stellar_address || (user.public_encryption_key?.startsWith("G") ? user.public_encryption_key : null);
+      if (!signer) {
+        return res.status(400).json({ error: "No signer address found for this user profile." });
+      }
+      const verified = verifyRequestSignature(timestamp, signature, signer);
+      if (!verified) {
+        return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+      }
     }
 
     // 3. Fetch notes
@@ -85,14 +108,14 @@ app.post("/api/notes", async (req, res) => {
 // Marks a commitment note as spent in cache database (authenticated)
 app.post("/api/notes/spend", async (req, res) => {
   const { commitment, timestamp, signature } = req.body;
-  if (!commitment || !timestamp || !signature) {
-    return res.status(400).json({ error: "Commitment, timestamp, and signature are required." });
+  if (!commitment) {
+    return res.status(400).json({ error: "Commitment is required." });
   }
   try {
-    // 1. Fetch note to get recipient's viewing key
+    // 1. Fetch note to get recipient's viewing key and status
     const { data: note, error: noteError } = await supabase
       .from("shielded_notes")
-      .select("recipient_viewing_key")
+      .select("recipient_viewing_key, status")
       .eq("commitment", commitment)
       .maybeSingle();
 
@@ -100,10 +123,14 @@ app.post("/api/notes/spend", async (req, res) => {
       return res.status(404).json({ error: "Shielded note not found." });
     }
 
+    if (note.status === "spent") {
+      return res.status(200).json({ success: true, message: "Note already marked as spent." });
+    }
+
     // 2. Lookup recipient's stellar address from users profile
     const { data: user, error: userError } = await supabase
       .from("users")
-      .select("stellar_address")
+      .select("id, username, stellar_address, public_encryption_key")
       .eq("public_encryption_key", note.recipient_viewing_key)
       .maybeSingle();
 
@@ -111,10 +138,30 @@ app.post("/api/notes/spend", async (req, res) => {
       return res.status(404).json({ error: "User profile matching this note not found." });
     }
 
-    // 3. Cryptographically verify signature
-    const verified = verifyRequestSignature(timestamp, signature, user.stellar_address);
-    if (!verified) {
-      return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+    // 3. Cryptographically verify signature or JWT
+    let authViaJwt = false;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      try {
+        const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET);
+        if (decoded && (decoded.id === user.id || decoded.username === user.username)) {
+          authViaJwt = true;
+        }
+      } catch {}
+    }
+
+    if (!authViaJwt) {
+      if (!timestamp || !signature) {
+        return res.status(401).json({ error: "Authentication parameters (timestamp, signature) or valid Bearer token required." });
+      }
+      const signer = user.stellar_address || (user.public_encryption_key?.startsWith("G") ? user.public_encryption_key : null);
+      if (!signer) {
+        return res.status(400).json({ error: "No signer address found for this user profile." });
+      }
+      const verified = verifyRequestSignature(timestamp, signature, signer);
+      if (!verified) {
+        return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+      }
     }
 
     // 4. Update status
@@ -288,9 +335,12 @@ app.post("/api/faucet/fund", async (req, res) => {
 
     // 2. Cryptographic signature check if provided
     if (timestamp && signature) {
-      const verified = verifyRequestSignature(timestamp, signature, user.stellar_address);
-      if (!verified) {
-        return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+      const signer = user.stellar_address || (user.public_encryption_key?.startsWith("G") ? user.public_encryption_key : null);
+      if (signer) {
+        const verified = verifyRequestSignature(timestamp, signature, signer);
+        if (!verified) {
+          return res.status(401).json({ error: "Unauthorized: Invalid request signature." });
+        }
       }
     }
 
@@ -310,7 +360,10 @@ app.post("/api/faucet/fund", async (req, res) => {
       });
     }
 
-    const rawSecret = process.env.FAUCET_SCREATE_KEY || process.env.FAUCET_SECRET_KEY || "SCZ5A6735NTZTXFNS6CBA5KXDRGP3PZDCXZKPHT2SKW7TI4LPX3F2FUQ";
+    const rawSecret = process.env.FAUCET_SCREATE_KEY || process.env.FAUCET_SECRET_KEY;
+    if (!rawSecret) {
+      throw new Error("Server configuration error: FAUCET_SECRET_KEY is not configured in environment");
+    }
     const cleanSecret = rawSecret.replace(/['"\s]/g, "").trim();
     const faucetKeypair = StellarSdk.Keypair.fromSecret(cleanSecret);
 

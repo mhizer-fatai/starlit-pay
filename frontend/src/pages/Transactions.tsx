@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   Send,
+  ArrowUp,
   Check,
   X,
 } from "lucide-react";
@@ -16,6 +17,8 @@ import { PageTransition } from "@/components/PageTransition";
 import { useSidebar } from "@/lib/sidebar";
 import { getUser } from "@/lib/auth";
 import { fetchTransactions, type BackendTransaction } from "@/lib/backend";
+import { decodeTransaction } from "@/lib/notes";
+
 
 const PAGE_SIZE = 20;
 
@@ -80,17 +83,24 @@ function TransactionsPage() {
   function buildExportContent() {
     if (fileType === "xls") {
       const rows = activities
-        .map(
-          (a) =>
-            `<tr><td>Transaction ${a.id ?? ""}</td><td>${a.created_at ?? ""}</td><td style="text-align:right">—</td></tr>`,
-        )
+        .map((a) => {
+          const dec = decodeTransaction(a);
+          const amtStr =
+            dec.amount > 0
+              ? `${dec.type === "receive" || dec.type === "faucet" ? "+" : "-"}${dec.amount.toFixed(2)} ${dec.asset}`
+              : "—";
+          return `<tr><td>${dec.type.toUpperCase()}: ${dec.party}</td><td>${dec.createdAt ? new Date(dec.createdAt).toLocaleString() : ""}</td><td style="text-align:right">${amtStr}</td></tr>`;
+        })
         .join("");
       return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><table border="1" cellpadding="4" cellspacing="0"><thead><tr><th>Transaction</th><th>Date</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
     }
 
     const lines = [
-      "Transaction,Date,Amount",
-      ...activities.map((a) => `"Transaction ${a.id ?? ""}","${a.created_at ?? ""}","—"`),
+      "Type,Party,Amount,Asset,Date",
+      ...activities.map((a) => {
+        const dec = decodeTransaction(a);
+        return `"${dec.type}","${dec.party}","${dec.amount}","${dec.asset}","${dec.createdAt ? new Date(dec.createdAt).toLocaleString() : ""}"`;
+      }),
     ];
     return lines.join("\n");
   }
@@ -156,27 +166,33 @@ function TransactionsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {pageItems.map((tx, i) => (
-                    <tr key={tx.id ?? i}>
-                      <td>
-                        <div className="tx-row">
-                          <span className="activity-icon icon-blue">
-                            <Send />
-                          </span>
-                          <div className="activity-copy">
-                            <b>Shielded transaction</b>
-                            <small>#{tx.id ?? i}</small>
+                  {pageItems.map((tx, i) => {
+                    const dec = decodeTransaction(tx);
+                    const isPositive = dec.type === "receive" || dec.type === "faucet";
+                    return (
+                      <tr key={tx.id ?? i}>
+                        <td>
+                          <div className="tx-row">
+                            <span className="activity-icon icon-blue">
+                              {dec.type === "withdraw" ? <ArrowUp /> : <Send />}
+                            </span>
+                            <div className="activity-copy">
+                              <b>{dec.type === "withdraw" ? "Withdrawal" : dec.type === "faucet" ? "Faucet claim" : "Shielded payment"}</b>
+                              <small>{dec.party} {dec.id ? `· #${dec.id.slice(0, 8)}` : ""}</small>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="transactions-date">
-                        {tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <strong className="amount-negative">—</strong>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="transactions-date">
+                          {dec.createdAt ? new Date(dec.createdAt).toLocaleString() : tx.created_at ? new Date(tx.created_at).toLocaleString() : "—"}
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <strong className={isPositive ? "amount-positive" : "amount-negative"}>
+                            {dec.amount > 0 ? `${isPositive ? "+" : "-"}${dec.amount.toFixed(2)} ${dec.asset}` : "—"}
+                          </strong>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
               {loading && <p className="text-sm text-muted-foreground" style={{ padding: 12 }}>Loading transactions…</p>}

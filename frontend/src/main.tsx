@@ -1,3 +1,17 @@
+import { Buffer } from "buffer";
+if (typeof window !== "undefined") {
+  window.Buffer = Buffer;
+  // @ts-ignore
+  globalThis.Buffer = Buffer;
+
+  // Enforce official custom domain: bounce any visitor away from the default Netlify subdomain
+  if (window.location.hostname.endsWith(".netlify.app")) {
+    window.location.replace(
+      `https://starlitpay.xyz${window.location.pathname}${window.location.search}${window.location.hash}`
+    );
+  }
+}
+
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";

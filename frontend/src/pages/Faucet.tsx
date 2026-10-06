@@ -8,7 +8,7 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { Input } from "@/components/ui/input";
 import { getUser, type SessionUser } from "@/lib/auth";
-import { faucetFund, faucetStatus } from "@/lib/backend";
+import { faucetFund, faucetStatus, postTransaction } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
 
 function FaucetPage() {
@@ -74,7 +74,20 @@ function FaucetPage() {
         viewingKey: me.public_encryption_key,
         depositMemo: me.deposit_memo || undefined,
       });
-      setStatus(res.hash ? `Funded! Tx ${res.hash}` : "Faucet claim submitted. Tokens will arrive shortly.");
+
+      // Record transaction log for dashboard feed
+      try {
+        const payload = JSON.stringify({
+          to: me.username || "me",
+          amount: 50,
+          asset: "USDC",
+          type: "faucet",
+          at: new Date().toISOString(),
+        });
+        await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
+      } catch {}
+
+      setStatus(res.hash ? `Funded! Tx ${res.hash}` : "Faucet claim submitted! 100 XLM & 50 USDC will arrive shortly.");
       setCaptchaSolved(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Claim failed — try again later.");

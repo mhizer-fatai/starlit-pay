@@ -67,8 +67,10 @@ function PaymentLinksPage() {
   const [copied, setCopied] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [formAmount, setFormAmount] = useState("");
+  const [formAsset, setFormAsset] = useState<"USDC" | "XLM">("USDC");
   const [formDesc, setFormDesc] = useState("");
   const [busy, setBusy] = useState(false);
+
 
   useEffect(() => {
     document.title = "Payment Links — Starlit Pay";
@@ -124,19 +126,20 @@ function PaymentLinksPage() {
         creator_id: me.id,
         amount: formAmount,
         commitment,
-        asset: "USDC",
+        asset: formAsset,
         description: formDesc || undefined,
       });
       const row: LinkRow = {
         id: commitment,
         commitment,
         amount: formAmount,
-        asset: "USDC",
+        asset: formAsset,
         title: formDesc || `Payment request ${commitment.slice(0, 6)}`,
         status: "pending",
         createdAt: new Date().toLocaleDateString(),
         url: `${window.location.origin}/pay/${commitment}`,
       };
+
       const rows = [row, ...links];
       setLinks(rows);
       writeCache(me.id, rows);
@@ -399,17 +402,30 @@ function PaymentLinksPage() {
               </button>
             </div>
             <form className="modal-body" onSubmit={handleCreate}>
-              <label className="text-sm font-semibold">
-                Amount (USDC)
-                <Input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={formAmount}
-                  onChange={(e) => setFormAmount(e.target.value)}
-                  placeholder="0.00"
-                />
-              </label>
+              <div className="flex gap-2">
+                <div className="w-1/3">
+                  <label className="text-sm font-semibold block mb-1">Asset</label>
+                  <select
+                    value={formAsset}
+                    onChange={(e) => setFormAsset(e.target.value as "USDC" | "XLM")}
+                    className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="USDC">USDC</option>
+                    <option value="XLM">XLM</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="text-sm font-semibold block mb-1">Amount</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={formAmount}
+                    onChange={(e) => setFormAmount(e.target.value)}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
               <label className="text-sm font-semibold">
                 Description (optional)
                 <Input
@@ -422,6 +438,7 @@ function PaymentLinksPage() {
                 {busy ? "Creating…" : "Create link"}
               </Button>
             </form>
+
           </div>
         </div>
       )}

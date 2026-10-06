@@ -88,9 +88,10 @@ async function runGatewayDaemon() {
     
     let txsRes;
     try {
-      console.log(`Gateway querying transactions for address ${gatewayAddress} starting at cursor ${lastProcessedTxToken}...`);
       txsRes = await txsQuery.call();
-      console.log(`Gateway query complete. Found ${txsRes.records.length} transaction records.`);
+      if (txsRes.records.length > 0) {
+        console.log(`Gateway discovered ${txsRes.records.length} new transaction record(s) on address ${gatewayAddress}`);
+      }
     } catch (horizonErr) {
       console.error("Gateway Horizon query failed:", horizonErr.message || horizonErr);
       isGatewayRunning = false;

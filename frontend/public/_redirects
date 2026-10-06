@@ -1,0 +1,6 @@
+# Force permanent redirect from old netlify subdomain to official custom domain
+https://starlit-pay.netlify.app/* https://starlitpay.xyz/:splat 301!
+http://starlit-pay.netlify.app/* https://starlitpay.xyz/:splat 301!
+
+# SPA client-side routing fallback
+/* /index.html 200

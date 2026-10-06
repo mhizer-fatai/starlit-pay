@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Camera, Check, Pencil, X } from "lucide-react";
+import { Camera, Check, Pencil, X, LogOut } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { Input } from "@/components/ui/input";
-import { getUser, updateUserProfile, type SessionUser } from "@/lib/auth";
+import { getUser, updateUserProfile, signOut, type SessionUser } from "@/lib/auth";
 import { getAvatarUrl } from "@/lib/avatar";
 import { useSidebar } from "@/lib/sidebar";
 
@@ -60,6 +60,11 @@ function ProfilePage() {
     }
   }
 
+  async function handleLogout() {
+    await signOut();
+    window.location.href = "/auth";
+  }
+
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !user) return;
@@ -104,12 +109,28 @@ function ProfilePage() {
                 <h1 className="profile-title">Profile</h1>
                 <p className="profile-subtitle">Manage your account details</p>
               </div>
-              {!editing && (
-                <Button className="profile-edit-btn" onClick={() => setEditing(true)}>
-                  <Pencil className="size-4" />
-                  Edit profile
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {!editing && (
+                  <Button className="profile-edit-btn" onClick={() => setEditing(true)}>
+                    <Pencil className="size-4" />
+                    Edit profile
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={handleLogout}
+                  style={{
+                    color: "#ef4444",
+                    borderColor: "rgba(239, 68, 68, 0.3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  }}
+                >
+                  <LogOut className="size-4" />
+                  Log out
                 </Button>
-              )}
+              </div>
             </div>
 
             <div className="profile-body">
@@ -179,6 +200,40 @@ function ProfilePage() {
                   </>
                 )}
               </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: "32px",
+                paddingTop: "24px",
+                borderTop: "1px solid var(--border-color, #27272a)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "16px",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 600, fontSize: "14px", color: "var(--text-color, #fff)" }}>
+                  Account Session
+                </div>
+                <div style={{ fontSize: "12px", color: "var(--text-muted, #a1a1aa)" }}>
+                  Sign out of this session and clear active wallet credentials on this device
+                </div>
+              </div>
+              <Button
+                variant="destructive"
+                onClick={handleLogout}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <LogOut className="size-4" />
+                Sign Out
+              </Button>
             </div>
           </section>
         </main>

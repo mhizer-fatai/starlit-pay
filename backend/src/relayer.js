@@ -2,28 +2,13 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import rateLimit from "express-rate-limit";
 import { app, rpc, horizon, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
 import { isAddressBlocked } from "./asp_service.js";
+import { performRelayerGasCheck, getRelayerMonitorStatus } from "./relayer_monitor.js";
 
-// Minimum gas threshold before alerting (in XLM)
-const MIN_RELAYER_XLM_BALANCE = 10;
-
-// Checks relayer XLM balance and alerts if low
+// Checks relayer XLM balance and alerts if low using the relayer monitoring service
 export async function checkRelayerBalance() {
   if (!relayerKeypair) return null;
-  try {
-    const account = await horizon.loadAccount(relayerKeypair.publicKey());
-    const nativeBalance = account.balances.find((b) => b.asset_type === "native");
-    const balance = nativeBalance ? parseFloat(nativeBalance.balance) : 0;
-
-    if (balance < MIN_RELAYER_XLM_BALANCE) {
-      console.warn(
-        `[RELAYER GAS ALERT] Relayer account ${relayerKeypair.publicKey()} balance is LOW: ${balance} XLM. Please top up.`
-      );
-    }
-    return balance;
-  } catch (err) {
-    console.error("Failed to check relayer balance:", err.message);
-    return null;
-  }
+  const result = await performRelayerGasCheck();
+  return result.balanceXlm;
 }
 
 // Rate Limiter for Relayer Gas Endpoints (Max 20 requests per 15 minutes per IP)
@@ -333,12 +318,35 @@ app.get("/api/relayer/health", async (req, res) => {
     return res.status(503).json({ status: "unavailable", error: "Relayer keypair not configured." });
   }
 
-  const balance = await checkRelayerBalance();
+  const daemonMetrics = getRelayerMonitorStatus();
+  const balance = daemonMetrics.currentBalanceXlm !== null ? daemonMetrics.currentBalanceXlm : await checkRelayerBalance();
+
   res.json({
-    status: "ok",
+    status: daemonMetrics.status === "ERROR" ? "degraded" : "ok",
+    healthState: daemonMetrics.status,
     address: relayerKeypair.publicKey(),
     balanceXlm: balance,
-    isLowGas: balance !== null && balance < MIN_RELAYER_XLM_BALANCE,
+    isLowGas: daemonMetrics.status === "WARNING" || daemonMetrics.status === "CRITICAL",
+    thresholds: daemonMetrics.thresholds,
+    uptimeSeconds: daemonMetrics.uptimeSeconds,
+    lastCheckedAt: daemonMetrics.lastCheckedAt,
+    checkCount: daemonMetrics.checkCount
+  });
+});
+
+// Endpoint to inspect background relayer monitor daemon status and check history
+app.get("/api/relayer/daemon/status", (req, res) => {
+  const daemonStatus = getRelayerMonitorStatus();
+  res.json(daemonStatus);
+});
+
+// Endpoint to trigger an immediate relayer gas check on demand
+app.post("/api/relayer/daemon/check-now", async (req, res) => {
+  const checkResult = await performRelayerGasCheck();
+  res.json({
+    message: "Relayer gas check executed successfully.",
+    result: checkResult,
+    daemon: getRelayerMonitorStatus()
   });
 });
 
