@@ -198,3 +198,4 @@ export async function updateUserProfile(
   const token = getToken();
   if (token && res.user) setSession(token, res.user);
 }
+
