@@ -272,10 +272,12 @@ function DashboardPage() {
             <Button
               variant="secondary"
               className={actionButtonClass}
-              onClick={() => setStatementOpen(true)}
+              disabled
+              aria-label="Download Statement — coming soon"
             >
               <Download />
               Download Statement
+              <span className="soon-pill">Soon</span>
             </Button>
           </div>
           </motion.div>
