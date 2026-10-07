@@ -187,6 +187,15 @@ app.get("/api/health/db", async (req, res) => {
   }
 });
 
+// Single source of truth for the deposit gateway address:
+// explicit env override first, then the daemon keypair's address, then the
+// well-known fallback. The faucet, the daemon, and the /api/gateway/address
+// endpoint all resolve through this so they can never disagree.
+const GATEWAY_ADDRESS =
+  process.env.GATEWAY_PUBLIC_KEY ||
+  gatewayKeypair?.publicKey() ||
+  "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
+
 export {
   app,
   PORT,
@@ -196,5 +205,6 @@ export {
   relayerKeypair,
   gatewayKeypair,
   supabase,
-  dbPoolConfig
+  dbPoolConfig,
+  GATEWAY_ADDRESS
 };

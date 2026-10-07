@@ -56,7 +56,6 @@ function PaymentLinksPage() {
   const navigate = useNavigate();
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [me, setMe] = useState<SessionUser | null>(null);
   const [links, setLinks] = useState<LinkRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -82,7 +81,6 @@ function PaymentLinksPage() {
         return;
       }
       setMe(user);
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
       const cached = readCache(user.id);
       setLinks(cached);
@@ -229,7 +227,6 @@ function PaymentLinksPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button
@@ -270,6 +267,7 @@ function PaymentLinksPage() {
               </div>
             )}
 
+            <div className="table-scroll">
             <table className="payment-links-table">
               <thead>
                 <tr>
@@ -358,6 +356,7 @@ function PaymentLinksPage() {
                 ))}
               </tbody>
             </table>
+            </div>
 
             <div className="transactions-footer">
               <Button

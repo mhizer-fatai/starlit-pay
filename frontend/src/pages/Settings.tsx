@@ -27,6 +27,7 @@ import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { getUser } from "@/lib/auth";
+import { fetchSettings, updateSettings, type SettingsUpdate } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
 
 const languages = [
@@ -153,46 +154,25 @@ function SettingsPage() {
   const navigate = useNavigate();
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
-  const [companyName, setCompanyName] = useState("Starlit Pay");
-  const [referralCode, setReferralCode] = useState("STARLIT-2025");
-
-  const [language, setLanguage] = useState(() => {
-    try {
-      const saved = localStorage.getItem("starlit_lang");
-      return saved || "en";
-    } catch {
-      return "en";
-    }
+  const [language, setLanguage] = useState("en");
+  const [currency, setCurrency] = useState("USD");
+  const [notifications, setNotifications] = useState<Record<NotificationKey, boolean>>({
+    email: true,
+    push: true,
+    sms: false,
+    marketing: false,
   });
-
-  const [currency, setCurrency] = useState(() => {
-    try {
-      const saved = localStorage.getItem("starlit_curr");
-      return saved || "USD";
-    } catch {
-      return "USD";
-    }
+  const [security, setSecurity] = useState<Record<SecurityKey, boolean>>({
+    passkey: true,
+    google: true,
+    email: true,
+    phone: false,
+    password: true,
   });
-
-  const [notifications, setNotifications] = useState<Record<NotificationKey, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem("starlit_notifications");
-      return saved ? JSON.parse(saved) : { email: true, push: true, sms: false, marketing: false };
-    } catch {
-      return { email: true, push: true, sms: false, marketing: false };
-    }
-  });
-
-  const [security, setSecurity] = useState<Record<SecurityKey, boolean>>(() => {
-    try {
-      const saved = localStorage.getItem("starlit_security");
-      return saved ? JSON.parse(saved) : { passkey: true, google: true, email: true, phone: false, password: true };
-    } catch {
-      return { passkey: true, google: true, email: true, phone: false, password: true };
-    }
-  });
-
+  const [referralCode] = useState("STARLIT-JANE-2024");
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [settingsError, setSettingsError] = useState("");
 
   useEffect(() => {
     document.title = "Settings — Starlit Pay";
@@ -203,9 +183,32 @@ function SettingsPage() {
         navigate("/auth", { replace: true });
         return;
       }
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
-      if (user.username) setReferralCode(`STARLIT-${user.username.toUpperCase()}`);
       setChecking(false);
+      // Per-account settings follow the user across devices.
+      void fetchSettings()
+        .then(({ settings }) => {
+          if (cancelled) return;
+          setLanguage(settings.language);
+          setCurrency(settings.currency);
+          setNotifications({
+            email: settings.notif_email,
+            push: settings.notif_push,
+            sms: settings.notif_sms,
+            marketing: settings.notif_marketing,
+          });
+          setSecurity({
+            passkey: settings.sec_passkey,
+            google: settings.sec_google,
+            email: settings.sec_email,
+            phone: settings.sec_phone,
+            password: settings.sec_password,
+          });
+          setSettingsReady(true);
+        })
+        .catch(() => {
+          if (!cancelled)
+            setSettingsError("Couldn't load your settings — changes won't be saved yet.");
+        });
     });
     return () => {
       cancelled = true;
@@ -221,40 +224,48 @@ function SettingsPage() {
     });
   }
 
-  function handleLanguageChange(val: string) {
-    setLanguage(val);
-    try {
-      localStorage.setItem("starlit_lang", val);
-    } catch {}
-  }
-
-  function handleCurrencyChange(val: string) {
-    setCurrency(val);
-    try {
-      localStorage.setItem("starlit_curr", val);
-    } catch {}
-  }
-
   function toggleNotification(key: NotificationKey) {
-    setNotifications((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      try {
-        localStorage.setItem("starlit_notifications", JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    const next = !notifications[key];
+    setNotifications((prev) => ({ ...prev, [key]: next }));
+    void persistSetting({ [`notif_${key}`]: next } as SettingsUpdate, () =>
+      setNotifications((prev) => ({ ...prev, [key]: !next })),
+    );
   }
 
   function toggleSecurity(key: SecurityKey) {
-    setSecurity((prev) => {
-      const next = { ...prev, [key]: !prev[key] };
-      try {
-        localStorage.setItem("starlit_security", JSON.stringify(next));
-      } catch {}
-      return next;
-    });
+    const next = !security[key];
+    setSecurity((prev) => ({ ...prev, [key]: next }));
+    void persistSetting({ [`sec_${key}`]: next } as SettingsUpdate, () =>
+      setSecurity((prev) => ({ ...prev, [key]: !next })),
+    );
   }
 
+  function changeLanguage(value: string) {
+    const prev = language;
+    setLanguage(value);
+    void persistSetting({ language: value }, () => setLanguage(prev));
+  }
+
+  function changeCurrency(value: string) {
+    const prev = currency;
+    setCurrency(value);
+    void persistSetting({ currency: value }, () => setCurrency(prev));
+  }
+
+  async function persistSetting(patch: SettingsUpdate, revert: () => void) {
+    if (!settingsReady) {
+      revert();
+      setSettingsError("Settings are still loading — try again in a moment.");
+      return;
+    }
+    try {
+      await updateSettings(patch);
+      setSettingsError("");
+    } catch {
+      revert();
+      setSettingsError("Couldn't save settings — check your connection.");
+    }
+  }
 
   if (checking) return null;
 
@@ -265,7 +276,6 @@ function SettingsPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button
@@ -281,6 +291,11 @@ function SettingsPage() {
           <section className="dash-card settings-card">
             <h1 className="settings-title">Settings</h1>
             <p className="settings-subtitle">Manage your account preferences and security</p>
+            {settingsError && (
+              <p className="text-sm text-red-500" role="alert" style={{ marginTop: 8 }}>
+                {settingsError}
+              </p>
+            )}
 
             <div className="settings-section">
               <button
@@ -300,11 +315,11 @@ function SettingsPage() {
                 <div className="settings-grid">
                   <label className="settings-field">
                     <span className="settings-field-label">Language</span>
-                    <SettingsSelect value={language} onChange={handleLanguageChange} options={languages} />
+                    <SettingsSelect value={language} onChange={changeLanguage} options={languages} />
                   </label>
                   <label className="settings-field">
                     <span className="settings-field-label">Currency</span>
-                    <SettingsSelect value={currency} onChange={handleCurrencyChange} options={currencies} />
+                    <SettingsSelect value={currency} onChange={changeCurrency} options={currencies} />
                   </label>
                 </div>
               </div>
@@ -374,7 +389,7 @@ function SettingsPage() {
                     variant="secondary"
                     className="settings-referral-btn"
                     style={{ height: 44 }}
-                    onClick={() => navigator.clipboard.writeText(`https://starlitpay.com/ref/${referralCode}`)}
+                    onClick={() => navigator.clipboard.writeText(`https://starlitpay.xyz/ref/${referralCode}`)}
                   >
                     <Link2 /> Copy Link
                   </Button>
@@ -409,11 +424,7 @@ function SettingsPage() {
                     <GooglePlayButton size="md" />
                     <span className="soon-badge">Soon</span>
                   </span>
-                  <Button
-                    variant="secondary"
-                    className="settings-action-btn settings-trustpilot-btn"
-                    onClick={() => window.open("https://github.com/mhizer-fatai/starlit-pay", "_blank")}
-                  >
+                  <Button variant="secondary" className="settings-action-btn settings-trustpilot-btn">
                     <ExternalLink /> Trustpilot
                   </Button>
                 </div>
@@ -436,18 +447,10 @@ function SettingsPage() {
               </button>
               <div className={`settings-section-body ${collapsedSections.has("feedback") ? "settings-section-body-collapsed" : ""}`}>
                 <div className="settings-grid">
-                  <Button
-                    variant="secondary"
-                    className="settings-action-btn"
-                    onClick={() => window.open("https://github.com/mhizer-fatai/starlit-pay/issues", "_blank")}
-                  >
+                  <Button variant="secondary" className="settings-action-btn">
                     <Share2 /> Share Feedback
                   </Button>
-                  <Button
-                    variant="secondary"
-                    className="settings-action-btn"
-                    onClick={() => window.open("https://discord.gg/stellar", "_blank")}
-                  >
+                  <Button variant="secondary" className="settings-action-btn">
                     <Users /> Join Community
                   </Button>
                 </div>

@@ -1,9 +1,8 @@
-import { Buffer } from "buffer";
-import nacl from "tweetnacl";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import {
   clearSession,
   getStoredUser,
+  getToken,
   login,
   register,
   setSession,
@@ -11,117 +10,92 @@ import {
   type BackendUser,
 } from "@/lib/backend";
 import { supabase } from "@/lib/supabase";
+import {
+  bytesToHex,
+  deriveKeysFromEmailAndPin,
+  identityCommitment,
+  sha256,
+  type DerivedKeys,
+} from "@/lib/keys";
+
+export { sha256 };
 
 export type SessionUser = BackendUser;
 
 const SECRET_SUFFIX = (email: string) => `starlit_secret:${email.toLowerCase()}`;
 const VIEWING_SECRET_KEY = (email: string) => `starlit_viewing_secret:${email.toLowerCase()}`;
+const SPENDING_KEY_SUFFIX = (email: string) => `starlit_spending:${email.toLowerCase()}`;
 
-function randomHex(bytes = 32): string {
-  const arr = new Uint8Array(bytes);
-  crypto.getRandomValues(arr);
-  return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+let unlockedKeys: DerivedKeys | null = null;
+let unlockedThisLoad = false;
+
+export function isUnlocked(): boolean {
+  return unlockedThisLoad || (typeof window !== "undefined" && !!localStorage.getItem("starlit_user"));
 }
 
-export function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+export function getUnlockedKeys(): DerivedKeys | null {
+  return unlockedKeys;
 }
 
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-export function ensureKeys(email: string): {
-  identity_commitment: string;
-  public_encryption_key: string;
-  stellar_address: string;
-} {
-  const existing = getStoredUser<BackendUser>();
-
-  // 1. Ed25519 Stellar keypair
-  let secret = localStorage.getItem(SECRET_SUFFIX(email));
-  let keypair: StellarSdk.Keypair;
-  if (secret) {
+export function markUnlocked(keys: DerivedKeys, email?: string) {
+  unlockedKeys = keys;
+  unlockedThisLoad = true;
+  if (email && typeof window !== "undefined") {
     try {
-      keypair = StellarSdk.Keypair.fromSecret(secret);
+      localStorage.setItem(VIEWING_SECRET_KEY(email), keys.viewing.secretKey);
+      localStorage.setItem(SECRET_SUFFIX(email), keys.stellar.secretKey);
+      localStorage.setItem(SPENDING_KEY_SUFFIX(email), keys.spendingKey);
     } catch {
-      keypair = StellarSdk.Keypair.random();
-      secret = keypair.secret();
-      localStorage.setItem(SECRET_SUFFIX(email), secret);
+      /* ignore storage errors */
     }
-  } else {
-    keypair = StellarSdk.Keypair.random();
-    secret = keypair.secret();
-    localStorage.setItem(SECRET_SUFFIX(email), secret);
   }
-
-  // 2. Curve25519 nacl.box viewing keypair
-  let viewingSecretHex = localStorage.getItem(VIEWING_SECRET_KEY(email));
-  let viewingKeyPair: nacl.BoxKeyPair;
-  if (viewingSecretHex) {
-    try {
-      viewingKeyPair = nacl.box.keyPair.fromSecretKey(hexToBytes(viewingSecretHex));
-    } catch {
-      viewingKeyPair = nacl.box.keyPair();
-      localStorage.setItem(VIEWING_SECRET_KEY(email), bytesToHex(viewingKeyPair.secretKey));
-    }
-  } else {
-    viewingKeyPair = nacl.box.keyPair();
-    localStorage.setItem(VIEWING_SECRET_KEY(email), bytesToHex(viewingKeyPair.secretKey));
-  }
-
-  const viewingPublicKeyHex = bytesToHex(viewingKeyPair.publicKey);
-  const stellarAddress = keypair.publicKey();
-
-  return {
-    identity_commitment: existing?.identity_commitment || randomHex(),
-    public_encryption_key: viewingPublicKeyHex,
-    stellar_address: stellarAddress,
-  };
 }
 
-export async function sha256(message: string | Uint8Array): Promise<Uint8Array> {
-  const bytes = typeof message === "string" ? new TextEncoder().encode(message) : message;
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", copy);
-  return new Uint8Array(hashBuffer);
+export function lockSession() {
+  unlockedKeys = null;
+  unlockedThisLoad = false;
 }
 
-export async function deriveKeysFromEmailAndPin(email: string, pin: string) {
-  const cleanEmail = email.toLowerCase().trim();
-  const cleanPin = pin.trim();
+export function getSpendingKey(email: string): string | null {
+  if (unlockedKeys?.spendingKey) return unlockedKeys.spendingKey;
+  try {
+    return localStorage.getItem(SPENDING_KEY_SUFFIX(email));
+  } catch {
+    return null;
+  }
+}
 
-  const combinedSalt = `${cleanEmail}:${cleanPin}`;
-  const masterSeed = await sha256(combinedSalt);
-  const masterSeedHex = bytesToHex(masterSeed);
+export function getViewingSecret(email: string): string | null {
+  if (unlockedKeys?.viewing?.secretKey) return unlockedKeys.viewing.secretKey;
+  try {
+    return localStorage.getItem(VIEWING_SECRET_KEY(email));
+  } catch {
+    return null;
+  }
+}
 
-  const stellarSeed = await sha256(`${masterSeedHex}:stellar`);
-  const stellarKeypair = StellarSdk.Keypair.fromRawEd25519Seed(Buffer.from(stellarSeed));
+export function signAuthRequest(email: string, message: string): string | null {
+  try {
+    let secret = unlockedKeys?.stellar?.secretKey;
+    if (!secret && typeof window !== "undefined") {
+      secret = localStorage.getItem(SECRET_SUFFIX(email)) || undefined;
+    }
+    if (!secret) return null;
+    const keypair = StellarSdk.Keypair.fromSecret(secret);
+    const signatureBytes = keypair.sign(Buffer.from(message));
+    return bytesToHex(signatureBytes);
+  } catch {
+    return null;
+  }
+}
 
-  const zkSpendingSeed = await sha256(`${masterSeedHex}:spending`);
-  const zkSpendingKey = bytesToHex(zkSpendingSeed);
-
-  const viewingSeed = await sha256(`${masterSeedHex}:viewing`);
-  const viewingKeyPair = nacl.box.keyPair.fromSecretKey(viewingSeed);
-
-  return {
-    masterSeed: masterSeedHex,
-    stellar: {
-      publicKey: stellarKeypair.publicKey(),
-      secretKey: stellarKeypair.secret(),
-      keypair: stellarKeypair,
-    },
-    spendingKey: zkSpendingKey,
-    viewing: {
-      publicKey: bytesToHex(viewingKeyPair.publicKey),
-      secretKey: bytesToHex(viewingKeyPair.secretKey),
-    },
-  };
+export function isWalletUnlocked(email: string): boolean {
+  if (unlockedThisLoad) return true;
+  try {
+    return !!localStorage.getItem(VIEWING_SECRET_KEY(email));
+  } catch {
+    return false;
+  }
 }
 
 export async function unlockWalletWithPin(
@@ -132,85 +106,80 @@ export async function unlockWalletWithPin(
   try {
     const derived = await deriveKeysFromEmailAndPin(email, pin);
     if (expectedCommitment) {
-      const hashedSpendingKey = bytesToHex(await sha256(derived.spendingKey));
-      if (hashedSpendingKey !== expectedCommitment) {
+      const commitment = await identityCommitment(derived.spendingKey);
+      if (commitment !== expectedCommitment) {
         return { success: false, error: "Incorrect 6-digit PIN" };
       }
     }
-    localStorage.setItem(VIEWING_SECRET_KEY(email), derived.viewing.secretKey);
-    localStorage.setItem(SECRET_SUFFIX(email), derived.stellar.secretKey);
-    localStorage.setItem(`starlit_spending:${email.toLowerCase()}`, derived.spendingKey);
+    markUnlocked(derived, email);
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : "Failed to derive keys" };
   }
 }
 
-export function isWalletUnlocked(email: string): boolean {
-  return !!localStorage.getItem(VIEWING_SECRET_KEY(email));
-}
-
-export function getSpendingKey(email: string): string | null {
-  try {
-    return localStorage.getItem(`starlit_spending:${email.toLowerCase()}`);
-  } catch {
-    return null;
-  }
-}
-
-export function signAuthRequest(email: string, message: string): string | null {
-  try {
-    const secret = localStorage.getItem(SECRET_SUFFIX(email));
-    if (!secret) return null;
-    const keypair = StellarSdk.Keypair.fromSecret(secret);
-    const signatureBytes = keypair.sign(Buffer.from(message));
-    return bytesToHex(signatureBytes);
-  } catch {
-    return null;
-  }
-}
-
-export function getViewingSecret(email: string): string | null {
-  try {
-    return localStorage.getItem(VIEWING_SECRET_KEY(email));
-  } catch {
-    return null;
-  }
-}
-
 export async function getUser(): Promise<SessionUser | null> {
+  if (!getToken()) return null;
   return getStoredUser<SessionUser>();
 }
 
-export async function signInWithEmail(email: string): Promise<{ registered: boolean; user: SessionUser }> {
+/** Lookup mode: checks whether a backend user row exists. Issues NO token. */
+export async function lookupByEmail(
+  email: string,
+): Promise<{ exists: boolean; user: SessionUser | null }> {
   const res = await login(email.toLowerCase().trim());
-  if (res.exists === false || !res.user) return { registered: false, user: null as unknown as SessionUser };
-  setSession(res.token, res.user);
-  return { registered: true, user: res.user };
+  if (res.exists === false || !res.user) return { exists: false, user: null };
+  return { exists: true, user: res.user };
 }
 
-export async function registerWithEmail(args: {
+/**
+ * New account: derives wallet keys from email + PIN and registers.
+ * Stores identity_commitment = sha256(spendingKey) so the PIN can be
+ * verified later without ever persisting the keys.
+ */
+export async function registerWithPin(args: {
   email: string;
   username: string;
   displayName: string;
+  pin: string;
+  avatarUrl?: string;
 }): Promise<SessionUser> {
-  const keys = ensureKeys(args.email);
+  const clean = args.email.toLowerCase().trim();
+  const derived = await deriveKeysFromEmailAndPin(clean, args.pin);
   const res = await register({
-    email: args.email.toLowerCase().trim(),
+    email: clean,
     username: args.username.toLowerCase().trim().replace(/^@/, ""),
     display_name: args.displayName.trim() || args.username.trim(),
-    identity_commitment: keys.identity_commitment,
-    public_encryption_key: keys.public_encryption_key,
-    stellar_address: keys.stellar_address,
+    identity_commitment: await identityCommitment(derived.spendingKey),
+    public_encryption_key: derived.viewing.publicKey,
+    avatar_url: args.avatarUrl,
+    stellar_address: derived.stellar.publicKey,
   });
+  if (!res.token || !res.user) throw new Error("Registration failed.");
   setSession(res.token, res.user);
+  markUnlocked(derived, clean);
   return res.user;
 }
 
-
+/**
+ * Existing account: re-derives keys from email + PIN and lets the backend
+ * verify the commitment before it issues a JWT (401 on wrong PIN).
+ */
+export async function unlockWithPin(email: string, pin: string): Promise<SessionUser> {
+  const clean = email.toLowerCase().trim();
+  const derived = await deriveKeysFromEmailAndPin(clean, pin);
+  const res = await login(clean, await identityCommitment(derived.spendingKey));
+  if (res.exists === false || !res.user || !res.token) {
+    throw new Error("Account not found. Please create a PIN first.");
+  }
+  setSession(res.token, res.user);
+  markUnlocked(derived, clean);
+  return res.user;
+}
 
 export async function signOut(): Promise<void> {
   clearSession();
+  lockSession();
   try {
     await supabase.auth.signOut();
   } catch {
@@ -222,17 +191,10 @@ export async function updateUserProfile(
   _id: string,
   updates: Partial<Pick<SessionUser, "display_name" | "email" | "avatar_url">>,
 ): Promise<void> {
-  const user = await getUser();
-  if (!user) return;
-  try {
-    const updated = { ...user, ...updates };
-    localStorage.setItem("starlit_user", JSON.stringify(updated));
-    await updateProfile({
-      display_name: updates.display_name ?? undefined,
-      avatar_url: updates.avatar_url ?? undefined,
-    });
-  } catch {
-    /* ignore offline */
-  }
+  const body: { display_name?: string; avatar_url?: string } = {};
+  if (typeof updates.display_name === "string") body.display_name = updates.display_name;
+  if (typeof updates.avatar_url === "string") body.avatar_url = updates.avatar_url;
+  const res = await updateProfile(body);
+  const token = getToken();
+  if (token && res.user) setSession(token, res.user);
 }
-

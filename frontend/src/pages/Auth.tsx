@@ -1,23 +1,23 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, User, Lock, ShieldCheck, ArrowRight } from "lucide-react";
+import { Lock, Mail, User } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   getUser,
-  deriveKeysFromEmailAndPin,
-  unlockWalletWithPin,
-  sha256,
-  bytesToHex,
-  signOut
+  isUnlocked,
+  lookupByEmail,
+  registerWithPin,
+  signOut,
+  unlockWithPin,
 } from "@/lib/auth";
-import { login, register, setSession, type BackendUser } from "@/lib/backend";
+import { isValidPin } from "@/lib/keys";
 import { supabase } from "@/lib/supabase";
 
 function GoogleIcon() {
   return (
-    <svg viewBox="0 0 24 24" className="size-8 shrink-0" aria-hidden="true">
+    <svg viewBox="0 0 24 24" className="size-10 shrink-0" aria-hidden="true">
       <path
         fill="#4285F4"
         d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.03 5.03 0 0 1-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -38,117 +38,138 @@ function GoogleIcon() {
   );
 }
 
-type AuthStep = "login" | "register-profile" | "unlock-pin";
+type Phase = "google" | "checking" | "pin-entry" | "pin-setup";
+
+const PIN_INPUT_STYLE = {
+  textAlign: "center",
+  letterSpacing: "8px",
+  fontSize: "20px",
+} as const;
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [step, setStep] = useState<AuthStep>("login");
+  const [phase, setPhase] = useState<Phase>("google");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [status, setStatus] = useState("");
 
-  // Pending user data from OAuth
-  const [pendingEmail, setPendingEmail] = useState("");
-  const [pendingDisplayName, setPendingDisplayName] = useState("");
-  const [pendingAvatar, setPendingAvatar] = useState("");
-  const [existingUser, setExistingUser] = useState<BackendUser | null>(null);
-
-  // Form states for profile registration
-  const [usernameInput, setUsernameInput] = useState("");
-  const [pinInput, setPinInput] = useState("");
-  const [pinConfirmInput, setPinConfirmInput] = useState("");
-
-  // Returning user PIN unlock state
-  const [loginPin, setLoginPin] = useState("");
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(undefined);
+  const [username, setUsername] = useState("");
+  const [pin, setPin] = useState("");
+  const [pinConfirm, setPinConfirm] = useState("");
 
   useEffect(() => {
     document.title = "Sign in — Starlit Pay";
-
-    const isCallback =
-      window.location.hash.includes("access_token") ||
-      window.location.search.includes("code");
-
-    if (!isCallback) {
-      void getUser().then((user) => {
-        if (user) navigate("/dashboard", { replace: true });
-      });
-    }
-
-    async function handleSession(sessionUserEmail: string, sessionMetadata?: any) {
-      try {
-        setBusy(true);
-        const cleanEmail = sessionUserEmail.toLowerCase().trim();
-        setPendingEmail(cleanEmail);
-
-        const dName =
-          sessionMetadata?.full_name ||
-          sessionMetadata?.name ||
-          cleanEmail.split("@")[0] ||
-          "User";
-        const aUrl = sessionMetadata?.avatar_url || sessionMetadata?.picture || "";
-
-        setPendingDisplayName(dName);
-        setPendingAvatar(aUrl);
-
-        // Check if user already exists in backend database
-        const checkRes = await login(cleanEmail);
-        if (checkRes.exists && checkRes.user) {
-          setExistingUser(checkRes.user);
-          setSession(checkRes.token, checkRes.user);
-          setStep("unlock-pin");
-        } else {
-          // New user: user chooses their username and creates their PIN
-          setUsernameInput("");
-          setPinInput("");
-          setPinConfirmInput("");
-          setStep("register-profile");
-        }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Authentication error.");
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    // 1. Listen for Supabase auth state change (implicit OAuth redirect with #access_token)
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user?.email && (event === "SIGNED_IN" || event === "INITIAL_SESSION")) {
-        const hasHashOrCode =
-          window.location.hash.includes("access_token") ||
-          window.location.search.includes("code");
-        if (hasHashOrCode || step === "login") {
-          await handleSession(session.user.email, session.user.user_metadata);
-        }
-      }
-    });
-
-    // 2. Also check if returning from OAuth directly via getSession
+    let cancelled = false;
     void (async () => {
+      // Returning from Google OAuth: resolve the Supabase session, then ask
+      // for the payment PIN (or create one for new accounts) before any
+      // backend session is issued.
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get("code");
+      const hash = window.location.hash;
+      const hasHashToken = hash.includes("access_token") || hash.includes("code=");
+      let oauthPending = false;
       try {
-        const params = new URLSearchParams(window.location.search);
-        if (params.has("code")) {
-          setBusy(true);
-          await supabase.auth.exchangeCodeForSession(window.location.search);
-          window.history.replaceState(null, "", "/auth");
-        }
-
-        const { data } = await supabase.auth.getSession();
-        if (data.session?.user?.email) {
-          const hasHashOrCode =
-            window.location.hash.includes("access_token") ||
-            window.location.search.includes("code");
-          if (hasHashOrCode) {
-            await handleSession(data.session.user.email, data.session.user.user_metadata);
+        oauthPending = sessionStorage.getItem("starlit_oauth") === "1";
+      } catch {
+        /* ignore */
+      }
+      const isOAuthReturn = Boolean(code) || hasHashToken || oauthPending;
+      if (isOAuthReturn) {
+        try {
+          if (!cancelled) {
+            setPhase("checking");
+            setBusy(true);
+            setError("");
+            setStatus("Completing sign-in…");
+          }
+          // PKCE flow returns ?code= — exchange just the code (not the full
+          // query string) for a session.
+          if (code) {
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeError) throw exchangeError;
+            window.history.replaceState(null, "", "/auth");
+          }
+          const { data } = await supabase.auth.getSession();
+          const googleEmail = data.session?.user.email;
+          if (!googleEmail) {
+            throw new Error("Google sign-in returned without a session. Please try again.");
+          }
+          if (hasHashToken) window.history.replaceState(null, "", "/auth");
+          try {
+            sessionStorage.removeItem("starlit_oauth");
+          } catch {
+            /* ignore */
+          }
+          const meta = data.session?.user.user_metadata ?? {};
+          const name =
+            (meta.full_name as string | undefined) ||
+            (meta.name as string | undefined) ||
+            "";
+          const avatar =
+            (meta.avatar_url as string | undefined) || (meta.picture as string | undefined);
+          if (!cancelled) {
+            setEmail(googleEmail);
+            setDisplayName(name);
+            setAvatarUrl(avatar);
+            setStatus("Checking account…");
+          }
+          const { exists, user } = await lookupByEmail(googleEmail);
+          if (cancelled) return;
+          setPin("");
+          setPinConfirm("");
+          if (exists) {
+            setUsername(user?.username ?? "");
+            setPhase("pin-entry");
+          } else {
+            const base =
+              googleEmail
+                .split("@")[0]!
+                .replace(/[^a-z0-9_]/g, "_")
+                .slice(0, 24) || "user";
+            setUsername(user?.username ?? base);
+            if (!name) setDisplayName(base);
+            setPhase("pin-setup");
+          }
+        } catch (e) {
+          if (!cancelled) {
+            setError(e instanceof Error ? e.message : "Google sign-in failed.");
+            setPhase("google");
+          }
+          try {
+            sessionStorage.removeItem("starlit_oauth");
+          } catch {
+            /* ignore */
+          }
+        } finally {
+          if (!cancelled) {
+            setBusy(false);
+            setStatus("");
           }
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "OAuth session verification failed.");
+        return;
       }
+      // Plain visit: a valid backend session alone is not enough — the PIN
+      // must have been entered during this page load (RequireUnlock enforces
+      // this on every protected route and sends locked visits here).
+      const user = await getUser();
+      if (cancelled || !user) return;
+      if (isUnlocked()) {
+        navigate("/dashboard", { replace: true });
+        return;
+      }
+      // Locked after a refresh: skip Google, go straight to PIN re-entry.
+      setEmail(user.email);
+      setUsername(user.username ?? "");
+      setPin("");
+      setPinConfirm("");
+      setPhase("pin-entry");
     })();
-
     return () => {
-      subscription.unsubscribe();
+      cancelled = true;
     };
   }, [navigate]);
 
@@ -156,147 +177,149 @@ function AuthPage() {
     document.documentElement.classList.remove("dark");
   }, []);
 
-  async function handleGoogleLogin() {
+  async function handleGoogle() {
     setError("");
+    setStatus("");
     setBusy(true);
     try {
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      try {
+        sessionStorage.setItem("starlit_oauth", "1");
+      } catch {
+        /* ignore */
+      }
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${window.location.origin}/auth` },
+        options: {
+          redirectTo: `${window.location.origin}/auth`,
+          // Force Google to show the account chooser every time instead of
+          // silently reusing the existing Google session.
+          queryParams: { prompt: "select_account" },
+        },
       });
-      if (oauthError) throw oauthError;
+      if (error) throw error;
     } catch (e) {
+      try {
+        sessionStorage.removeItem("starlit_oauth");
+      } catch {
+        /* ignore */
+      }
       setError(e instanceof Error ? e.message : "Google sign-in failed.");
       setBusy(false);
     }
   }
 
-  async function handleRegisterProfile(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-
-    const cleanUsername = usernameInput.toLowerCase().trim().replace(/^@/, "");
-    if (!cleanUsername || cleanUsername.length < 3) {
-      setError("Username must be at least 3 characters.");
-      return;
-    }
-
-    if (!/^[a-z0-9_]+$/.test(cleanUsername)) {
-      setError("Username can only contain lowercase letters, numbers, and underscores.");
-      return;
-    }
-
-    if (pinInput.length !== 6 || !/^\d{6}$/.test(pinInput)) {
-      setError("Security PIN must be exactly 6 digits.");
-      return;
-    }
-
-    if (pinInput !== pinConfirmInput) {
-      setError("Confirmation PIN does not match.");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      // 1. Derive encryption and signing keys from email and PIN
-      const derived = await deriveKeysFromEmailAndPin(pendingEmail, pinInput);
-      const identityCommitment = bytesToHex(await sha256(derived.spendingKey));
-
-      // 2. Register profile in backend
-      const regRes = await register({
-        email: pendingEmail,
-        username: cleanUsername,
-        display_name: pendingDisplayName || cleanUsername,
-        identity_commitment: identityCommitment,
-        public_encryption_key: derived.viewing.publicKey,
-        stellar_address: derived.stellar.publicKey,
-        avatar_url: pendingAvatar || undefined,
-      });
-
-      // 3. Save JWT session and unlock wallet in local storage
-      setSession(regRes.token, regRes.user);
-      await unlockWalletWithPin(pendingEmail, pinInput, identityCommitment);
-
-      // 4. Enter dashboard unlocked
-      navigate("/dashboard", { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create profile.");
-      setBusy(false);
-    }
-  }
-
-  async function handleUnlockExisting(e: React.FormEvent) {
-    e.preventDefault();
-    if (loginPin.length !== 6 || !/^\d{6}$/.test(loginPin)) {
-      setError("Please enter your 6-digit PIN.");
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-    try {
-      if (!existingUser) throw new Error("User profile not found.");
-      const unlockRes = await unlockWalletWithPin(
-        existingUser.email,
-        loginPin,
-        existingUser.identity_commitment || undefined
-      );
-
-      if (!unlockRes.success) {
-        throw new Error(unlockRes.error || "Incorrect 6-digit PIN.");
-      }
-
-      navigate("/dashboard", { replace: true });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unlock failed.");
-      setBusy(false);
-    }
-  }
-
-  async function handleResetToLogin() {
+  async function handleSwitchAccount() {
     await signOut();
-    setStep("login");
-    setPendingEmail("");
-    setExistingUser(null);
-    setPinInput("");
-    setPinConfirmInput("");
-    setLoginPin("");
+    setPhase("google");
+    setEmail("");
+    setDisplayName("");
+    setAvatarUrl(undefined);
+    setUsername("");
+    setPin("");
+    setPinConfirm("");
     setError("");
+    setStatus("");
   }
+
+  async function handlePinUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isValidPin(pin)) {
+      setError("PIN must be exactly 6 digits.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    setStatus("Unlocking wallet…");
+    try {
+      await unlockWithPin(email, pin);
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Incorrect PIN.");
+      setPin("");
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  async function handlePinSetup(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanUsername = username.toLowerCase().trim().replace(/^@/, "");
+    if (cleanUsername.length < 3 || !/^[a-z0-9_]+$/.test(cleanUsername)) {
+      setError("Username must be at least 3 characters (letters, numbers, _).");
+      return;
+    }
+    if (!isValidPin(pin) || !isValidPin(pinConfirm)) {
+      setError("PIN must be exactly 6 digits.");
+      return;
+    }
+    if (pin !== pinConfirm) {
+      setError("PINs do not match.");
+      return;
+    }
+    setError("");
+    setBusy(true);
+    setStatus("Creating secure account…");
+    try {
+      await registerWithPin({
+        email,
+        username: cleanUsername,
+        displayName: displayName || cleanUsername,
+        pin,
+        avatarUrl,
+      });
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create account.");
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  const digitsOnly = (value: string) => value.replace(/\D/g, "").slice(0, 6);
 
   return (
     <main className="auth-stage">
       <div className="auth-shell">
         <section className="auth-panel">
           <div className="auth-form-wrap">
-            {step === "login" && (
-              <div>
+            {(phase === "google" || phase === "checking") && (
+              <>
                 <div className="text-center">
                   <h1 className="text-[32px] font-medium text-foreground">Welcome to Starlit Pay</h1>
                   <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
-                    Start your confidential payment experience by signing in or creating an account.
+                    Start your experience with Starlit Pay by signing in or
+                    <br className="hidden sm:block" /> signing up.
                   </p>
                 </div>
 
                 <div className="mt-8 space-y-6">
                   <Button
                     type="button"
-                    onClick={handleGoogleLogin}
+                    onClick={handleGoogle}
                     disabled={busy}
                     className="h-16 w-full rounded-lg bg-background text-[18px] font-semibold text-foreground shadow-md shadow-primary/10 hover:bg-white/50"
                   >
-                    <GoogleIcon /> {busy ? "Connecting to Google..." : "Continue with Google"}
+                    <GoogleIcon /> {busy ? status || "Please wait…" : "Continue with Google"}
                   </Button>
 
+                  {status && !error && (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {status}
+                    </p>
+                  )}
                   {error && (
-                    <p className="text-sm text-red-500 text-center" role="alert">
+                    <p className="text-sm text-red-500" role="alert">
                       {error}
                     </p>
                   )}
 
                   <div>
                     <div className="flex items-center justify-between">
-                      <span className="text-[15px] font-semibold text-foreground">Login with Email</span>
+                      <span className="text-[15px] font-semibold text-foreground">
+                        Login with Email
+                      </span>
                       <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
                         Coming Soon
                       </span>
@@ -315,156 +338,153 @@ function AuthPage() {
                     Sign In
                   </Button>
                 </div>
-              </div>
+              </>
             )}
 
-            {step === "register-profile" && (
-              <div>
+            {phase === "pin-entry" && (
+              <>
                 <div className="text-center">
-                  <div className="inline-flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary mb-3">
-                    <ShieldCheck className="size-6" />
-                  </div>
-                  <h1 className="text-[26px] font-medium text-foreground">Create Your Profile</h1>
-                  <p className="mt-2 text-[14px] leading-5 text-muted-foreground">
-                    Choose your username and set a 6-digit PIN to encrypt your private wallet.
+                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
+                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Unlock Wallet</h1>
+                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
+                    Enter the 6-digit payment PIN for{" "}
+                    <span className="font-semibold text-foreground">{email}</span>
                   </p>
-                  <div className="mt-3 inline-block rounded-full bg-muted/60 px-3 py-1 text-xs text-muted-foreground font-mono">
-                    {pendingEmail}
-                  </div>
                 </div>
 
-                {error && (
-                  <div className="mt-4 p-3 rounded-md bg-red-500/10 border border-red-500/20 text-red-500 text-xs text-center">
-                    {error}
-                  </div>
-                )}
+                <form onSubmit={handlePinUnlock} className="mt-8 space-y-6">
+                  <Input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    maxLength={6}
+                    placeholder="••••••"
+                    value={pin}
+                    onChange={(e) => setPin(digitsOnly(e.target.value))}
+                    required
+                    autoFocus
+                    disabled={busy}
+                    style={PIN_INPUT_STYLE}
+                  />
+                  {status && !error && (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {status}
+                    </p>
+                  )}
+                  {error && (
+                    <p className="text-sm text-red-500" role="alert">
+                      {error}
+                    </p>
+                  )}
+                  <Button
+                    type="submit"
+                    disabled={busy}
+                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
+                  >
+                    {busy ? status || "Unlocking…" : "Unlock"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={handleSwitchAccount}
+                    disabled={busy}
+                    className="h-12 w-full rounded-lg text-[15px]"
+                  >
+                    Switch Account
+                  </Button>
+                </form>
+              </>
+            )}
 
-                <form onSubmit={handleRegisterProfile} className="mt-6 space-y-4">
+            {phase === "pin-setup" && (
+              <>
+                <div className="text-center">
+                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
+                  <h1 className="mt-4 text-[28px] font-medium text-foreground">
+                    Secure your wallet
+                  </h1>
+                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
+                    <span className="font-semibold text-foreground">{email}</span> is new here.
+                    Create a 6-digit payment PIN — it derives your wallet keys.
+                  </p>
+                </div>
+
+                <form onSubmit={handlePinSetup} className="mt-8 space-y-6">
                   <div>
-                    <label className="block text-xs font-medium text-foreground mb-1.5">
-                      Choose Username
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2.5 text-sm text-muted-foreground">@</span>
+                    <span className="text-[15px] font-semibold text-foreground">Username</span>
+                    <div className="auth-input">
+                      <User />
                       <Input
                         type="text"
+                        placeholder="e.g. alice"
+                        value={username}
+                        onChange={(e) =>
+                          setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))
+                        }
                         required
-                        className="pl-7"
-                        placeholder="yourname"
-                        value={usernameInput}
-                        onChange={(e) => setUsernameInput(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                        disabled={busy}
                       />
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Used for payment links and receiving transfers.
-                    </p>
                   </div>
-
                   <div>
-                    <label className="block text-xs font-medium text-foreground mb-1.5">
-                      Create 6-Digit Payment PIN
-                    </label>
-                    <Input
-                      type="password"
-                      maxLength={6}
-                      required
-                      placeholder="••••••"
-                      className="text-center text-lg tracking-[0.5em]"
-                      value={pinInput}
-                      onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
-                    />
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Your PIN derives your private keys locally on this device.
+                    <span className="text-[15px] font-semibold text-foreground">
+                      6-digit payment PIN
+                    </span>
+                    <div className="mt-2 space-y-3">
+                      <Input
+                        type="password"
+                        inputMode="numeric"
+                        autoComplete="new-password"
+                        maxLength={6}
+                        placeholder="Enter 6-digit PIN"
+                        value={pin}
+                        onChange={(e) => setPin(digitsOnly(e.target.value))}
+                        required
+                        disabled={busy}
+                        style={PIN_INPUT_STYLE}
+                      />
+                      <Input
+                        type="password"
+                        inputMode="numeric"
+                        autoComplete="new-password"
+                        maxLength={6}
+                        placeholder="Confirm 6-digit PIN"
+                        value={pinConfirm}
+                        onChange={(e) => setPinConfirm(digitsOnly(e.target.value))}
+                        required
+                        disabled={busy}
+                        style={PIN_INPUT_STYLE}
+                      />
+                    </div>
+                  </div>
+                  {status && !error && (
+                    <p className="text-sm text-muted-foreground" role="status">
+                      {status}
                     </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-foreground mb-1.5">
-                      Confirm PIN
-                    </label>
-                    <Input
-                      type="password"
-                      maxLength={6}
-                      required
-                      placeholder="••••••"
-                      className="text-center text-lg tracking-[0.5em]"
-                      value={pinConfirmInput}
-                      onChange={(e) => setPinConfirmInput(e.target.value.replace(/\D/g, ""))}
-                    />
-                  </div>
-
+                  )}
+                  {error && (
+                    <p className="text-sm text-red-500" role="alert">
+                      {error}
+                    </p>
+                  )}
                   <Button
                     type="submit"
-                    disabled={busy || !usernameInput || pinInput.length !== 6 || pinConfirmInput.length !== 6}
-                    className="w-full h-12 text-sm font-semibold mt-4"
+                    disabled={busy}
+                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
                   >
-                    {busy ? "Encrypting Wallet & Creating Account..." : "Complete Setup & Launch Wallet"}
+                    {busy ? status || "Creating…" : "Create Account"}
                   </Button>
-
-                  <div className="text-center pt-2">
-                    <button
-                      type="button"
-                      onClick={handleResetToLogin}
-                      className="text-xs text-muted-foreground hover:text-foreground underline cursor-pointer"
-                    >
-                      Use a different account
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {step === "unlock-pin" && existingUser && (
-              <div>
-                <div className="text-center">
-                  <div className="inline-flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary mb-3">
-                    <Lock className="size-6" />
-                  </div>
-                  <h1 className="text-[26px] font-medium text-foreground">Welcome Back</h1>
-                  <p className="mt-2 text-[14px] text-muted-foreground">
-                    Enter your 6-digit PIN for <b>@{existingUser.username}</b> to unlock your private wallet.
-                  </p>
-                </div>
-
-                {error && (
-                  <div className="mt-4 p-3 rounded-md bg-red-500/10 border border-red-500/20 text-red-500 text-xs text-center">
-                    {error}
-                  </div>
-                )}
-
-                <form onSubmit={handleUnlockExisting} className="mt-6 space-y-4">
-                  <div>
-                    <Input
-                      type="password"
-                      maxLength={6}
-                      required
-                      autoFocus
-                      placeholder="••••••"
-                      className="text-center text-xl tracking-[0.5em] h-14"
-                      value={loginPin}
-                      onChange={(e) => setLoginPin(e.target.value.replace(/\D/g, ""))}
-                    />
-                  </div>
-
                   <Button
-                    type="submit"
-                    disabled={busy || loginPin.length !== 6}
-                    className="w-full h-12 text-sm font-semibold"
+                    type="button"
+                    variant="secondary"
+                    onClick={handleSwitchAccount}
+                    disabled={busy}
+                    className="h-12 w-full rounded-lg text-[15px]"
                   >
-                    {busy ? "Decrypting..." : "Unlock Wallet"}
+                    Switch Account
                   </Button>
-
-                  <div className="text-center pt-2">
-                    <button
-                      type="button"
-                      onClick={handleResetToLogin}
-                      className="text-xs text-muted-foreground hover:text-foreground underline cursor-pointer"
-                    >
-                      Sign in to a different account
-                    </button>
-                  </div>
                 </form>
-              </div>
+              </>
             )}
           </div>
         </section>

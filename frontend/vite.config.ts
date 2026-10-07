@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
+      canvg: fileURLToPath(new URL("./src/lib/empty.ts", import.meta.url)),
     },
   },
   define: {

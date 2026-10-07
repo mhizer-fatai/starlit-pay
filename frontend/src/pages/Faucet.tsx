@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
 import { Check, ChevronDown, Droplets } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -8,19 +9,32 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { Input } from "@/components/ui/input";
 import { getUser, type SessionUser } from "@/lib/auth";
-import { faucetFund, faucetStatus, postTransaction } from "@/lib/backend";
+import { faucetFund, faucetStatus } from "@/lib/backend";
+import { loadPrivateBalances } from "@/lib/wallet";
 import { useSidebar } from "@/lib/sidebar";
+
+const COOLDOWN_SECONDS = 4 * 60 * 60;
+
+function formatCooldown(totalSec: number): string {
+  const s = Math.max(0, Math.ceil(totalSec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
 
 function FaucetPage() {
   const navigate = useNavigate();
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [me, setMe] = useState<SessionUser | null>(null);
   const [asset, setAsset] = useState("USDC");
   const [assetOpen, setAssetOpen] = useState(false);
   const [captchaSolved, setCaptchaSolved] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const turnstileRef = useRef<TurnstileInstance | undefined>(undefined);
   const [claiming, setClaiming] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState("");
   const assetRef = useRef<HTMLDivElement>(null);
@@ -35,13 +49,22 @@ function FaucetPage() {
         return;
       }
       setMe(user);
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
+      // Seed the 4h cooldown from this browser (backup) then sync with backend.
+      try {
+        const lastClaim = parseInt(localStorage.getItem(`starlit_faucet_last_claim_${user.id}`) || "0", 10);
+        const elapsed = Math.floor(Date.now() / 1000) - lastClaim;
+        if (lastClaim && elapsed < COOLDOWN_SECONDS && !cancelled) {
+          setCooldownSeconds(COOLDOWN_SECONDS - elapsed);
+        }
+      } catch {
+        /* ignore */
+      }
       if (user.public_encryption_key) {
         void faucetStatus(user.public_encryption_key)
           .then((s) => {
-            if (!cancelled && !s.canClaim)
-              setStatus(`Next claim available in ${Math.ceil(s.remainingMs / 60000)} min.`);
+            if (cancelled || s.canClaim) return;
+            setCooldownSeconds((prev) => Math.max(prev, Math.ceil(s.remainingMs / 1000)));
           })
           .catch(() => {});
       }
@@ -50,6 +73,26 @@ function FaucetPage() {
       cancelled = true;
     };
   }, [navigate]);
+
+  // Live 1-second cooldown countdown.
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = window.setInterval(() => {
+      setCooldownSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldownSeconds]);
+
+  function startCooldown() {
+    setCooldownSeconds(COOLDOWN_SECONDS);
+    if (me?.id) {
+      try {
+        localStorage.setItem(`starlit_faucet_last_claim_${me.id}`, String(Math.floor(Date.now() / 1000)));
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 
   useEffect(() => {
     function onDocClick(event: MouseEvent) {
@@ -68,30 +111,62 @@ function FaucetPage() {
       setError("No viewing key on your account — sign up again.");
       return;
     }
+    if (!captchaToken) {
+      setError("Please complete the captcha challenge first.");
+      return;
+    }
+    if (claiming || cooldownSeconds > 0) return;
+    const claimLabel = asset === "XLM" ? "100 XLM" : "50 USDC";
     setClaiming(true);
     try {
-      const res = await faucetFund({
+      // Snapshot balances so we can detect the credit landing (old behavior).
+      const snapshot = await loadPrivateBalances(me).catch(() => null);
+      const initUsdc = snapshot?.usdc ?? 0;
+      const initXlm = snapshot?.xlm ?? 0;
+
+      setStatus(`Sending funds… Auto-shielding ${claimLabel} to your account.`);
+      await faucetFund({
         viewingKey: me.public_encryption_key,
         depositMemo: me.deposit_memo || undefined,
+        captchaToken,
+        asset,
       });
 
-      // Record transaction log for dashboard feed
-      try {
-        const payload = JSON.stringify({
-          to: me.username || "me",
-          amount: 50,
-          asset: "USDC",
-          type: "faucet",
-          at: new Date().toISOString(),
-        });
-        await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
-      } catch {}
-
-      setStatus(res.hash ? `Funded! Tx ${res.hash}` : "Faucet claim submitted! 100 XLM & 50 USDC will arrive shortly.");
-      setCaptchaSolved(false);
+      // Poll for the private-balance credit (gateway shields async, ~2s cadence).
+      setStatus("Encrypting note and waiting for private balance credit…");
+      let credited = false;
+      for (let attempt = 0; attempt < 22 && !credited; attempt++) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000));
+        try {
+          const balances = await loadPrivateBalances(me);
+          if (balances && (balances.usdc > initUsdc || balances.xlm > initXlm)) {
+            credited = true;
+          }
+        } catch {
+          /* keep polling */
+        }
+      }
+      setStatus(
+        credited
+          ? `Funds received! +${claimLabel} credited to your private balance.`
+          : `Funds processed! +${claimLabel} sent — balances update after sync.`,
+      );
+      startCooldown();
     } catch (e) {
+      // Cooldown rejections (429): re-sync the countdown from the backend.
+      if (me?.public_encryption_key) {
+        void faucetStatus(me.public_encryption_key)
+          .then((s) => {
+            if (!s.canClaim) setCooldownSeconds(Math.ceil(s.remainingMs / 1000));
+          })
+          .catch(() => {});
+      }
       setError(e instanceof Error ? e.message : "Claim failed — try again later.");
     } finally {
+      // Turnstile tokens are single-use: always reset so the next claim solves fresh.
+      turnstileRef.current?.reset();
+      setCaptchaToken("");
+      setCaptchaSolved(false);
       setClaiming(false);
     }
   }
@@ -105,7 +180,6 @@ function FaucetPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button
@@ -169,31 +243,38 @@ function FaucetPage() {
                 <div className="captcha-wrap">
                   <label className="send-label">Captcha Challenge</label>
                   <div className="captcha-box">
-                    <div className="captcha-placeholder">
-                      {captchaSolved ? (
-                        <span className="captcha-success">
-                          <Check /> Verified
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="captcha-fake"
-                          onClick={() => setCaptchaSolved(true)}
-                        >
-                          Click to verify you are human
-                        </button>
-                      )}
-                    </div>
+                    <Turnstile
+                      ref={turnstileRef}
+                      siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY as string}
+                      options={{ size: "flexible" }}
+                      onSuccess={(token) => {
+                        setCaptchaToken(token);
+                        setCaptchaSolved(true);
+                      }}
+                      onExpire={() => {
+                        setCaptchaToken("");
+                        setCaptchaSolved(false);
+                      }}
+                      onError={() => {
+                        setCaptchaToken("");
+                        setCaptchaSolved(false);
+                        setError("Captcha failed to load — please refresh and try again.");
+                      }}
+                    />
                   </div>
                 </div>
 
                 <Button
                   type="button"
                   className="faucet-claim-btn"
-                  disabled={!captchaSolved || claiming}
+                  disabled={!captchaSolved || claiming || cooldownSeconds > 0}
                   onClick={handleClaim}
                 >
-                  {claiming ? "Processing..." : "Claim"}
+                  {claiming
+                    ? "Processing..."
+                    : cooldownSeconds > 0
+                      ? `Claim (${formatCooldown(cooldownSeconds)})`
+                      : "Claim"}
                 </Button>
                 {status && (
                   <p className="text-center text-xs text-muted-foreground" role="status">

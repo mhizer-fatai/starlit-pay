@@ -1,4 +1,6 @@
-import { BrandMark } from "@/components/BrandMark";
+import { useState, type FormEvent } from "react";
+
+import { Button } from "@/components/ui/button";
 import { container } from "@/lib/utils";
 
 const socials = [
@@ -12,11 +14,11 @@ const socials = [
     ),
   },
   {
-    label: "GitHub",
+    label: "LinkedIn",
     href: "#",
     icon: (
       <svg viewBox="0 0 24 24" fill="currentColor" className="size-4" aria-hidden="true">
-        <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+        <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.119 20.452H3.554V9h3.565v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z" />
       </svg>
     ),
   },
@@ -40,9 +42,31 @@ const socials = [
   },
 ];
 
-const legalLinks = ["Privacy Policy", "Terms of Use", "Cookie Policy"];
+const legalLinks: { label: string; href: string }[] = [
+  { label: "FAQ", href: "/faqs" },
+  { label: "Help & support", href: "/help" },
+  { label: "Documentation", href: "/docs" },
+  { label: "Blog", href: "#" },
+  { label: "About Starlit Pay", href: "/about" },
+  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Terms of Use", href: "/terms" },
+  { label: "Cookie Policy", href: "/cookies" },
+];
 
 export function SiteFooter() {
+  const [email, setEmail] = useState("");
+  const [note, setNote] = useState<"ok" | "error" | "">("");
+
+  function handleSubscribe(event: FormEvent) {
+    event.preventDefault();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setNote("error");
+      return;
+    }
+    setEmail("");
+    setNote("ok");
+  }
+
   return (
     <footer className="bg-black text-white">
       <div className={`${container} py-14 lg:py-16`}>
@@ -52,9 +76,41 @@ export function SiteFooter() {
             aria-label="Starlit Pay home"
             className="flex items-center gap-3 self-start"
           >
-            <BrandMark />
+            <img src="/logo.png" alt="Starlit Pay" className="h-9 w-auto" />
             <span className="text-[17px] font-semibold">Starlit Pay</span>
           </a>
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-1 md:items-center md:px-6">
+            <form
+              onSubmit={handleSubscribe}
+              className="flex w-full items-center gap-2 md:max-w-md"
+              aria-label="Newsletter signup"
+            >
+              <label htmlFor="newsletter-email" className="sr-only">
+                Email address
+              </label>
+              <input
+                id="newsletter-email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Enter your email for updates"
+                className="h-10 w-full rounded border border-white/15 bg-white/10 px-3 text-sm text-white placeholder:text-white/40 focus:border-white/40 focus:outline-none"
+              />
+              <Button type="submit" className="h-10 shrink-0 rounded">
+                Subscribe
+              </Button>
+            </form>
+            {note === "ok" && (
+              <p className="text-xs text-white/70" role="status">
+                Thanks for subscribing! Watch your inbox for updates.
+              </p>
+            )}
+            {note === "error" && (
+              <p className="text-xs text-red-400" role="alert">
+                Please enter a valid email address.
+              </p>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             {socials.map((social) => (
               <a
@@ -73,9 +129,9 @@ export function SiteFooter() {
             aria-label="Legal"
             className="flex flex-wrap gap-x-8 gap-y-2 text-[14px] text-white/70"
           >
-            {legalLinks.map((label) => (
-              <a key={label} href="#" className="transition-colors duration-200 hover:text-white">
-                {label}
+            {legalLinks.map((link) => (
+              <a key={link.label} href={link.href} className="transition-colors duration-200 hover:text-hero-sky">
+                {link.label}
               </a>
             ))}
           </nav>

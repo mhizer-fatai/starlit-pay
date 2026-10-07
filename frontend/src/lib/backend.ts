@@ -96,13 +96,22 @@ export interface BackendUser {
 
 export interface AuthResponse {
   exists?: boolean;
-  user: BackendUser;
-  token: string;
+  user?: BackendUser;
+  token?: string;
 }
 
 // --- Auth / users (read + write) ---
-export const login = (email: string) =>
-  req<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify({ email }) });
+// Lookup mode (no identity_commitment): returns { exists, user? } WITHOUT a
+// token so a JWT is never issued before the PIN is verified.
+// Unlock mode (with identity_commitment): backend verifies the PIN-derived
+// commitment and only then returns { exists: true, user, token }.
+export const login = (email: string, identity_commitment?: string) =>
+  req<AuthResponse>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(
+      identity_commitment ? { email, identity_commitment } : { email },
+    ),
+  });
 
 export const register = (body: {
   email: string;
@@ -117,8 +126,52 @@ export const register = (body: {
 export const lookupUser = (username: string) =>
   req<{ user: BackendUser }>(`/api/users/lookup/${encodeURIComponent(username.replace(/^@/, ""))}`);
 
+// Authenticated self-profile update (display name + avatar only).
 export const updateProfile = (body: { display_name?: string; avatar_url?: string }) =>
-  req<{ user: BackendUser }>("/api/users/profile", { method: "PATCH", body: JSON.stringify(body) }, true);
+  req<{ user: BackendUser }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) }, true);
+
+export interface UserSettings {
+  user_id: string;
+  language: string;
+  currency: string;
+  notif_email: boolean;
+  notif_push: boolean;
+  notif_sms: boolean;
+  notif_marketing: boolean;
+  sec_passkey: boolean;
+  sec_google: boolean;
+  sec_email: boolean;
+  sec_phone: boolean;
+  sec_password: boolean;
+  updated_at?: string;
+}
+
+export type SettingsUpdate = Partial<
+  Pick<
+    UserSettings,
+    | "language"
+    | "currency"
+    | "notif_email"
+    | "notif_push"
+    | "notif_sms"
+    | "notif_marketing"
+    | "sec_passkey"
+    | "sec_google"
+    | "sec_email"
+    | "sec_phone"
+    | "sec_password"
+  >
+>;
+
+// Per-account settings (requires the user_settings table — see schema_settings.sql).
+export const fetchSettings = () =>
+  req<{ settings: UserSettings }>("/api/users/me/settings", {}, true);
+export const updateSettings = (body: SettingsUpdate) =>
+  req<{ settings: UserSettings }>(
+    "/api/users/me/settings",
+    { method: "PATCH", body: JSON.stringify(body) },
+    true,
+  );
 
 // --- Payment links (read + write) ---
 export interface PaymentLink {
@@ -152,6 +205,7 @@ export interface ShieldedNote {
   status?: string;
   root?: string;
   ledger?: number;
+  created_at?: string;
 }
 export const fetchNotes = (viewingKey: string, timestamp?: string, signature?: string) => {
   const query =
@@ -173,7 +227,7 @@ export const faucetStatus = (viewingKey: string) =>
   req<{ canClaim: boolean; remainingMs: number; nextClaimAt?: string }>(
     `/api/faucet/status/${encodeURIComponent(viewingKey)}`,
   );
-export const faucetFund = (body: { viewingKey: string; depositMemo?: string; timestamp?: string; signature?: string }) =>
+export const faucetFund = (body: { viewingKey: string; depositMemo?: string; timestamp?: string; signature?: string; captchaToken?: string; asset?: string }) =>
   req<{ success: boolean; hash?: string; amountXlm?: number; amountUsdc?: number }>(
     "/api/faucet/fund",
     { method: "POST", body: JSON.stringify(body) },
@@ -204,6 +258,20 @@ export const fetchStats = () =>
     status: string;
   }>("/api/stats");
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
+export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
+
+// Sends the generated statement file to the user's own inbox (server-side).
+export const emailStatement = (body: {
+  filename: string;
+  mime: string;
+  contentBase64: string;
+  subject?: string;
+}) =>
+  req<{ sent: boolean; to: string }>(
+    "/api/statements/email",
+    { method: "POST", body: JSON.stringify(body) },
+    true,
+  );
 export const complianceCheck = (address: string) =>
   req<{ address: string; blocked: boolean; status: string }>(
     `/api/compliance/check/${encodeURIComponent(address)}`,

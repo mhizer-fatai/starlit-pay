@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Copy, Wallet, ArrowDownLeft, QrCode } from "lucide-react";
+import { Check, Copy, Wallet } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { AppTopbar } from "@/components/AppTopbar";
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { getUser, type SessionUser } from "@/lib/auth";
+import { fetchGatewayAddress } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
 import {
   DEPOSIT_GATEWAY_ADDRESS,
@@ -18,8 +19,7 @@ import {
 } from "@/lib/stellar";
 import { connectWithWalletKit, signWithWalletKit } from "@/lib/walletKit";
 
-// Gateway address funds land at; the memo routes to the user (see backend gateway.js).
-const GATEWAY_ADDRESS = DEPOSIT_GATEWAY_ADDRESS;
+const GATEWAY_FALLBACK = DEPOSIT_GATEWAY_ADDRESS || "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
 
 function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -54,6 +54,7 @@ function ReceivePage() {
   const [depositAmount, setDepositAmount] = useState("");
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletMessage, setWalletMessage] = useState("");
+  const [gatewayAddress, setGatewayAddress] = useState(GATEWAY_FALLBACK);
 
   useEffect(() => {
     document.title = "Receive — Starlit Pay";
@@ -67,6 +68,11 @@ function ReceivePage() {
       setUser(current);
       setChecking(false);
     });
+    void fetchGatewayAddress()
+      .then((res) => {
+        if (!cancelled && res.address) setGatewayAddress(res.address);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -76,10 +82,10 @@ function ReceivePage() {
 
   const username = user?.username ?? "";
   const memo = user?.deposit_memo ?? "—";
-  const companyName = username ? `@${username}` : "Starlit Pay";
+  const memoValue = user?.deposit_memo != null ? String(user.deposit_memo) : "";
 
   const sep0007Uri = generateSep0007Uri({
-    destination: GATEWAY_ADDRESS,
+    destination: gatewayAddress,
     memo: user?.deposit_memo || undefined,
     asset: selectedAsset,
     amount: depositAmount ? parseFloat(depositAmount) : undefined,
@@ -105,7 +111,7 @@ function ReceivePage() {
 
       const xdr = await buildPublicPaymentTxXdr(
         conn.address,
-        GATEWAY_ADDRESS,
+        gatewayAddress,
         amt,
         selectedAsset,
         CLASSIC_TOKENS[selectedAsset],
@@ -131,7 +137,6 @@ function ReceivePage() {
   return (
     <div className="dashboard-frame">
       <DashboardSidebar
-        companyName={companyName}
         open={mobileOpen}
         collapsed={collapsed}
         onToggle={toggleCollapsed}
@@ -153,14 +158,14 @@ function ReceivePage() {
 
                 <p className="receive-label">Starlit Deposit Address (Gateway)</p>
                 <div className="receive-row">
-                  <code>{GATEWAY_ADDRESS}</code>
-                  <CopyButton value={GATEWAY_ADDRESS} label="Copy Address" />
+                  <code>{gatewayAddress}</code>
+                  <CopyButton value={gatewayAddress} label="Copy Address" />
                 </div>
 
                 <p className="receive-label">Your Deposit Memo (MEMO ID)</p>
                 <div className="receive-row">
                   <code>{memo}</code>
-                  {user?.deposit_memo && <CopyButton value={user.deposit_memo.toString()} label="Copy Memo" />}
+                  {memoValue && <CopyButton value={memoValue} label="Copy Memo" />}
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-border/40 space-y-3">
@@ -208,32 +213,41 @@ function ReceivePage() {
 
                 <p className="receive-disclaimer mt-4">
                   <b>IMPORTANT:</b> You must include this 6-digit Memo ID when sending deposits.
-                  Incoming deposits are automatically shielded into your private notes.
+                  Deposits sent without a Memo cannot be routed to your account.
                 </p>
               </section>
 
-              <section className="dash-card qr-card flex flex-col items-center justify-center gap-4">
-                <div className="text-center">
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    SEP-0007 Stellar QR Code
-                  </span>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Scan with LOBSTR, Solar, or any Stellar wallet
-                  </p>
-                </div>
-                <div className="qr-wrap bg-white p-4 rounded-2xl shadow-sm">
-                  <QRCodeSVG value={sep0007Uri} size={180} />
-                </div>
-                <div className="w-full max-w-xs flex gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={sep0007Uri}
-                    className="w-full bg-background border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-muted-foreground truncate"
-                  />
-                  <CopyButton value={sep0007Uri} label="Copy SEP-0007 URI" />
-                </div>
-              </section>
+              <div className="qr-stack">
+                <section className="dash-card qr-card flex flex-col items-center justify-center gap-4">
+                  <div className="text-center">
+                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      SEP-0007 Stellar QR Code
+                    </span>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Scan with LOBSTR, Solar, or any Stellar wallet
+                    </p>
+                  </div>
+                  <div className="qr-wrap bg-white p-4 rounded-2xl shadow-sm">
+                    <QRCodeSVG value={sep0007Uri} size={150} />
+                  </div>
+                  <div className="w-full max-w-xs flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={sep0007Uri}
+                      className="w-full bg-background border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-muted-foreground truncate"
+                    />
+                    <CopyButton value={sep0007Uri} label="Copy SEP-0007 URI" />
+                  </div>
+                </section>
+
+                <section className="dash-card qr-card">
+                  <span className="qr-label">Deposit Address QR</span>
+                  <div className="qr-wrap">
+                    <QRCodeSVG value={gatewayAddress} size={130} />
+                  </div>
+                </section>
+              </div>
             </div>
           </main>
         </PageTransition>
@@ -243,4 +257,3 @@ function ReceivePage() {
 }
 
 export default ReceivePage;
-

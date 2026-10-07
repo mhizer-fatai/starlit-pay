@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
+import { ReceiptModal } from "@/components/ReceiptModal";
 import { Input } from "@/components/ui/input";
 import { getUser, getViewingSecret, signAuthRequest } from "@/lib/auth";
 import {
@@ -37,6 +38,7 @@ import { getSpendableNotes } from "@/lib/notes";
 import { bytesToHex, encryptNote } from "@/lib/crypto";
 import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
 import { TOKENS } from "@/lib/stellar";
+import type { ActivityItem } from "@/lib/wallet";
 import { useSidebar } from "@/lib/sidebar";
 
 function SlideToConfirm({ label, onComplete }: { label: string; onComplete: () => void }) {
@@ -130,7 +132,6 @@ function SendPage() {
   const [checking, setChecking] = useState(true);
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [displayName, setDisplayName] = useState("Jane");
-  const [companyName, setCompanyName] = useState("Starlit Pay");
   const [username, setUsername] = useState("");
   const [asset, setAsset] = useState("USDC");
   const [amount, setAmount] = useState("");
@@ -165,7 +166,9 @@ function SendPage() {
   }, []);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [receipt, setReceipt] = useState<ActivityItem | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [scanTarget, setScanTarget] = useState<"username" | "tagId">("username");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [errors, setErrors] = useState<{ username?: string; amount?: string }>({});
   const scanInputRef = useRef<HTMLInputElement>(null);
@@ -179,8 +182,12 @@ function SendPage() {
       const detector = new BarcodeDetector({ formats: ["qr_code"] });
       const codes = await detector.detect(bitmap);
       if (codes[0]?.rawValue) {
-        setUsername(codes[0].rawValue);
-        setErrors((prev) => ({ ...prev, username: undefined }));
+        if (scanTarget === "tagId") {
+          setTagId(codes[0].rawValue);
+        } else {
+          setUsername(codes[0].rawValue);
+          setErrors((prev) => ({ ...prev, username: undefined }));
+        }
       }
     } catch {
       // ignore scan errors
@@ -201,7 +208,6 @@ function SendPage() {
       }
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
-      setCompanyName(user.username ? `@${user.username}` : "Starlit Pay");
       setChecking(false);
     });
     return () => {
@@ -408,6 +414,16 @@ function SendPage() {
         await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
 
         setMessage(`Withdrawal of ${spendAmount} ${asset} to ${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)} completed! Tx: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
+        setReceipt({
+          key: `withdraw-${relayerRes.hash || Date.now()}`,
+          direction: "out",
+          amount: spendAmount,
+          asset,
+          party: `${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)}`,
+          date: Date.now(),
+          reference: relayerRes.hash || rawTarget,
+          referenceLabel: "Withdrawal Tx",
+        });
         setUsername("");
         setAmount("");
       } else {
@@ -519,6 +535,16 @@ function SendPage() {
         await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
 
         setMessage(`Sent ${spendAmount} ${asset} to @${recipient}! Tx Hash: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
+        setReceipt({
+          key: `send-${recipientCommitmentHex}`,
+          direction: "out",
+          amount: spendAmount,
+          asset,
+          party: recipient,
+          date: Date.now(),
+          reference: recipientCommitmentHex,
+          referenceLabel: "Note commitment",
+        });
         setUsername("");
         setAmount("");
       }
@@ -539,7 +565,6 @@ function SendPage() {
         collapsed={collapsed}
         onToggle={toggleCollapsed}
         onClose={() => setMobileOpen(false)}
-        companyName={companyName}
       />
       {mobileOpen && (
         <button
@@ -603,6 +628,7 @@ function SendPage() {
                           className="send-scan"
                           onClick={() => {
                             setScanning(true);
+                            setScanTarget("username");
                             scanInputRef.current?.click();
                           }}
                           aria-label="Scan QR code"
@@ -717,6 +743,18 @@ function SendPage() {
                         onChange={(event) => setTagId(event.target.value)}
                         placeholder="Enter Tag ID"
                       />
+                      <button
+                        type="button"
+                        className="send-scan"
+                        onClick={() => {
+                          setScanning(true);
+                          setScanTarget("tagId");
+                          scanInputRef.current?.click();
+                        }}
+                        aria-label="Scan QR code"
+                      >
+                        <QrCode />
+                      </button>
                     </div>
                   </label>
                 </div>
@@ -794,6 +832,9 @@ function SendPage() {
             )}
           </main>
         </PageTransition>
+        {receipt && (
+          <ReceiptModal item={receipt} userName={displayName} onClose={() => setReceipt(null)} />
+        )}
       </div>
     </div>
   );

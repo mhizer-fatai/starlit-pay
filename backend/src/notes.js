@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import jwt from "jsonwebtoken";
-import { app, supabase, rpc } from "./config.js";
+import { app, supabase, rpc, GATEWAY_ADDRESS } from "./config.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? null : "starlit_secret_key_change_in_prod");
@@ -312,7 +312,36 @@ app.get("/api/faucet/status/:viewingKey", async (req, res) => {
 // 1-Click Testnet Faucet Endpoint: Mints 100 XLM + 50 USDC with 4-Hour Cooldown (Strictly Per Account)
 app.post("/api/faucet/fund", async (req, res) => {
   try {
-    const { viewingKey, depositMemo, timestamp, signature } = req.body;
+    const { viewingKey, depositMemo, timestamp, signature, captchaToken, asset } = req.body;
+
+    // Fund only the requested asset (one at a time). Validated before the
+    // single-use captcha token is spent so bad input never burns a solve.
+    const requested = typeof asset === "string" ? asset.toUpperCase() : "BOTH";
+    if (requested !== "USDC" && requested !== "XLM" && requested !== "BOTH") {
+      return res.status(400).json({ error: "Invalid asset. Use USDC, XLM, or omit for both." });
+    }
+
+    // 0. Human check (Cloudflare Turnstile). Tokens are single-use and expire
+    // after a few minutes, so a fresh solve is required per claim.
+    if (!captchaToken) {
+      return res.status(400).json({ error: "Captcha verification required." });
+    }
+    try {
+      const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          secret: process.env.TURNSTILE_SECRET_KEY || "",
+          response: captchaToken,
+        }),
+      });
+      const verdict = await verifyRes.json().catch(() => ({}));
+      if (!verdict.success) {
+        return res.status(403).json({ error: "Captcha verification failed. Please try again." });
+      }
+    } catch (e) {
+      return res.status(503).json({ error: "Captcha service unavailable. Please try again." });
+    }
 
     // 1. Ensure only registered, logged-in users can claim (prevents public draining)
     if (!viewingKey) {
@@ -367,10 +396,9 @@ app.post("/api/faucet/fund", async (req, res) => {
     const cleanSecret = rawSecret.replace(/['"\s]/g, "").trim();
     const faucetKeypair = StellarSdk.Keypair.fromSecret(cleanSecret);
 
-    const gatewayAddress = process.env.GATEWAY_PUBLIC_KEY || "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
-
-    // Target is ALWAYS the Gateway Address so funds are auto-shielded for the user memo
-    const targetRecipient = gatewayAddress;
+    // Target is ALWAYS the Gateway Address so funds are auto-shielded for the user memo.
+    // Resolved from the shared config so faucet, daemon, and frontend agree.
+    const targetRecipient = GATEWAY_ADDRESS;
     
     // Safely construct Stellar Memo (Text or ID)
     const memoVal = (depositMemo !== undefined && depositMemo !== null && depositMemo !== "")
@@ -393,25 +421,35 @@ app.post("/api/faucet/fund", async (req, res) => {
     const account = await rpc.getAccount(faucetKeypair.publicKey());
     const usdcAsset = new StellarSdk.Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");
 
-    // Build batch payment transaction (100 XLM + 50 USDC) to Gateway with user memo
-    const tx = new StellarSdk.TransactionBuilder(account, {
+    // Fund only the requested asset (one at a time). Defaults to both for
+    // older clients that don't send an asset (validated above, pre-captcha).
+    const fundXlm = requested === "XLM" || requested === "BOTH";
+    const fundUsdc = requested === "USDC" || requested === "BOTH";
+
+    // Build payment transaction to Gateway with user memo
+    const builder = new StellarSdk.TransactionBuilder(account, {
       fee: "500",
       networkPassphrase: StellarSdk.Networks.TESTNET
-    })
-      .addOperation(
+    });
+    if (fundXlm) {
+      builder.addOperation(
         StellarSdk.Operation.payment({
           destination: targetRecipient,
           asset: StellarSdk.Asset.native(),
           amount: "100.0000000"
         })
-      )
-      .addOperation(
+      );
+    }
+    if (fundUsdc) {
+      builder.addOperation(
         StellarSdk.Operation.payment({
           destination: targetRecipient,
           asset: usdcAsset,
           amount: "50.0000000"
         })
-      )
+      );
+    }
+    const tx = builder
       .addMemo(stellarMemo)
       .setTimeout(30)
       .build();
@@ -435,12 +473,15 @@ app.post("/api/faucet/fund", async (req, res) => {
     res.status(200).json({
       success: true,
       hash: txHash,
-      amountXlm: 100,
-      amountUsdc: 50,
+      amountXlm: fundXlm ? 100 : 0,
+      amountUsdc: fundUsdc ? 50 : 0,
+      asset: requested,
       recipient: targetRecipient,
       memo: memoStr,
       cooldownMs: FAUCET_COOLDOWN_MS,
-      message: "Successfully funded 100 XLM & 50 USDC via Faucet!"
+      message: fundXlm && fundUsdc
+        ? "Successfully funded 100 XLM & 50 USDC via Faucet!"
+        : `Successfully funded ${fundXlm ? "100 XLM" : "50 USDC"} via Faucet!`
     });
   } catch (err) {
     const errorDetails = err.message || "Unknown faucet error";

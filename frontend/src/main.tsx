@@ -1,4 +1,6 @@
+import { StrictMode, useEffect, useState, type ReactNode } from "react";
 import { Buffer } from "buffer";
+
 if (typeof window !== "undefined") {
   window.Buffer = Buffer;
   // @ts-ignore
@@ -11,15 +13,24 @@ if (typeof window !== "undefined") {
     );
   }
 }
-
-import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { SidebarProvider } from "./lib/sidebar";
 
+// stellar-sdk uses the Node `Buffer` global internally; polyfill it for browsers.
+if (typeof globalThis.Buffer === "undefined") {
+  globalThis.Buffer = Buffer;
+}
+
 import Faqs from "./pages/Faqs";
 import Index from "./pages/Index";
+import AboutPage from "./pages/About";
+import DocsPage from "./pages/Docs";
+import HelpPage from "./pages/Help";
+import PrivacyPage from "./pages/Privacy";
+import TermsPage from "./pages/Terms";
+import CookiesPage from "./pages/Cookies";
 import AuthPage from "./pages/Auth";
 import DashboardPage from "./pages/Dashboard";
 import FaucetPage from "./pages/Faucet";
@@ -30,6 +41,7 @@ import SendPage from "./pages/Send";
 import SettingsPage from "./pages/Settings";
 import TransactionsPage from "./pages/Transactions";
 import PayRequestPage from "./pages/PayRequest";
+import { getUser, isUnlocked } from "./lib/auth";
 import "./styles.css";
 
 function ScrollToTop() {
@@ -40,6 +52,36 @@ function ScrollToTop() {
   return null;
 }
 
+/**
+ * App-wide session gate: no JWT → /auth; JWT from a previous page load but
+ * no PIN entered since (tab refresh) → /auth?mode=unlock for PIN re-entry.
+ * The unlock flag lives only in memory, so a refresh always locks.
+ */
+function RequireUnlock({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void getUser().then((user) => {
+      if (cancelled) return;
+      if (!user) {
+        navigate("/auth", { replace: true });
+        return;
+      }
+      if (!isUnlocked()) {
+        navigate("/auth?mode=unlock", { replace: true });
+        return;
+      }
+      setOk(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
+  if (!ok) return null;
+  return <>{children}</>;
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
@@ -48,16 +90,22 @@ createRoot(document.getElementById("root")!).render(
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/faqs" element={<Faqs />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/help" element={<HelpPage />} />
+          <Route path="/docs" element={<DocsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/cookies" element={<CookiesPage />} />
           <Route path="/auth" element={<AuthPage />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-          <Route path="/transactions" element={<TransactionsPage />} />
-          <Route path="/send" element={<SendPage />} />
-          <Route path="/receive" element={<ReceivePage />} />
-          <Route path="/payment-links" element={<PaymentLinksPage />} />
-          <Route path="/faucet" element={<FaucetPage />} />
+          <Route path="/dashboard" element={<RequireUnlock><DashboardPage /></RequireUnlock>} />
+          <Route path="/profile" element={<RequireUnlock><ProfilePage /></RequireUnlock>} />
+          <Route path="/transactions" element={<RequireUnlock><TransactionsPage /></RequireUnlock>} />
+          <Route path="/send" element={<RequireUnlock><SendPage /></RequireUnlock>} />
+          <Route path="/receive" element={<RequireUnlock><ReceivePage /></RequireUnlock>} />
+          <Route path="/payment-links" element={<RequireUnlock><PaymentLinksPage /></RequireUnlock>} />
+          <Route path="/faucet" element={<RequireUnlock><FaucetPage /></RequireUnlock>} />
           <Route path="/pay/:commitment" element={<PayRequestPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<RequireUnlock><SettingsPage /></RequireUnlock>} />
         </Routes>
       </SidebarProvider>
     </BrowserRouter>

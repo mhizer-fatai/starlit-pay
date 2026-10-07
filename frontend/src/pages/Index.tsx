@@ -36,7 +36,7 @@ function StatCard({
   const isPrimary = variant === "primary";
   return (
     <div
-      className={`flex min-h-[420px] flex-col rounded-md p-8 shadow-lg shadow-primary/10 ${
+      className={`flex min-h-[280px] flex-col rounded-md p-6 shadow-lg shadow-primary/10 sm:min-h-[420px] sm:p-8 ${
         isPrimary ? "stat-wash-primary" : "stat-wash"
       }`}
     >
@@ -173,6 +173,7 @@ const features: { title: string; image: string }[] = [
 
 function Index() {
   useEffect(() => {
+    document.title = "Starlit Pay - Send and Receive Payments with Absolute Privacy.";
     document.documentElement.classList.remove("dark");
   }, []);
 

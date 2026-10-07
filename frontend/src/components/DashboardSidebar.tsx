@@ -86,13 +86,11 @@ export function DashboardSidebar({
   collapsed,
   onToggle,
   onClose,
-  companyName,
 }: {
   open: boolean;
   collapsed: boolean;
   onToggle: () => void;
   onClose: () => void;
-  companyName: string;
 }) {
   const { mode, toggleTheme } = useTheme();
   const navigate = useNavigate();
@@ -119,8 +117,8 @@ export function DashboardSidebar({
   return (
     <aside className={`dashboard-sidebar ${open ? "open" : ""} ${collapsed ? "collapsed" : ""}`}>
       <div className="company-switcher">
-        <div className="company-art" />
-        <strong>{companyName}</strong>
+        <img src="/logo.png" alt="Starlit Pay" className="h-7 w-auto" />
+        <strong>Starlit Pay</strong>
       </div>
       <nav aria-label="Main navigation">
         {navItems.map((item) => (
