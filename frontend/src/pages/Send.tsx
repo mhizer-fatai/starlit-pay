@@ -22,9 +22,11 @@ import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
+import { ReceiptModal } from "@/components/ReceiptModal";
 import { Input } from "@/components/ui/input";
 import { getUser } from "@/lib/auth";
 import { lookupUser, postNote, postTransaction } from "@/lib/backend";
+import type { ActivityItem } from "@/lib/wallet";
 import { useSidebar } from "@/lib/sidebar";
 
 function SlideToConfirm({ label, onComplete }: { label: string; onComplete: () => void }) {
@@ -136,6 +138,7 @@ function SendPage() {
   }, []);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [receipt, setReceipt] = useState<ActivityItem | null>(null);
   const [scanning, setScanning] = useState(false);
   const [scanTarget, setScanTarget] = useState<"username" | "tagId">("username");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -255,6 +258,16 @@ function SendPage() {
       });
       await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
       setMessage(`Sent ${amt} ${asset} to @${recipient} — recorded.`);
+      setReceipt({
+        key: `send-${commitment}`,
+        direction: "out",
+        amount: amt,
+        asset,
+        party: recipient,
+        date: Date.now(),
+        reference: commitment,
+        referenceLabel: "Note commitment",
+      });
       setUsername("");
       setAmount("");
     } catch (e) {
@@ -541,6 +554,9 @@ function SendPage() {
             )}
           </main>
         </PageTransition>
+        {receipt && (
+          <ReceiptModal item={receipt} userName={displayName} onClose={() => setReceipt(null)} />
+        )}
       </div>
     </div>
   );
