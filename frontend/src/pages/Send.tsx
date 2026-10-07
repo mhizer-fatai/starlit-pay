@@ -11,6 +11,7 @@ import {
   Check,
   ChevronDown,
   Hash,
+  Loader2,
   QrCode,
   Send,
   TriangleAlert,
@@ -24,9 +25,15 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { Input } from "@/components/ui/input";
-import { getUser } from "@/lib/auth";
+import { getUser, type SessionUser } from "@/lib/auth";
 import { lookupUser, postNote, postTransaction } from "@/lib/backend";
-import type { ActivityItem } from "@/lib/wallet";
+import {
+  formatGrouped,
+  loadPrivateBalances,
+  spendForPayment,
+  spendableBalance,
+  type ActivityItem,
+} from "@/lib/wallet";
 import { useSidebar } from "@/lib/sidebar";
 
 function SlideToConfirm({ label, onComplete }: { label: string; onComplete: () => void }) {
@@ -121,6 +128,11 @@ function SendPage() {
   const [displayName, setDisplayName] = useState("Jane");
   const [username, setUsername] = useState("");
   const [asset, setAsset] = useState("USDC");
+  const [assetBalances, setAssetBalances] = useState<{ USDC: number; XLM: number }>({
+    USDC: 0,
+    XLM: 0,
+  });
+  const [balancesRefreshing, setBalancesRefreshing] = useState(false);
   const [amount, setAmount] = useState("");
   const [tagId, setTagId] = useState("");
   const [mode, setMode] = useState<"starlit" | "external">("starlit");
@@ -181,11 +193,23 @@ function SendPage() {
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
       setChecking(false);
+      // Live per-asset balances for the selector (read-only here).
+      void refreshAssetBalances(user).catch(() => {});
     });
     return () => {
       cancelled = true;
     };
   }, [navigate]);
+
+  async function refreshAssetBalances(user: SessionUser) {
+    setBalancesRefreshing(true);
+    try {
+      const balances = await loadPrivateBalances(user);
+      if (balances) setAssetBalances({ USDC: balances.usdc, XLM: balances.xlm });
+    } finally {
+      setBalancesRefreshing(false);
+    }
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -246,10 +270,20 @@ function SendPage() {
       }
       const amt = Number(amount);
       if (!Number.isFinite(amt) || amt <= 0) throw new Error("Enter an amount greater than 0");
+      // Check the sender can cover it BEFORE crediting anyone.
+      const available = await spendableBalance(me, asset);
+      if (available + 1e-9 < amt) throw new Error(`Insufficient ${asset} balance.`);
       const commitment = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
         b.toString(16).padStart(2, "0"),
       ).join("");
-      const payload = JSON.stringify({ to: recipientKey, amount: amt, asset, at: new Date().toISOString() });
+      const payload = JSON.stringify({
+        to: recipientKey,
+        toUsername: recipient,
+        sender: me.username,
+        amount: amt,
+        asset,
+        at: new Date().toISOString(),
+      });
       // Writes: encrypted note + transaction record (backend stores opaque blobs).
       await postNote({
         commitment,
@@ -257,6 +291,35 @@ function SendPage() {
         recipient_viewing_key: recipientKey,
       });
       await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
+      // Debit the sender: mark covering notes spent, return change to self.
+      try {
+        const { change } = await spendForPayment(me, asset, amt);
+        if (change > 1e-9 && me.public_encryption_key) {
+          const changeCommitment = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) =>
+            b.toString(16).padStart(2, "0"),
+          ).join("");
+          const changePayload = JSON.stringify({
+            to: me.public_encryption_key,
+            toUsername: me.username,
+            sender: me.username,
+            amount: change,
+            asset,
+            at: new Date().toISOString(),
+          });
+          await postNote({
+            commitment: changeCommitment,
+            encrypted_note: btoa(changePayload),
+            recipient_viewing_key: me.public_encryption_key,
+          });
+        }
+      } catch (debitError) {
+        setMessage(
+          `Sent ${amt} ${asset} to @${recipient} — recorded. Balance update pending, refresh shortly.`,
+        );
+        setUsername("");
+        setAmount("");
+        return;
+      }
       setMessage(`Sent ${amt} ${asset} to @${recipient} — recorded.`);
       setReceipt({
         key: `send-${commitment}`,
@@ -268,6 +331,8 @@ function SendPage() {
         reference: commitment,
         referenceLabel: "Note commitment",
       });
+      // Balances changed (debit + change): reload the selector figures.
+      void refreshAssetBalances(me).catch(() => {});
       setUsername("");
       setAmount("");
     } catch (e) {
@@ -345,18 +410,6 @@ function SendPage() {
                           aria-invalid={Boolean(errors.username)}
                           aria-describedby={errors.username ? "send-username-error" : undefined}
                         />
-                        <button
-                          type="button"
-                          className="send-scan"
-                          onClick={() => {
-                            setScanning(true);
-                            setScanTarget("username");
-                            scanInputRef.current?.click();
-                          }}
-                          aria-label="Scan QR code"
-                        >
-                          <QrCode />
-                        </button>
                       </div>
                       {errors.username && (
                         <span className="send-error" id="send-username-error" role="alert">
@@ -401,7 +454,17 @@ function SendPage() {
                         aria-haspopup="listbox"
                         aria-expanded={assetOpen}
                       >
-                        <span>{asset}</span>
+                        <span>
+                          {asset} ·{" "}
+                          {balancesRefreshing ? (
+                            <Loader2
+                              className="inline size-4 animate-spin"
+                              aria-label="Updating balances"
+                            />
+                          ) : (
+                            formatGrouped(assetBalances[asset as keyof typeof assetBalances] ?? 0)
+                          )}
+                        </span>
                         <ChevronDown className={assetOpen ? "rotate-180" : ""} />
                       </button>
                       {assetOpen && (
@@ -418,7 +481,10 @@ function SendPage() {
                                   setAssetOpen(false);
                                 }}
                               >
-                                {option}
+                                {option} ·{" "}
+                                {formatGrouped(
+                                  assetBalances[option as keyof typeof assetBalances] ?? 0,
+                                )}
                                 {asset === option && <Check className="size-4" />}
                               </button>
                             </li>
@@ -456,29 +522,31 @@ function SendPage() {
                     )}
                   </label>
 
-                  <label className="send-label">
-                    Tag ID
-                    <div className="send-input">
-                      <Hash />
-                      <Input
-                        value={tagId}
-                        onChange={(event) => setTagId(event.target.value)}
-                        placeholder="Enter Tag ID"
-                      />
-                      <button
-                        type="button"
-                        className="send-scan"
-                        onClick={() => {
-                          setScanning(true);
-                          setScanTarget("tagId");
-                          scanInputRef.current?.click();
-                        }}
-                        aria-label="Scan QR code"
-                      >
-                        <QrCode />
-                      </button>
-                    </div>
-                  </label>
+                  {mode === "external" && (
+                    <label className="send-label">
+                      Tag ID
+                      <div className="send-input">
+                        <Hash />
+                        <Input
+                          value={tagId}
+                          onChange={(event) => setTagId(event.target.value)}
+                          placeholder="Enter Tag ID"
+                        />
+                        <button
+                          type="button"
+                          className="send-scan"
+                          onClick={() => {
+                            setScanning(true);
+                            setScanTarget("tagId");
+                            scanInputRef.current?.click();
+                          }}
+                          aria-label="Scan QR code"
+                        >
+                          <QrCode />
+                        </button>
+                      </div>
+                    </label>
+                  )}
                 </div>
 
                 {message && (
@@ -488,8 +556,17 @@ function SendPage() {
                 )}
 
                 <Button type="submit" size="lg" className="w-full" disabled={busy}>
-                  <Send />
-                  Send {amount || "0"} {asset}
+                  {busy ? (
+                    <>
+                      <Loader2 className="animate-spin" />
+                      Sending…
+                    </>
+                  ) : (
+                    <>
+                      <Send />
+                      Send {amount || "0"} {asset}
+                    </>
+                  )}
                 </Button>
               </form>
             </section>

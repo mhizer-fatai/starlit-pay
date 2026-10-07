@@ -178,7 +178,7 @@ export function NotificationBell() {
         .then(([txs, balances]) => {
           if (cancelled) return;
           const readIds = new Set(getReadIds(user.id));
-          const feed = buildActivityFeed(balances?.notes ?? [], txs).slice(0, 10);
+          const feed = buildActivityFeed(balances?.notes ?? [], txs, user.username).slice(0, 10);
           setNotifications(feed.map((item) => toNotification(item, readIds.has(item.key))));
         })
         .catch(() => {});
