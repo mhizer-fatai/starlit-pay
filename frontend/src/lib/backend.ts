@@ -259,6 +259,22 @@ export const fetchStats = () =>
   }>("/api/stats");
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
 export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
+export const notifyGatewayDeposit = (txHash: string) =>
+  req<{
+    status: string;
+    processed?: boolean;
+    reason?: string;
+    operations?: Array<{
+      processed: boolean;
+      amount: number;
+      asset: string;
+      commitment: string;
+      contractTxHash: string;
+    }>;
+  }>("/api/gateway/deposit", {
+    method: "POST",
+    body: JSON.stringify({ txHash }),
+  });
 
 // Sends the generated statement file to the user's own inbox (server-side).
 export const emailStatement = (body: {

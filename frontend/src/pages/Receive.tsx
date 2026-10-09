@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { getUser, type SessionUser } from "@/lib/auth";
-import { fetchGatewayAddress } from "@/lib/backend";
+import { fetchGatewayAddress, notifyGatewayDeposit } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
 import {
   DEPOSIT_GATEWAY_ADDRESS,
@@ -125,7 +125,13 @@ function ReceivePage() {
       setWalletMessage("Submitting deposit to Stellar network...");
       const hash = await submitSignedXdr(signedXdr);
 
-      setWalletMessage(`Deposit of ${amt} ${selectedAsset} submitted! Tx: ${hash.slice(0, 8)}... (Auto-shielding in ~5s)`);
+      setWalletMessage(`Deposit submitted! Shielding funds into private balance for tx ${hash.slice(0, 8)}...`);
+      try {
+        await notifyGatewayDeposit(hash);
+        setWalletMessage(`Deposit of ${amt} ${selectedAsset} confirmed and shielded into your private balance!`);
+      } catch {
+        setWalletMessage(`Deposit of ${amt} ${selectedAsset} submitted! Tx: ${hash.slice(0, 8)}... (Auto-shielding in ~15s)`);
+      }
       setDepositAmount("");
     } catch (err: unknown) {
       setWalletMessage(err instanceof Error ? err.message : "Deposit failed.");

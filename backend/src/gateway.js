@@ -12,6 +12,23 @@ app.get("/api/gateway/address", (_req, res) => {
   res.status(200).json({ address: GATEWAY_ADDRESS });
 });
 
+// Direct endpoint allowing clients (or external deposit flows) to trigger instant verification and shielding
+app.post("/api/gateway/deposit", async (req, res) => {
+  const { txHash } = req.body || {};
+  if (!txHash) {
+    return res.status(400).json({ error: "txHash is required" });
+  }
+
+  try {
+    const txRecord = await horizon.transactions().transaction(txHash).call();
+    const result = await processDepositTransaction(txRecord);
+    return res.status(200).json({ status: "ok", ...result });
+  } catch (err) {
+    console.error(`Error processing /api/gateway/deposit for tx ${txHash}:`, err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 const GATEWAY_STATE_FILE = path.join(process.cwd(), "gateway_state.json");
 let lastProcessedTxToken = "0";
 
@@ -73,6 +90,132 @@ async function submitGatewayDeposit(gatewayKeypair, contractId, token, amount, c
   }
 }
 
+export async function processDepositTransaction(txRecord) {
+  if (!gatewayKeypair) {
+    throw new Error("Gateway keypair is not configured.");
+  }
+  const gatewayAddress = gatewayKeypair.publicKey();
+  const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
+  if (!activeContractId) {
+    throw new Error("SHIELDED_POOL_CONTRACT_ID environment variable is missing.");
+  }
+
+  if (txRecord.memo_type !== "id" && txRecord.memo_type !== "text") {
+    return { processed: false, reason: "invalid_memo_type" };
+  }
+
+  const memoId = parseInt(txRecord.memo, 10);
+  if (isNaN(memoId)) {
+    return { processed: false, reason: "invalid_memo_id" };
+  }
+
+  const { data: user, error: userError } = await supabase
+    .from("users")
+    .select("id, username, public_encryption_key")
+    .eq("deposit_memo", memoId)
+    .maybeSingle();
+
+  if (userError) {
+    throw new Error(`Gateway DB lookup error for memo ${memoId}: ${userError.message}`);
+  }
+
+  if (!user) {
+    return { processed: false, reason: "user_not_found", memoId };
+  }
+
+  const tx = new StellarSdk.Transaction(txRecord.envelope_xdr, NETWORK_PASSPHRASE);
+  const results = [];
+
+  for (const op of tx.operations) {
+    if (op.type === "payment" && op.destination === gatewayAddress) {
+      const amount = parseFloat(op.amount);
+      if (amount <= 0.0001) continue;
+
+      const isNative = op.asset.isNative();
+      const tokenAddress = isNative
+        ? "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+        : "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+
+      const assetName = isNative ? "XLM" : "USDC";
+
+      console.log(`Gateway processing incoming deposit of ${amount} ${assetName} for @${user.username} (Memo: ${memoId})`);
+
+      const isBlocked = await isAddressBlocked(tx.source);
+      if (isBlocked) {
+        console.warn(`[ASP COMPLIANCE BLOCK] Deposit from sanctioned address ${tx.source} rejected for @${user.username}.`);
+        return { processed: false, reason: "sanctioned_address" };
+      }
+
+      const noteSecret = crypto.createHmac("sha256", gatewayKeypair.secret()).update(txRecord.hash).digest("hex");
+      const commitmentHex = await calculateCommitment(amount, user.public_encryption_key, tokenAddress, noteSecret);
+      const encrypted = encryptNoteForUser(amount, assetName, noteSecret, tx.source, user.public_encryption_key);
+      const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
+
+      const { data: existingNote } = await supabase
+        .from("shielded_notes")
+        .select("commitment")
+        .eq("commitment", commitmentHex)
+        .maybeSingle();
+
+      if (existingNote) {
+        console.log(`Gateway: commitment ${commitmentHex} already processed. Skipping.`);
+        results.push({ processed: false, reason: "already_processed", commitment: commitmentHex });
+        continue;
+      }
+
+      const { error: insertErr } = await supabase
+        .from("shielded_notes")
+        .insert([{
+          commitment: commitmentHex,
+          encrypted_note: encryptedHex,
+          recipient_viewing_key: user.public_encryption_key,
+          status: "unspent"
+        }]);
+
+      if (insertErr) {
+        console.error(`Gateway duplicate prevention insert failed: ${insertErr.message}`);
+        continue;
+      }
+
+      try {
+        console.log(`Gateway submitting Soroban deposit of ${amount} ${assetName} with commitment ${commitmentHex}`);
+        const depositTxHash = await submitGatewayDeposit(
+          gatewayKeypair,
+          activeContractId,
+          tokenAddress,
+          amount,
+          commitmentHex,
+          encryptedHex
+        );
+
+        console.log(`Gateway successfully shielded deposit! Contract Tx: ${depositTxHash}`);
+
+        await supabase
+          .from("shielded_notes")
+          .update({
+            encrypted_note: encryptedHex,
+            status: "unspent"
+          })
+          .eq("commitment", commitmentHex);
+
+        results.push({
+          processed: true,
+          amount,
+          asset: assetName,
+          commitment: commitmentHex,
+          contractTxHash: depositTxHash,
+        });
+      } catch (submitErr) {
+        console.error(`Gateway deposit transaction submission failed:`, submitErr.message);
+        await supabase.from("shielded_notes").delete().eq("commitment", commitmentHex);
+        throw submitErr;
+      }
+    }
+  }
+
+  return { processed: results.some((r) => r.processed), operations: results };
+}
+
 let isGatewayRunning = false;
 async function runGatewayDaemon() {
   if (isGatewayRunning) return;
@@ -91,7 +234,7 @@ async function runGatewayDaemon() {
     if (lastProcessedTxToken !== "0") {
       txsQuery.cursor(lastProcessedTxToken);
     }
-    
+
     let txsRes;
     try {
       txsRes = await txsQuery.call();
@@ -106,117 +249,7 @@ async function runGatewayDaemon() {
 
     for (const txRecord of txsRes.records) {
       try {
-        if (txRecord.memo_type !== "id" && txRecord.memo_type !== "text") {
-          lastProcessedTxToken = txRecord.paging_token;
-          continue;
-        }
-        
-        const memoId = parseInt(txRecord.memo);
-        if (isNaN(memoId)) {
-          lastProcessedTxToken = txRecord.paging_token;
-          continue;
-        }
-
-        const { data: user, error: userError } = await supabase
-          .from("users")
-          .select("id, username, public_encryption_key")
-          .eq("deposit_memo", memoId)
-          .maybeSingle();
-
-        if (userError) {
-          console.error(`Gateway DB error lookup for memo ${memoId}:`, userError.message);
-          continue;
-        }
-
-        if (!user) {
-          console.log(`Gateway received transaction ${txRecord.hash} with memo ${memoId} but no user was found.`);
-          lastProcessedTxToken = txRecord.paging_token;
-          continue;
-        }
-
-        const tx = new StellarSdk.Transaction(txRecord.envelope_xdr, NETWORK_PASSPHRASE);
-
-        for (const op of tx.operations) {
-          if (op.type === "payment" && op.destination === gatewayAddress) {
-            const amount = parseFloat(op.amount);
-            if (amount <= 0.0001) continue;
-
-            const isNative = op.asset.isNative();
-            const tokenAddress = isNative 
-              ? "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
-              : "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
-            
-            const assetName = isNative ? "XLM" : "USDC";
-
-            console.log(`Gateway processing incoming deposit of ${amount} ${assetName} for @${user.username} (Memo: ${memoId})`);
-
-            // Screen sender address against ASP compliance policy
-            const isBlocked = await isAddressBlocked(tx.source);
-            if (isBlocked) {
-              console.warn(`[ASP COMPLIANCE BLOCK] Deposit from sanctioned address ${tx.source} rejected for @${user.username}.`);
-              continue;
-            }
-
-            // Derive noteSecret deterministically from transaction hash to prevent duplicate processing on server restarts
-            const noteSecret = crypto.createHmac("sha256", gatewayKeypair.secret()).update(txRecord.hash).digest("hex");
-            const commitmentHex = await calculateCommitment(amount, user.public_encryption_key, tokenAddress, noteSecret);
-            const encrypted = encryptNoteForUser(amount, assetName, noteSecret, tx.source, user.public_encryption_key);
-            const encryptedHex = encrypted.ephemeralPublicKey + encrypted.nonce + encrypted.ciphertext;
-
-            // Check if this commitment has already been processed
-            const { data: existingNote } = await supabase
-              .from("shielded_notes")
-              .select("commitment")
-              .eq("commitment", commitmentHex)
-              .maybeSingle();
-
-            if (existingNote) {
-              console.log(`Gateway: commitment ${commitmentHex} already processed. Skipping.`);
-              continue;
-            }
-
-            const { error: insertErr } = await supabase
-              .from("shielded_notes")
-              .insert([{
-                commitment: commitmentHex,
-                encrypted_note: encryptedHex,
-                recipient_viewing_key: user.public_encryption_key,
-                status: "unspent"
-              }]);
-
-            if (insertErr) {
-              console.error(`Gateway duplicate prevention insert failed: ${insertErr.message}`);
-              continue;
-            }
-
-            try {
-              console.log(`Gateway submitting Soroban deposit of ${amount} ${assetName} with commitment ${commitmentHex}`);
-              const depositTxHash = await submitGatewayDeposit(
-                gatewayKeypair,
-                activeContractId,
-                tokenAddress,
-                amount,
-                commitmentHex,
-                encryptedHex
-              );
-
-              console.log(`Gateway successfully shielded deposit! Contract Tx: ${depositTxHash}`);
-
-              await supabase
-                .from("shielded_notes")
-                .update({
-                  encrypted_note: encryptedHex,
-                  status: "unspent"
-                })
-                .eq("commitment", commitmentHex);
-
-            } catch (submitErr) {
-              console.error(`Gateway deposit transaction submission failed:`, submitErr.message);
-              await supabase.from("shielded_notes").delete().eq("commitment", commitmentHex);
-            }
-          }
-        }
-
+        await processDepositTransaction(txRecord);
         lastProcessedTxToken = txRecord.paging_token;
         fs.writeFileSync(GATEWAY_STATE_FILE, JSON.stringify({ lastProcessedTxToken }), "utf-8");
       } catch (txErr) {

@@ -53,20 +53,20 @@
   - [x] Database connection pooling active and verified.
 
 ### Week 2: SEP-0007 QR Gateway & Stellar Wallets Kit Integration
-- [ ] Dynamic SEP-0007 URI & QR Code Generation:
-  - [ ] Install and configure lightweight SVG QR code generator in `frontend/`.
-  - [ ] Implement SEP-0007 URI generator formatting `web+stellar:pay?destination=...&amount=...&asset_code=...&memo=...`.
-  - [ ] Add mobile QR display modal in the Deposit workflow.
-- [ ] Stellar Wallets Kit Integration:
-  - [ ] Integrate `@creit.tech/stellar-wallets-kit` modal in `frontend/src/components/Balances.jsx`.
-  - [ ] Support one-click connection for Freighter, LOBSTR, xBull, and Hana.
-  - [ ] Implement client-side transaction signing and submission to the deposit gateway.
-- [ ] Automated Deposit Shielding Pipeline:
-  - [ ] Connect deposit events from connected wallets to backend gateway `/api/gateway/deposit`.
-  - [ ] Automatically mint encrypted shielded note commitments into the user's private balance upon confirmation.
-- [ ] Week 2 Deliverable Checkpoint:
-  - [ ] Mobile users can scan SEP-0007 QR codes with LOBSTR/Solar to deposit.
-  - [ ] Desktop users can connect Freighter to deposit public XLM/USDC into the shielded pool.
+- [x] Dynamic SEP-0007 URI & QR Code Generation:
+  - [x] Install and configure lightweight SVG QR code generator in `frontend/`.
+  - [x] Implement SEP-0007 URI generator formatting `web+stellar:pay?destination=...&amount=...&asset_code=...&memo=...`.
+  - [x] Add mobile QR display modal in the Deposit workflow.
+- [x] Stellar Wallets Kit Integration:
+  - [x] Integrate `@creit.tech/stellar-wallets-kit` modal in `frontend/src/lib/walletKit.ts` and `Receive.tsx`.
+  - [x] Support one-click connection for Freighter, LOBSTR, xBull, and Hana.
+  - [x] Implement client-side transaction signing and submission to the deposit gateway.
+- [x] Automated Deposit Shielding Pipeline:
+  - [x] Connect deposit events from connected wallets to backend gateway `/api/gateway/deposit`.
+  - [x] Automatically mint encrypted shielded note commitments into the user's private balance upon confirmation.
+- [x] Week 2 Deliverable Checkpoint:
+  - [x] Mobile users can scan SEP-0007 QR codes with LOBSTR/Solar to deposit.
+  - [x] Desktop users can connect Freighter to deposit public XLM/USDC into the shielded pool.
 
 ### Week 3: Stellar Native Passkey Biometric Authentication (CAP-0051)
 - [ ] WebAuthn Device Registration Flow:
@@ -107,7 +107,7 @@
 
 | Deliverable | Planned Evidence | Status |
 | :--- | :--- | :--- |
-| **Deliverable 1: SEP-0007 & Wallets Kit** | Live web app link with QR deposit flow + Stellar Testnet explorer links (Stellar.expert) showing public-to-shielded contract deposits from external wallets | Planned |
+| **Deliverable 1: SEP-0007 & Wallets Kit** | Live web app link with QR deposit flow + Stellar Testnet explorer links (Stellar.expert) showing public-to-shielded contract deposits from external wallets | **Completed** (Tx: `c5963a3e...`, Memo routing + Auto-shielding verified) |
 | **Deliverable 2: Production Infrastructure** | Live custom domain URL with valid SSL, sub-second latency proof, and automated relayer daemon monitoring logs on testnet | **Completed** (`https://starlitpay.xyz` & `https://api.starlitpay.xyz`) |
 | **Deliverable 3: Passkeys (CAP-0051)** | Demonstrated Face ID / Touch ID wallet login on live app + Soroban transaction verification logs confirming biometric authorization | Planned |
 | **Overall Sprint** | 2-minute public product walkthrough video + final technical report | Planned |
