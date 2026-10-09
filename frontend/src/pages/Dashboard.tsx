@@ -295,11 +295,19 @@ function DashboardPage() {
               Swap
               <span className="soon-pill">Soon</span>
             </Button>
-            <Button variant="secondary" className={actionButtonClass}>
+            <Button
+              variant="secondary"
+              className={actionButtonClass}
+              onClick={() => navigate("/send?mode=external")}
+            >
               <ArrowUp />
               Withdraw
             </Button>
-            <Button variant="secondary" className={actionButtonClass}>
+            <Button
+              variant="secondary"
+              className={actionButtonClass}
+              onClick={() => navigate("/faucet")}
+            >
               <Droplets />
               Faucet
             </Button>
