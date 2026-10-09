@@ -10,9 +10,11 @@ import {
   type BackendUser,
 } from "@/lib/backend";
 import { supabase } from "@/lib/supabase";
+import nacl from "tweetnacl";
 import {
   bytesToHex,
   deriveKeysFromEmailAndPin,
+  hexToBytes,
   identityCommitment,
   sha256,
   type DerivedKeys,
@@ -30,11 +32,40 @@ let unlockedKeys: DerivedKeys | null = null;
 let unlockedThisLoad = false;
 
 export function isUnlocked(): boolean {
-  return unlockedThisLoad || (typeof window !== "undefined" && !!localStorage.getItem("starlit_user"));
+  return unlockedThisLoad || (typeof window !== "undefined" && !!getUnlockedKeys());
 }
 
-export function getUnlockedKeys(): DerivedKeys | null {
-  return unlockedKeys;
+export function getUnlockedKeys(userEmail?: string): DerivedKeys | null {
+  if (unlockedKeys) return unlockedKeys;
+  const email = userEmail || getStoredUser<SessionUser>()?.email;
+  if (email && typeof window !== "undefined") {
+    try {
+      const viewingSecret = localStorage.getItem(VIEWING_SECRET_KEY(email));
+      const stellarSecret = localStorage.getItem(SECRET_SUFFIX(email));
+      const spendingKey = localStorage.getItem(SPENDING_KEY_SUFFIX(email));
+      if (viewingSecret && stellarSecret && spendingKey) {
+        const viewingKeyPair = nacl.box.keyPair.fromSecretKey(hexToBytes(viewingSecret));
+        const stellarKeypair = StellarSdk.Keypair.fromSecret(stellarSecret);
+        unlockedKeys = {
+          masterSeed: "",
+          stellar: {
+            publicKey: stellarKeypair.publicKey(),
+            secretKey: stellarSecret,
+          },
+          spendingKey,
+          viewing: {
+            publicKey: bytesToHex(viewingKeyPair.publicKey),
+            secretKey: viewingSecret,
+          },
+        };
+        unlockedThisLoad = true;
+        return unlockedKeys;
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+  }
+  return null;
 }
 
 export function markUnlocked(keys: DerivedKeys, email?: string) {

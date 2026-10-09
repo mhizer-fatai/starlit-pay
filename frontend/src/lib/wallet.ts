@@ -50,7 +50,7 @@ export interface PrivateBalances {
  * Returns null when the wallet is locked (no PIN-derived keys in this tab).
  */
 export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBalances | null> {
-  const keys = getUnlockedKeys();
+  const keys = getUnlockedKeys(user.email);
   if (!keys || !user.public_encryption_key) return null;
   const timestamp = Date.now().toString();
   const keypair = StellarSdk.Keypair.fromSecret(keys.stellar.secretKey);
