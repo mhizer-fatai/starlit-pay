@@ -62,7 +62,7 @@ function TransactionsPage() {
       void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user)])
         .then(([txs, balances]) => {
           if (cancelled) return;
-          setFeed(buildActivityFeed(balances?.notes ?? [], txs));
+          setFeed(buildActivityFeed(balances?.notes ?? [], txs, user.username));
         })
         .catch(() => {})
         .finally(() => {

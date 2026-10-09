@@ -10,6 +10,7 @@ import {
   Eye,
   EyeOff,
   Receipt,
+  RefreshCw,
   Send,
 } from "lucide-react";
 
@@ -60,6 +61,7 @@ function DashboardPage() {
   const [tvl, setTvl] = useState<string | null>(null);
   const [balancesLoading, setBalancesLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   // Live prices via the backend CoinGecko proxy (static fallback until loaded).
   const prices = usePrices();
   const totalUsd = usdcBalance * prices.USDC + xlmBalance * prices.XLM;
@@ -76,6 +78,7 @@ function DashboardPage() {
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
       setEmail(user.email);
+      setViewerUsername(user.username);
       setChecking(false);
       // Real transaction history (read).
       void loadUserTransactions(user.id)
@@ -115,6 +118,32 @@ function DashboardPage() {
     navigate("/auth", { replace: true });
   }
 
+  // Refreshes balances + activity without reloading the page. Stale values
+  // stay visible behind skeletons-free UI while the sync icon spins.
+  async function handleSync() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const user = await getUser();
+      if (!user) {
+        navigate("/auth", { replace: true });
+        return;
+      }
+      const [txs, balances] = await Promise.all([
+        loadUserTransactions(user.id).catch(() => []),
+        loadPrivateBalances(user).catch(() => null),
+      ]);
+      setAllTxs(txs);
+      if (balances) {
+        setUsdcBalance(balances.usdc);
+        setXlmBalance(balances.xlm);
+        setBalanceNotes(balances.notes);
+      }
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   const chartRef = useRef<HTMLDivElement>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverY, setHoverY] = useState<number | null>(null);
@@ -122,7 +151,8 @@ function DashboardPage() {
 
   // Balance trend derived from real on-database events: shielded-note receipts
   // (+) and recorded sends (−), ordered by time as a cumulative USD series
-  // converted at live prices.
+  // converted at live prices. Anchored so the line ends at today's balance —
+  // spent input notes are invisible to history, so raw accumulation undershoots.
   const chartPoints: ChartPoint[] = useMemo(() => {
     const events: { t: number; usd: number }[] = [];
     for (const note of balanceNotes) {
@@ -154,6 +184,8 @@ function DashboardPage() {
       values = sampled;
     }
     if (values.length < 2) values = [0, 0];
+    const shift = totalUsd - values[values.length - 1]!;
+    values = values.map((value) => value + shift);
     const lo = Math.min(0, ...values);
     const hi = Math.max(0.01, ...values);
     return values.map((value, i) => ({
@@ -161,7 +193,7 @@ function DashboardPage() {
       y: 200 - ((value - lo) / (hi - lo)) * 190,
       balance: `$${formatGrouped(value)}`,
     }));
-  }, [balanceNotes, allTxs, prices]);
+  }, [balanceNotes, allTxs, prices, totalUsd]);
 
   const chartLinePath = useMemo(
     () => chartPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" "),
@@ -173,9 +205,11 @@ function DashboardPage() {
   );
 
   // Unified date-ordered feed: incoming shielded notes + outgoing records.
+  // Viewer identity filters out own change notes (see buildActivityFeed).
+  const [viewerUsername, setViewerUsername] = useState("");
   const activityFeed = useMemo(
-    () => buildActivityFeed(balanceNotes, allTxs),
-    [balanceNotes, allTxs],
+    () => buildActivityFeed(balanceNotes, allTxs, viewerUsername),
+    [balanceNotes, allTxs, viewerUsername],
   );
   const recentActivity = activityFeed.slice(0, 4);
 
@@ -301,9 +335,21 @@ function DashboardPage() {
                 ) : balancesLoading ? (
                   <Skeleton className="h-9 w-52" label="Loading balance" />
                 ) : (
-                  <>
+                  <span>
                     ${dollars}<sup>{cents}</sup>
-                  </>
+                  </span>
+                )}
+                {!balancesLoading && (
+                  <button
+                    type="button"
+                    className="balance-sync"
+                    onClick={handleSync}
+                    disabled={syncing}
+                    aria-label={syncing ? "Refreshing balance" : "Refresh balance"}
+                    title="Refresh balance"
+                  >
+                    <RefreshCw className={syncing ? "animate-spin" : ""} />
+                  </button>
                 )}
               </div>
               {chartLoading ? (

@@ -7,6 +7,7 @@ import { getUnlockedKeys, type SessionUser } from "@/lib/auth";
 import {
   fetchNotes,
   fetchTransactions,
+  spendNote,
   type BackendTransaction,
 } from "@/lib/backend";
 import { bytesToHex, decryptShieldedNote } from "@/lib/keys";
@@ -79,6 +80,8 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
 
 export interface DecodedTx {
   to?: string;
+  toUsername?: string;
+  sender?: string;
   amount?: number;
   asset?: string;
   at?: string;
@@ -89,6 +92,8 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
   try {
     const obj = JSON.parse(atob(encryptedPayload)) as {
       to?: unknown;
+      toUsername?: unknown;
+      sender?: unknown;
       amount?: unknown;
       asset?: unknown;
       at?: unknown;
@@ -96,6 +101,8 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
     if (obj && typeof obj === "object") {
       return {
         to: typeof obj.to === "string" ? obj.to : undefined,
+        toUsername: typeof obj.toUsername === "string" ? obj.toUsername : undefined,
+        sender: typeof obj.sender === "string" ? obj.sender : undefined,
         amount: typeof obj.amount === "number" && Number.isFinite(obj.amount) ? obj.amount : undefined,
         asset: typeof obj.asset === "string" ? obj.asset : undefined,
         at: typeof obj.at === "string" ? obj.at : undefined,
@@ -110,6 +117,62 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
 export async function loadUserTransactions(userId: string): Promise<BackendTransaction[]> {
   const res = await fetchTransactions(userId);
   return res.transactions ?? [];
+}
+
+const EPSILON = 1e-9;
+
+/** Sums unspent notes for an asset, or throws when the wallet is locked. */
+export async function spendableBalance(user: SessionUser, asset: string): Promise<number> {
+  const balances = await loadPrivateBalances(user);
+  if (!balances) throw new Error("Unlock your wallet first.");
+  const code = asset.toUpperCase();
+  return balances.notes
+    .filter((note) => note.asset === code)
+    .reduce((sum, note) => sum + note.amount, 0);
+}
+
+export interface SpendResult {
+  spentCommitments: string[];
+  change: number;
+}
+
+/**
+ * Marks the sender's unspent notes covering `amount` as spent (signed request,
+ * verified against the stored Stellar address) and returns any change owed.
+ * Throws on insufficient balance — callers must check before crediting anyone.
+ */
+export async function spendForPayment(
+  user: SessionUser,
+  asset: string,
+  amount: number,
+): Promise<SpendResult> {
+  const keys = getUnlockedKeys();
+  if (!keys) throw new Error("Unlock your wallet first.");
+  const balances = await loadPrivateBalances(user);
+  if (!balances) throw new Error("Unlock your wallet first.");
+  const code = asset.toUpperCase();
+  const notes = balances.notes.filter((note) => note.asset === code);
+  const total = notes.reduce((sum, note) => sum + note.amount, 0);
+  if (total + EPSILON < amount) {
+    throw new Error(`Insufficient ${code} balance.`);
+  }
+  const selected: typeof notes = [];
+  let covered = 0;
+  for (const note of notes) {
+    selected.push(note);
+    covered += note.amount;
+    if (covered + EPSILON >= amount) break;
+  }
+  const timestamp = Date.now().toString();
+  const keypair = StellarSdk.Keypair.fromSecret(keys.stellar.secretKey);
+  const signature = bytesToHex(keypair.sign(Buffer.from(new TextEncoder().encode(timestamp))));
+  for (const note of selected) {
+    await spendNote({ commitment: note.commitment, timestamp, signature });
+  }
+  return {
+    spentCommitments: selected.map((note) => note.commitment),
+    change: Math.max(0, covered - amount),
+  };
 }
 
 /** "1,156,908.27" style grouping with exactly 2 decimals. */
@@ -161,10 +224,17 @@ export interface ActivityItem {
 
 /**
  * Merges decrypted shielded-note receipts (incoming) with decoded transaction
- * records (outgoing) into one date-ordered activity feed.
+ * records (outgoing) into one date-ordered activity feed. Notes you sent to
+ * yourself (payment change) are your money coming back, not new receipts, so
+ * they are excluded here — balances still count them.
  */
-export function buildActivityFeed(notes: BalanceNote[], txs: BackendTransaction[]): ActivityItem[] {
+export function buildActivityFeed(
+  notes: BalanceNote[],
+  txs: BackendTransaction[],
+  viewerUsername?: string,
+): ActivityItem[] {
   const items: ActivityItem[] = [];
+  const self = (viewerUsername ?? "").toLowerCase().trim();
   for (const tx of txs) {
     const decoded = tx.encrypted_payload ? decodeTransactionPayload(tx.encrypted_payload) : null;
     if (decoded?.amount === undefined || !decoded.asset) continue;
@@ -173,13 +243,15 @@ export function buildActivityFeed(notes: BalanceNote[], txs: BackendTransaction[
       direction: "out",
       amount: decoded.amount,
       asset: decoded.asset,
-      party: decoded.to ?? "",
+      party: decoded.toUsername ?? decoded.to ?? "",
       date: tx.created_at ? new Date(tx.created_at).getTime() : 0,
       reference: tx.id ?? "",
       referenceLabel: "Record ID",
     });
   }
   for (const note of notes) {
+    const sender = (note.sender ?? "").toLowerCase().trim();
+    if (self && sender && sender === self) continue;
     items.push({
       key: `note-${note.commitment}`,
       direction: "in",

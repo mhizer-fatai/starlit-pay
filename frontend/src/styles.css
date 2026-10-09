@@ -1500,6 +1500,32 @@
   }
 }
 
+@utility balance-sync {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+  & svg {
+    width: 16px;
+  }
+  &:hover:not(:disabled) {
+    background: oklch(0.96 0.006 250);
+    color: var(--color-foreground);
+  }
+  &:disabled {
+    cursor: wait;
+  }
+}
+
 @utility receive-card {
   height: auto;
   min-height: 500px;
@@ -1614,6 +1640,9 @@
   font-size: 29px;
   font-weight: 500;
   letter-spacing: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   & sup {
     font-size: 13px;
   }
