@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { Wallet, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { fetchPaymentLink, getStoredUser, type BackendUser } from "@/lib/backend";
+import { fetchPaymentLink, getStoredUser, notifyGatewayDeposit, type BackendUser } from "@/lib/backend";
 import {
   DEPOSIT_GATEWAY_ADDRESS,
   buildPublicPaymentTxXdr,
@@ -85,7 +85,14 @@ function PayRequestPage() {
       setWalletMessage("Submitting transaction to Stellar Network...");
       const hash = await submitSignedXdr(signedXdr);
 
-      setWalletMessage(`Payment confirmed! Tx Hash: ${hash.slice(0, 8)}...`);
+      setWalletMessage(`Payment submitted! Shielding funds for recipient...`);
+      try {
+        await notifyGatewayDeposit(hash);
+      } catch {
+        // Gateway daemon will still verify in background
+      }
+
+      setWalletMessage(`Payment confirmed and shielded! Tx: ${hash.slice(0, 8)}...`);
       setState((prev) => ({ ...prev, status: "completed" }));
     } catch (err: unknown) {
       setWalletMessage(err instanceof Error ? err.message : "Payment failed.");

@@ -45,7 +45,7 @@ app.get("/api/payment-links/:commitment", async (req, res) => {
   try {
     const { data: link, error } = await supabase
       .from("payment_links")
-      .select("*, creator:creator_id(username, display_name, avatar_url)")
+      .select("*, creator:creator_id(username, display_name, avatar_url, deposit_memo, public_encryption_key)")
       .eq("commitment", commitment)
       .single();
 
