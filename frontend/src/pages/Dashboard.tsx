@@ -22,7 +22,7 @@ import { fetchStats, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
-import { usePrices } from "@/lib/prices";
+import { usePrices, formatTokenPrice } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
 import {
   activityTitle,
@@ -451,25 +451,45 @@ function DashboardPage() {
               </div>
               <div className="holdings-list">
                 <div className="holding-row">
-                  <span className="holding-label">USDC</span>
-                  {balancesLoading ? (
-                    <Skeleton className="h-5 w-24" label="Loading USDC balance" />
-                  ) : (
-                    <strong className={balanceHidden ? "holding-masked" : ""}>
-                      {balanceHidden ? "••••••" : formatGrouped(usdcBalance)}
-                    </strong>
-                  )}
+                  <div className="holding-asset-col">
+                    <span className="holding-label">USDC</span>
+                    <span className="holding-price">{formatTokenPrice(prices.USDC)}</span>
+                  </div>
+                  <div className="holding-values-col">
+                    {balancesLoading ? (
+                      <Skeleton className="h-5 w-24" label="Loading USDC balance" />
+                    ) : (
+                      <>
+                        <strong className={balanceHidden ? "holding-masked" : "holding-amount"}>
+                          {balanceHidden ? "••••••" : formatGrouped(usdcBalance)}
+                        </strong>
+                        <span className="holding-fiat">
+                          {balanceHidden ? "••••••" : `≈ $${formatGrouped(usdcBalance * prices.USDC)}`}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div className="holding-divider" />
                 <div className="holding-row">
-                  <span className="holding-label">XLM</span>
-                  {balancesLoading ? (
-                    <Skeleton className="h-5 w-24" label="Loading XLM balance" />
-                  ) : (
-                    <strong className={balanceHidden ? "holding-masked" : ""}>
-                      {balanceHidden ? "••••••" : formatGrouped(xlmBalance)}
-                    </strong>
-                  )}
+                  <div className="holding-asset-col">
+                    <span className="holding-label">XLM</span>
+                    <span className="holding-price">{formatTokenPrice(prices.XLM)}</span>
+                  </div>
+                  <div className="holding-values-col">
+                    {balancesLoading ? (
+                      <Skeleton className="h-5 w-24" label="Loading XLM balance" />
+                    ) : (
+                      <>
+                        <strong className={balanceHidden ? "holding-masked" : "holding-amount"}>
+                          {balanceHidden ? "••••••" : formatGrouped(xlmBalance)}
+                        </strong>
+                        <span className="holding-fiat">
+                          {balanceHidden ? "••••••" : `≈ $${formatGrouped(xlmBalance * prices.XLM)}`}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
             </section>

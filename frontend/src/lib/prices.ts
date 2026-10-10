@@ -56,3 +56,15 @@ export function usePrices(): Prices {
   }, []);
   return prices;
 }
+
+/** Formats unit price with appropriate decimal precision (e.g. $1.00 for USDC, $0.1972 for XLM). */
+export function formatTokenPrice(price: number): string {
+  if (!Number.isFinite(price) || price <= 0) return "$0.00";
+  if (price >= 0.999 && price <= 1.001) {
+    return "$1.00";
+  }
+  if (price >= 1) {
+    return `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return `$${price.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
