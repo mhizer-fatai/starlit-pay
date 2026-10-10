@@ -44,4 +44,7 @@ stellar-dev-skill/
 .gemini/
 netlify/
 
+# Personal agent rules
+agent_rule.md
+
 
