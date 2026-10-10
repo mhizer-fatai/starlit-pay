@@ -236,15 +236,6 @@ function ReceivePage() {
                   <div className="qr-wrap bg-white p-4 rounded-2xl shadow-sm">
                     <QRCodeSVG value={sep0007Uri} size={180} />
                   </div>
-                  <div className="w-full max-w-xs flex gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={sep0007Uri}
-                      className="w-full bg-background border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-muted-foreground truncate"
-                    />
-                    <CopyButton value={sep0007Uri} label="Copy SEP-0007 URI" />
-                  </div>
                 </section>
               </div>
             </div>
