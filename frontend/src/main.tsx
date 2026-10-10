@@ -12,6 +12,15 @@ if (typeof window !== "undefined") {
       `https://starlitpay.xyz${window.location.pathname}${window.location.search}${window.location.hash}`
     );
   }
+
+  // Unregister legacy service workers if present to clear no-op fetch handler warning
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      for (const registration of registrations) {
+        registration.unregister();
+      }
+    }).catch(() => {});
+  }
 }
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
