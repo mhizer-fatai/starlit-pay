@@ -61,7 +61,7 @@ function ProfilePage() {
 
   async function handleLogout() {
     await signOut();
-    window.location.href = "/auth";
+    navigate("/", { replace: true });
   }
 
   function handleCopyUsername() {

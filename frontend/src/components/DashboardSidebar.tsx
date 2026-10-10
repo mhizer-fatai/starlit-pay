@@ -111,7 +111,7 @@ export function DashboardSidebar({
     { label: "Settings", icon: Settings, to: "/settings" as string | undefined },
     { label: themeLabel, icon: ThemeIcon, action: toggleTheme },
     { label: "Install App", icon: Download, soon: true },
-    { label: "Log Out", icon: LogOut, action: async () => { await signOut(); navigate("/auth", { replace: true }); } },
+    { label: "Log Out", icon: LogOut, action: async () => { await signOut(); navigate("/", { replace: true }); } },
   ];
 
   return (

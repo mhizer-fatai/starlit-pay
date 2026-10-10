@@ -115,7 +115,7 @@ function DashboardPage() {
 
   async function handleSignOut() {
     await signOut();
-    navigate("/auth", { replace: true });
+    navigate("/", { replace: true });
   }
 
   // Refreshes balances + activity without reloading the page. Stale values
