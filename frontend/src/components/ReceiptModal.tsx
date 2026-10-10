@@ -74,15 +74,24 @@ export function ReceiptModal({
   const partyKind = incoming ? "sender" : "recipient";
   const partyLabelText = incoming ? "Sender" : "Recipient";
 
-  const targetHash =
+  const isActualTxHash = Boolean(
     item.hash ||
-    (/^[0-9a-fA-F]{64}$/.test(item.reference) ? item.reference : null);
+    (item.referenceLabel === "Transaction Hash" && /^[0-9a-fA-F]{64}$/.test(item.reference))
+  );
+
+  const targetHash = item.hash || (isActualTxHash ? item.reference : null);
 
   const stellarExpertUrl = targetHash
     ? `https://stellar.expert/explorer/testnet/tx/${targetHash}`
     : item.ledger
     ? `https://stellar.expert/explorer/testnet/ledger/${item.ledger}`
-    : null;
+    : `https://stellar.expert/explorer/testnet/contract/CAHSOWD7JVCRO4U73MGXRET7DRJDM3K2CFS5EGYARWDEGACHWSR6ZEZM`;
+
+  const stellarExpertLabel = targetHash
+    ? "View on Stellar Expert"
+    : item.ledger
+    ? `View Ledger #${item.ledger} on Stellar Expert`
+    : "View on Stellar Expert";
 
   return createPortal(
     <div
@@ -215,7 +224,7 @@ export function ReceiptModal({
             <Button asChild variant="outline" className="w-full text-xs">
               <a href={stellarExpertUrl} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                View on Stellar Expert
+                {stellarExpertLabel}
               </a>
             </Button>
           )}
