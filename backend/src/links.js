@@ -56,23 +56,61 @@ app.get("/api/payment-links/:commitment", async (req, res) => {
       throw error;
     }
 
-    // Checks if the link has already been claimed
-    if (link.status === "claimed") {
-      return res.status(400).json({ error: "This payment link has already been claimed and has expired." });
-    }
-
-    // Checks if the link was created more than 30 minutes ago
+    // Compute effective status based on expiration
     const createdAt = new Date(link.created_at);
     const now = new Date();
     const durationMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60);
 
-    if (durationMinutes > 30) {
-      return res.status(400).json({ error: "This payment link has expired (30-minute limit exceeded)." });
+    let effectiveStatus = link.status;
+    if (effectiveStatus !== "claimed" && durationMinutes > 30) {
+      effectiveStatus = "expired";
     }
 
-    res.status(200).json({ link });
+    res.status(200).json({ link: { ...link, status: effectiveStatus } });
   } catch (error) {
     console.error("Fetch payment link error:", error.message);
     res.status(500).json({ error: "Failed to fetch payment link" });
+  }
+});
+
+// Mark a payment link as claimed / one-time completed
+app.post("/api/payment-links/:commitment/claim", async (req, res) => {
+  const { commitment } = req.params;
+  const { txHash } = req.body || {};
+
+  try {
+    const { data: link, error: findError } = await supabase
+      .from("payment_links")
+      .select("*")
+      .eq("commitment", commitment)
+      .single();
+
+    if (findError || !link) {
+      return res.status(404).json({ error: "Payment link not found" });
+    }
+
+    if (link.status === "claimed") {
+      return res.status(400).json({ error: "This payment link has already been claimed." });
+    }
+
+    const createdAt = new Date(link.created_at);
+    const now = new Date();
+    const durationMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60);
+    if (durationMinutes > 30) {
+      return res.status(400).json({ error: "This payment link has expired." });
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from("payment_links")
+      .update({ status: "claimed" })
+      .eq("commitment", commitment)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+    res.status(200).json({ status: "ok", link: updated, txHash });
+  } catch (error) {
+    console.error("Claim payment link error:", error.message);
+    res.status(500).json({ error: "Failed to claim payment link" });
   }
 });

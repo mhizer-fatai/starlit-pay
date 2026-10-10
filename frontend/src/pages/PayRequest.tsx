@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Wallet, ShieldCheck } from "lucide-react";
+import { Wallet, ShieldCheck, Clock, CheckCircle2, AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { fetchPaymentLink, getStoredUser, notifyGatewayDeposit, type BackendUser } from "@/lib/backend";
+import {
+  claimPaymentLink,
+  fetchPaymentLink,
+  getStoredUser,
+  notifyGatewayDeposit,
+  type BackendUser,
+} from "@/lib/backend";
 import {
   DEPOSIT_GATEWAY_ADDRESS,
   buildPublicPaymentTxXdr,
@@ -11,6 +17,12 @@ import {
   CLASSIC_TOKENS,
 } from "@/lib/stellar";
 import { connectWithWalletKit, signWithWalletKit } from "@/lib/walletKit";
+
+function formatTimer(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
 
 function PayRequestPage() {
   const { commitment } = useParams();
@@ -24,11 +36,13 @@ function PayRequestPage() {
     creator?: string;
     creatorUser?: BackendUser;
     status?: string;
+    createdAt?: string;
   }>({
     loading: true,
   });
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletMessage, setWalletMessage] = useState("");
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
   useEffect(() => {
     document.title = "Pay request — Starlit Pay";
@@ -45,12 +59,51 @@ function PayRequestPage() {
           creator: res.link.creator?.username ? `@${res.link.creator.username}` : "a Starlit user",
           creatorUser: res.link.creator,
           status: res.link.status,
+          createdAt: res.link.created_at,
         }),
       )
-      .catch(() => setState({ loading: false, error: "This payment link does not exist or expired." }));
+      .catch((err) =>
+        setState({
+          loading: false,
+          error: err instanceof Error ? err.message : "This payment link does not exist or expired.",
+        }),
+      );
   }, [commitment]);
 
+  useEffect(() => {
+    if (!state.createdAt) return;
+
+    function getRemainingSeconds() {
+      const createdMs = new Date(state.createdAt!).getTime();
+      if (isNaN(createdMs)) return 0;
+      const expiresMs = createdMs + 30 * 60 * 1000;
+      return Math.max(0, Math.floor((expiresMs - Date.now()) / 1000));
+    }
+
+    const initial = getRemainingSeconds();
+    setTimeLeft(initial);
+    if (initial <= 0) return;
+
+    const timer = setInterval(() => {
+      const rem = getRemainingSeconds();
+      setTimeLeft(rem);
+      if (rem <= 0) {
+        clearInterval(timer);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [state.createdAt]);
+
+  const isClaimed = state.status === "claimed";
+  const isExpired = state.status === "expired" || (timeLeft !== null && timeLeft <= 0);
+  const isActionable = !isClaimed && !isExpired && state.status === "pending";
+
   async function handlePayWithStellarWallet() {
+    if (!isActionable) {
+      setWalletMessage("This payment link is no longer available.");
+      return;
+    }
     if (!state.creatorUser?.deposit_memo) {
       setWalletMessage("Recipient deposit memo is missing.");
       return;
@@ -92,8 +145,16 @@ function PayRequestPage() {
         // Gateway daemon will still verify in background
       }
 
+      if (commitment) {
+        try {
+          await claimPaymentLink(commitment, hash);
+        } catch {
+          // Link claim failure does not negate the transaction
+        }
+      }
+
       setWalletMessage(`Payment confirmed and shielded! Tx: ${hash.slice(0, 8)}...`);
-      setState((prev) => ({ ...prev, status: "completed" }));
+      setState((prev) => ({ ...prev, status: "claimed" }));
     } catch (err: unknown) {
       setWalletMessage(err instanceof Error ? err.message : "Payment failed.");
     } finally {
@@ -123,16 +184,38 @@ function PayRequestPage() {
                   {state.amount} <span className="text-sm font-normal text-muted-foreground">{state.asset}</span>
                 </p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  {state.status === "pending" ? `Requested by ${state.creator}` : `Status: ${state.status}`}
+                  Requested by {state.creator}
                 </p>
+
+                {isClaimed && (
+                  <div className="mt-3 flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-400">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>Payment completed (One-time link claimed)</span>
+                  </div>
+                )}
+
+                {isExpired && !isClaimed && (
+                  <div className="mt-3 flex items-center justify-center gap-1.5 rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-400">
+                    <AlertCircle className="h-3.5 w-3.5" />
+                    <span>Payment link expired (30-minute limit exceeded)</span>
+                  </div>
+                )}
+
+                {isActionable && timeLeft !== null && (
+                  <div className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-mono font-medium text-primary">
+                    <Clock className="h-3.5 w-3.5 animate-pulse" />
+                    <span>Expires in {formatTimer(timeLeft)}</span>
+                  </div>
+                )}
 
                 <div className="mt-5 space-y-3">
                   {currentUser ? (
                     <Button
                       className="w-full"
+                      disabled={!isActionable}
                       onClick={() =>
                         navigate(
-                          `/send?to=${encodeURIComponent(state.creator?.replace(/^@/, "") || "")}&amount=${encodeURIComponent(state.amount || "")}`,
+                          `/send?to=${encodeURIComponent(state.creator?.replace(/^@/, "") || "")}&amount=${encodeURIComponent(state.amount || "")}&link=${encodeURIComponent(commitment || "")}`,
                         )
                       }
                     >
@@ -140,7 +223,11 @@ function PayRequestPage() {
                       Pay Privately with Starlit
                     </Button>
                   ) : (
-                    <Button className="w-full" onClick={() => navigate("/auth")}>
+                    <Button
+                      className="w-full"
+                      disabled={!isActionable}
+                      onClick={() => navigate("/auth")}
+                    >
                       Log in to pay with Starlit
                     </Button>
                   )}
@@ -149,7 +236,7 @@ function PayRequestPage() {
                     variant="outline"
                     className="w-full"
                     onClick={handlePayWithStellarWallet}
-                    disabled={walletLoading || state.status === "completed"}
+                    disabled={!isActionable || walletLoading}
                   >
                     <Wallet className="mr-2 h-4 w-4" />
                     {walletLoading ? "Processing..." : "Pay with Stellar Wallet (Freighter / LOBSTR)"}

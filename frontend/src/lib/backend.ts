@@ -196,6 +196,11 @@ export const fetchPaymentLink = (commitment: string) =>
   req<{ link: PaymentLink & { creator?: BackendUser } }>(
     `/api/payment-links/${encodeURIComponent(commitment)}`,
   );
+export const claimPaymentLink = (commitment: string, txHash?: string) =>
+  req<{ link: PaymentLink }>(`/api/payment-links/${encodeURIComponent(commitment)}/claim`, {
+    method: "POST",
+    body: JSON.stringify({ txHash }),
+  });
 
 // --- Shielded notes (read + write) ---
 export interface ShieldedNote {

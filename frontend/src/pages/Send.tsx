@@ -32,6 +32,7 @@ import {
   postTransaction,
   fetchNotes,
   spendNote,
+  claimPaymentLink,
   submitRelayerTransfer,
   submitRelayerWithdraw,
 } from "@/lib/backend";
@@ -150,6 +151,7 @@ function SendPage() {
     const params = new URLSearchParams(window.location.search);
     return params.get("mode") === "external" ? "external" : "starlit";
   });
+  const [linkCommitment, setLinkCommitment] = useState<string | null>(null);
   const [assetOpen, setAssetOpen] = useState(false);
   const assetRef = useRef<HTMLDivElement>(null);
 
@@ -162,6 +164,8 @@ function SendPage() {
     if (toParam) setUsername(toParam);
     const amtParam = params.get("amount");
     if (amtParam) setAmount(amtParam);
+    const linkParam = params.get("link");
+    if (linkParam) setLinkCommitment(linkParam);
   }, [location.search]);
 
 
@@ -435,6 +439,14 @@ function SendPage() {
         });
         await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
 
+        if (linkCommitment) {
+          try {
+            await claimPaymentLink(linkCommitment, relayerRes.hash);
+          } catch (claimErr) {
+            console.error("Failed to mark payment link as claimed:", claimErr);
+          }
+        }
+
         setMessage(`Withdrawal of ${spendAmount} ${asset} to ${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)} completed! Tx: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
         setReceipt({
           key: `withdraw-${relayerRes.hash || Date.now()}`,
@@ -556,6 +568,14 @@ function SendPage() {
           at: new Date().toISOString(),
         });
         await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
+
+        if (linkCommitment) {
+          try {
+            await claimPaymentLink(linkCommitment, relayerRes.hash);
+          } catch (claimErr) {
+            console.error("Failed to mark payment link as claimed:", claimErr);
+          }
+        }
 
         setMessage(`Sent ${spendAmount} ${asset} to @${recipient}! Tx Hash: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
         setReceipt({
