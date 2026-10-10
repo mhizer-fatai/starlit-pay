@@ -55,6 +55,7 @@ function ReceivePage() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletMessage, setWalletMessage] = useState("");
   const [gatewayAddress, setGatewayAddress] = useState(GATEWAY_FALLBACK);
+  const [qrMode, setQrMode] = useState<"freighter" | "sep0007">("freighter");
 
   useEffect(() => {
     document.title = "Receive — Starlit Pay";
@@ -224,18 +225,68 @@ function ReceivePage() {
               </section>
 
               <div className="qr-stack">
-                <section className="dash-card qr-card flex flex-col items-center justify-center gap-4">
+                <section className="dash-card qr-card flex flex-col items-center justify-start gap-4">
+                  <div className="w-full flex justify-center">
+                    <div className="inline-flex rounded-lg bg-muted p-1 text-xs">
+                      <button
+                        type="button"
+                        className={`px-3 py-1 rounded-md font-medium transition-all ${
+                          qrMode === "freighter"
+                            ? "bg-background text-foreground shadow-sm font-semibold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        onClick={() => setQrMode("freighter")}
+                      >
+                        Freighter / Address
+                      </button>
+                      <button
+                        type="button"
+                        className={`px-3 py-1 rounded-md font-medium transition-all ${
+                          qrMode === "sep0007"
+                            ? "bg-background text-foreground shadow-sm font-semibold"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        onClick={() => setQrMode("sep0007")}
+                      >
+                        LOBSTR / Solar
+                      </button>
+                    </div>
+                  </div>
+
                   <div className="text-center">
                     <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      SEP-0007 Stellar QR Code
+                      {qrMode === "freighter" ? "Deposit Address QR" : "SEP-0007 Payment URI"}
                     </span>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Scan with LOBSTR, Solar, or any Stellar wallet
+                      {qrMode === "freighter"
+                        ? "Scan with Freighter, mobile wallets, or exchanges"
+                        : "Auto-fills address and memo in SEP-0007 wallets"}
                     </p>
                   </div>
+
                   <div className="qr-wrap bg-white p-4 rounded-2xl shadow-sm">
-                    <QRCodeSVG value={sep0007Uri} size={180} />
+                    <QRCodeSVG
+                      value={qrMode === "freighter" ? gatewayAddress : sep0007Uri}
+                      size={180}
+                    />
                   </div>
+
+                  {qrMode === "freighter" && (
+                    <div className="w-full bg-muted/40 border border-border/60 rounded-xl p-3 text-center space-y-1.5">
+                      <div className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                        Required Memo ID
+                      </div>
+                      <div className="flex items-center justify-center gap-2">
+                        <code className="text-base font-bold font-mono text-foreground tracking-wide">
+                          {memo}
+                        </code>
+                        {memoValue && <CopyButton value={memoValue} label="Copy Memo" />}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-tight">
+                        Enter this Memo ID in Freighter when sending.
+                      </p>
+                    </div>
+                  )}
                 </section>
               </div>
             </div>
