@@ -1989,10 +1989,13 @@
   place-items: center;
   background: oklch(0.15 0.02 230 / 0.4);
   padding: 20px;
+  overflow-y: auto;
 }
 
 @utility send-modal-card {
   width: min(100% - 32px, 420px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
   background: oklch(1 0 0);
   border-radius: 12px;
   box-shadow: 0 20px 50px oklch(0.2 0.02 230 / 0.2);

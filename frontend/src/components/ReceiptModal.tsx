@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowDownLeft, Check, Copy, Download, Send, X } from "lucide-react";
+import { ArrowDownLeft, Check, Copy, Download, ExternalLink, Send, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { downloadReceiptPdf } from "@/lib/receiptPdf";
@@ -74,6 +74,16 @@ export function ReceiptModal({
   const partyKind = incoming ? "sender" : "recipient";
   const partyLabelText = incoming ? "Sender" : "Recipient";
 
+  const targetHash =
+    item.hash ||
+    (/^[0-9a-fA-F]{64}$/.test(item.reference) ? item.reference : null);
+
+  const stellarExpertUrl = targetHash
+    ? `https://stellar.expert/explorer/testnet/tx/${targetHash}`
+    : item.ledger
+    ? `https://stellar.expert/explorer/testnet/ledger/${item.ledger}`
+    : null;
+
   return createPortal(
     <div
       className="send-modal"
@@ -88,6 +98,10 @@ export function ReceiptModal({
         aria-modal="true"
         aria-labelledby="receipt-title"
         onMouseDown={(event) => event.stopPropagation()}
+        style={{
+          maxHeight: "calc(100vh - 40px)",
+          overflowY: "auto",
+        }}
       >
         <div className="modal-header">
           <h3 className="modal-title" id="receipt-title">
@@ -196,6 +210,15 @@ export function ReceiptModal({
             Private shielded payment — details are encrypted and not published to the public
             ledger.
           </div>
+
+          {stellarExpertUrl && (
+            <Button asChild variant="outline" className="w-full text-xs">
+              <a href={stellarExpertUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                View on Stellar Expert
+              </a>
+            </Button>
+          )}
 
           <div className="flex gap-2">
             <Button type="button" className="flex-1" onClick={onClose}>

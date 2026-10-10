@@ -457,6 +457,7 @@ function SendPage() {
           date: Date.now(),
           reference: relayerRes.hash || rawTarget,
           referenceLabel: "Withdrawal Tx",
+          hash: relayerRes.hash,
         });
         void refreshAssetBalances(me).catch(() => {});
         setUsername("");
@@ -585,8 +586,9 @@ function SendPage() {
           asset,
           party: recipient,
           date: Date.now(),
-          reference: recipientCommitmentHex,
-          referenceLabel: "Note commitment",
+          reference: relayerRes.hash || recipientCommitmentHex,
+          referenceLabel: relayerRes.hash ? "Transaction Hash" : "Note commitment",
+          hash: relayerRes.hash,
         });
         void refreshAssetBalances(me).catch(() => {});
         setUsername("");

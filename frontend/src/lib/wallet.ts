@@ -35,6 +35,7 @@ export interface BalanceNote {
   asset: string;
   createdAt: number;
   sender?: string;
+  ledger?: number;
 }
 
 export interface PrivateBalances {
@@ -72,6 +73,7 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
       asset,
       createdAt: note.created_at ? new Date(note.created_at).getTime() : Date.now(),
       sender: decrypted.sender,
+      ledger: note.ledger,
     });
   }
   out.totalUsd = out.usdc * PRICES.USDC + out.xlm * PRICES.XLM;
@@ -84,6 +86,7 @@ export interface DecodedTx {
   sender?: string;
   amount?: number;
   asset?: string;
+  hash?: string;
   at?: string;
 }
 
@@ -96,6 +99,7 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
       sender?: unknown;
       amount?: unknown;
       asset?: unknown;
+      hash?: unknown;
       at?: unknown;
     };
     if (obj && typeof obj === "object") {
@@ -105,6 +109,7 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
         sender: typeof obj.sender === "string" ? obj.sender : undefined,
         amount: typeof obj.amount === "number" && Number.isFinite(obj.amount) ? obj.amount : undefined,
         asset: typeof obj.asset === "string" ? obj.asset : undefined,
+        hash: typeof obj.hash === "string" ? obj.hash : undefined,
         at: typeof obj.at === "string" ? obj.at : undefined,
       };
     }
@@ -220,6 +225,8 @@ export interface ActivityItem {
   date: number;
   reference: string;
   referenceLabel: string;
+  hash?: string;
+  ledger?: number;
 }
 
 /**
@@ -245,8 +252,9 @@ export function buildActivityFeed(
       asset: decoded.asset,
       party: decoded.toUsername ?? decoded.to ?? "",
       date: tx.created_at ? new Date(tx.created_at).getTime() : 0,
-      reference: tx.id ?? "",
-      referenceLabel: "Record ID",
+      reference: decoded.hash || tx.id || "",
+      referenceLabel: decoded.hash ? "Transaction Hash" : "Record ID",
+      hash: decoded.hash,
     });
   }
   for (const note of notes) {
@@ -261,6 +269,7 @@ export function buildActivityFeed(
       date: note.createdAt,
       reference: note.commitment,
       referenceLabel: "Note commitment",
+      ledger: note.ledger,
     });
   }
   items.sort((a, b) => b.date - a.date);
