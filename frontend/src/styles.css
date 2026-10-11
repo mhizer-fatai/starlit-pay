@@ -1599,14 +1599,14 @@
 }
 
 @utility qr-card {
-  flex: 0 0 240px;
+  flex: 0 0 280px;
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  gap: 12px;
-  padding: 24px 16px 16px;
+  gap: 14px;
+  padding: 24px 20px 20px;
 }
 
 @utility qr-label {
@@ -1618,7 +1618,7 @@
 }
 
 @utility qr-stack {
-  flex: 0 0 240px;
+  flex: 0 0 280px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -2015,26 +2015,31 @@
   z-index: 50;
   display: grid;
   place-items: center;
-  background: oklch(0.15 0.02 230 / 0.4);
+  background: oklch(0 0 0 / 0.6);
+  backdrop-filter: blur(4px);
   padding: 20px;
   overflow-y: auto;
 }
 
 @utility send-modal-card {
-  width: min(100% - 32px, 420px);
+  width: min(100% - 32px, 440px);
   max-height: calc(100vh - 40px);
   overflow-y: auto;
-  background: oklch(1 0 0);
-  border-radius: 12px;
-  box-shadow: 0 20px 50px oklch(0.2 0.02 230 / 0.2);
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px oklch(0 0 0 / 0.35);
   padding: 24px;
 }
 
 @utility payment-links-modal-card {
-  width: min(100% - 32px, 420px);
-  background: oklch(1 0 0);
-  border-radius: 12px;
-  box-shadow: 0 20px 50px oklch(0.2 0.02 230 / 0.2);
+  width: min(100% - 32px, 440px);
+  background: var(--color-card);
+  color: var(--color-card-foreground);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px oklch(0 0 0 / 0.35);
   padding: 24px;
 }
 
@@ -2048,6 +2053,7 @@
 @utility modal-title {
   font-size: 16px;
   font-weight: 600;
+  color: var(--color-card-foreground);
 }
 
 @utility modal-close {
@@ -2061,7 +2067,7 @@
   color: var(--color-muted-foreground);
   cursor: pointer;
   &:hover {
-    background: oklch(0.96 0.006 250);
+    background: var(--color-muted);
     color: var(--color-foreground);
   }
 }
@@ -2088,6 +2094,7 @@
 
 @utility modal-value {
   font-weight: 600;
+  color: var(--color-card-foreground);
 }
 
 @utility export-options-row {

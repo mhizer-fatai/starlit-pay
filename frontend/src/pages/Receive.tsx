@@ -230,28 +230,17 @@ function ReceivePage() {
                       SEP-0007 Stellar QR Code
                     </span>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Scan with LOBSTR, Solar, or any Stellar wallet
+                      Scan with LOBSTR, Solar, or any SEP-0007 compatible wallet
                     </p>
                   </div>
-                  <div className="qr-wrap bg-white p-4 rounded-2xl shadow-sm">
-                    <QRCodeSVG value={sep0007Uri} size={150} />
-                  </div>
-                  <div className="w-full max-w-xs flex gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={sep0007Uri}
-                      className="w-full bg-background border border-border rounded-lg px-2 py-1 text-[11px] font-mono text-muted-foreground truncate"
-                    />
-                    <CopyButton value={sep0007Uri} label="Copy SEP-0007 URI" />
-                  </div>
-                </section>
 
-                <section className="dash-card qr-card">
-                  <span className="qr-label">Deposit Address QR</span>
-                  <div className="qr-wrap">
-                    <QRCodeSVG value={gatewayAddress} size={130} />
+                  <div className="qr-wrap bg-white p-4 rounded-2xl shadow-sm">
+                    <QRCodeSVG value={sep0007Uri} size={180} />
                   </div>
+
+                  <p className="text-[11px] text-center text-muted-foreground leading-relaxed max-w-[220px]">
+                    Auto-fills the deposit address and your Memo ID in supported SEP-0007 wallets.
+                  </p>
                 </section>
               </div>
             </div>

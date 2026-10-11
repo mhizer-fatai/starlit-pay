@@ -197,17 +197,11 @@ function Index() {
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <Button asChild className="cta-shadow h-12 rounded px-5 text-[15px]">
                   <Link id="demo" to="/auth">
-                    Create Wallet{" "}
+                    Sign In{" "}
                     <span className="grid size-8 place-items-center rounded-full bg-primary-foreground text-primary">
                       <ArrowRight className="size-4" />
                     </span>
                   </Link>
-                </Button>
-                <Button
-                  asChild
-                  className="h-12 rounded bg-background/40 px-5 text-[15px] text-foreground/80 hover:bg-background/60"
-                >
-                  <a href="mailto:hello@example.com">Book a Demo</a>
                 </Button>
               </div>
             </section>
@@ -313,7 +307,7 @@ function Index() {
             </p>
             <Button asChild className="cta-shadow mt-8 h-14 rounded px-6 text-[16px]">
               <Link to="/auth">
-                Create Wallet Now{" "}
+                Sign In{" "}
                 <span className="grid size-8 place-items-center rounded-full bg-primary-foreground text-primary">
                   <ArrowRight className="size-4" />
                 </span>
