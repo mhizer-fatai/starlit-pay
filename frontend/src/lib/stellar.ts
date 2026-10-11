@@ -137,3 +137,78 @@ export function generateSep0007Uri(params: {
   }
   return url.toString();
 }
+
+const txHashCache = new Map<string, string>();
+
+/** Resolves the on-chain Soroban transaction hash for a shielded note commitment. */
+export async function findTxHashForCommitment(
+  commitment: string,
+  ledger?: number
+): Promise<string | null> {
+  if (!commitment) return null;
+  const cleanCommitment = commitment.toLowerCase().trim();
+  if (txHashCache.has(cleanCommitment)) {
+    return txHashCache.get(cleanCommitment)!;
+  }
+
+  try {
+    let startLedger: number;
+    let endLedger: number | undefined;
+
+    if (ledger && Number.isFinite(ledger) && ledger > 0) {
+      startLedger = ledger;
+      endLedger = ledger + 1;
+    } else {
+      const latest = await rpc.getLatestLedger();
+      startLedger = Math.max(1, latest.sequence - 300);
+    }
+
+    const filter: StellarSdk.rpc.Server.GetEventsRequest = {
+      startLedger,
+      filters: [
+        {
+          type: "contract",
+          contractIds: [SHIELDED_POOL_CONTRACT_ID],
+        },
+      ],
+      limit: 100,
+    };
+    if (endLedger) {
+      filter.endLedger = endLedger;
+    }
+
+    const res = await rpc.getEvents(filter);
+    if (!res.events || res.events.length === 0) return null;
+
+    for (const e of res.events) {
+      try {
+        const valArray = StellarSdk.scValToNative(e.value);
+        if (Array.isArray(valArray)) {
+          for (const item of valArray) {
+            let hex = "";
+            if (Buffer.isBuffer(item) || item instanceof Uint8Array) {
+              hex = Buffer.from(item).toString("hex").toLowerCase();
+            } else if (typeof item === "string") {
+              hex = item.toLowerCase();
+            }
+            if (hex === cleanCommitment && e.txHash) {
+              txHashCache.set(cleanCommitment, e.txHash);
+              return e.txHash;
+            }
+          }
+        }
+      } catch {
+        // continue
+      }
+    }
+
+    if (endLedger && res.events.length === 1 && res.events[0].txHash) {
+      txHashCache.set(cleanCommitment, res.events[0].txHash);
+      return res.events[0].txHash;
+    }
+  } catch (err) {
+    console.warn("findTxHashForCommitment query error:", err);
+  }
+  return null;
+}
+

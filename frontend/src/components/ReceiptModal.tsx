@@ -4,6 +4,7 @@ import { ArrowDownLeft, Check, Copy, Download, ExternalLink, Send, X } from "luc
 
 import { Button } from "@/components/ui/button";
 import { downloadReceiptPdf } from "@/lib/receiptPdf";
+import { findTxHashForCommitment } from "@/lib/stellar";
 import type { ActivityItem } from "@/lib/wallet";
 
 
@@ -74,7 +75,24 @@ export function ReceiptModal({
     (item.referenceLabel === "Transaction Hash" && /^[0-9a-fA-F]{64}$/.test(item.reference))
   );
 
-  const targetHash = item.hash || (isActualTxHash ? item.reference : null);
+  const [resolvedHash, setResolvedHash] = useState<string | null>(
+    item.hash || (isActualTxHash ? item.reference : null)
+  );
+
+  useEffect(() => {
+    if (resolvedHash || !item.reference) return;
+    let cancelled = false;
+    void findTxHashForCommitment(item.reference, item.ledger).then((hash) => {
+      if (!cancelled && hash) {
+        setResolvedHash(hash);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.reference, item.ledger, resolvedHash]);
+
+  const targetHash = resolvedHash || item.hash || (isActualTxHash ? item.reference : null);
 
   const stellarExpertUrl = targetHash
     ? `https://stellar.expert/explorer/testnet/tx/${targetHash}`
@@ -199,6 +217,18 @@ export function ReceiptModal({
               <div style={fieldBoxStyle}>
                 <span style={fieldValueStyle}>{item.reference}</span>
                 <CopyIconButton value={item.reference} label={item.referenceLabel || "reference"} />
+              </div>
+            </div>
+          )}
+
+          {targetHash && targetHash !== item.reference && (
+            <div>
+              <div className="modal-row" style={{ marginBottom: 6 }}>
+                <span className="modal-label">Transaction Hash</span>
+              </div>
+              <div style={fieldBoxStyle}>
+                <span style={fieldValueStyle}>{targetHash}</span>
+                <CopyIconButton value={targetHash} label="transaction hash" />
               </div>
             </div>
           )}
