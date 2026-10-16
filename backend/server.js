@@ -14,11 +14,13 @@ import "./src/transactions.js";
 import { startIndexer } from "./src/indexer.js";
 import { startGateway } from "./src/gateway.js";
 import { startRelayerMonitor } from "./src/relayer_monitor.js";
+import { startTtlKeeper } from "./src/ttl_keeper.js";
 
 // Start background services
 startRelayerMonitor();
 startIndexer();
 startGateway();
+startTtlKeeper();
 
 // Start HTTP Server
 app.listen(PORT, () => {
