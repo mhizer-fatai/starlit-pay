@@ -103,7 +103,7 @@ The goal: on-chain, the system looks like a single large pool of assets, so no o
 | ASP compliance proofs | ❌ Not implemented (pool uses a plain admin address blocklist) |
 | Independent security audit | ❌ Not audited |
 
-Because proofs are not yet verified, the pool's spend functions do not currently protect funds cryptographically. This is a testnet-only preview.
+Because proofs are not yet verified, the pool's spend functions do not protect funds cryptographically. As an interim guard, `claim`, `withdraw` and `transfer` must be authorized by the configured Starlit relayer (`set_relayer`), so the relayer is a trusted party until real proof verification ships. This is a testnet-only preview.
 
 ## 🔒 Security Model (Target Design)
 
