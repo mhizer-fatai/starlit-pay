@@ -12,7 +12,7 @@ const faqs = [
   {
     question: "How do private transactions work?",
     answer:
-      "Every payment is encrypted on your device and converted into a zero-knowledge proof that is verified on-chain. The Stellar network confirms the payment is valid without ever seeing your transaction amount, your recipient, or your balance.",
+      "Payments move through a shared shielded pool on Stellar. Note details are encrypted on your device, so the pool records commitments rather than readable balances. Starlit Pay is a testnet preview: on-chain zero-knowledge proof verification is still being built, and until it ships, transfers are submitted by the Starlit relayer.",
   },
   {
     question: "What assets are supported inside Starlit Pay?",
@@ -27,12 +27,12 @@ const faqs = [
   {
     question: "Are my private keys stored on Starlit servers?",
     answer:
-      "No. Your keys are generated and encrypted on your device and never leave it. Starlit servers cannot access your wallet, your balances, or your transaction history.",
+      "No. Your keys are generated on your device and are not sent to Starlit servers. Key protection is being strengthened with passkey (Face ID / Touch ID / Windows Hello) support during the testnet preview.",
   },
   {
     question: "Is Starlit Pay open-source and audited?",
     answer:
-      "Yes. The client-side cryptography and the Soroban vault contracts are open-source and independently audited, so you can verify exactly what the code does at any time.",
+      "Not yet. Starlit Pay has not been independently audited, and it runs on Stellar Testnet only, so do not use it with real funds. An audit is planned before any mainnet launch.",
   },
 ];
 

@@ -19,7 +19,7 @@ The system consists of four primary layers:
 1.  **Frontend (React/Vite):** Handles user interaction, local key derivation, note decryption, and transaction preparation.
 2.  **Backend Router & Services (Node.js/Express):** Serves API endpoints, runs the block indexer, manages the deposit gateway, and acts as the transaction relayer.
 3.  **Database (Supabase/PostgreSQL):** Stores user metadata, encrypted notes cache, and transaction logs.
-4.  **Smart Contract (Soroban/Rust):** Enforces double-spend prevention, manages the Merkle tree of deposit commitments, and validates proofs.
+4.  **Smart Contract (Soroban/Rust):** Tracks spent nullifiers, manages the Merkle tree of deposit commitments, and calls the verifier contract. *(Proof verification is currently a stub; see README → Implementation Status.)*
 
 ```mermaid
 graph TD
@@ -64,10 +64,10 @@ A note is a JSON payload: `{"amount": "100", "asset": "USDC", "secret": "hex..."
 
 ## 🛠️ Soroban Smart Contract Architecture (Nethermind SPP Suite)
 
-The smart contract layer transitions to Nethermind's modular **Stellar Private Payments (SPP)** suite, splitting state, verification, and compliance policies across dedicated contracts:
+The smart contract layer is modelled on Nethermind's modular **Stellar Private Payments (SPP)** suite, splitting state, verification, and compliance policies across dedicated contracts. *This section describes the target design; the verifier and ASP proofs are not implemented yet.*
 
 1.  **Shielded Pool Contract:** Maintains the core UTXO state machine, incremental Merkle tree of note commitments (`TREE_DEPTH = 20`), and double-spend nullifier records with automated Soroban TTL state management.
-2.  **Circom Groth16 Verifier Contract:** Independent verifier contract utilizing native Soroban host functions to verify ZK proofs on-chain.
+2.  **Circom Groth16 Verifier Contract (planned):** Independent verifier contract that will use Soroban's native BN254 host functions (CAP-0074, Protocol 25) to verify ZK proofs on-chain. Currently a stub that accepts any non-empty proof.
 3.  **ASP Membership Contract (Allow-list):** Maintained by Association Set Providers to enforce verified user participation without revealing individual addresses.
 4.  **ASP Exclusion Contract (Freeze / Block-list):** Employs Sparse Merkle Trees (SMTs) to freeze sanctioned or illicit accounts at the identity level.
 
