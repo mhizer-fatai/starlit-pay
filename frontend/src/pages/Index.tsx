@@ -95,7 +95,7 @@ const stats: { figure: string; title: string; caption: string; variant?: "light"
   {
     figure: "99",
     title: "Transactions Processed",
-    caption: "Live On-Chain Stats",
+    caption: "Stellar Testnet",
   },
   {
     figure: "1,113 USDC & 8,658 XLM",
@@ -109,9 +109,9 @@ const stats: { figure: string; title: string; caption: string; variant?: "light"
     caption: "Soroban Merkle Pool",
   },
   {
-    figure: "17",
-    title: "ZK Proofs Verified",
-    caption: "100% Client-Side ZK-SNARKs",
+    figure: "Testnet",
+    title: "Preview Network",
+    caption: "Not audited · No real funds",
   },
 ];
 
@@ -124,7 +124,7 @@ const steps = [
   {
     title: "Smart Proof Verification",
     description:
-      "Starlit creates a mathematical proof that confirms you have enough money for the payment without sharing your account balance, transaction history, or wallet keys.",
+      "Starlit is building zero-knowledge proofs that confirm you have enough money for a payment without sharing your balance, history, or keys. During the testnet preview, payments are submitted by the Starlit relayer while on-chain verification is completed.",
   },
   {
     title: "Private Asset Vaults",
@@ -226,8 +226,9 @@ function Index() {
       <ScrollReveal>
         <section id="how-it-works" className={`${container} py-20 lg:py-24`}>
           <SectionHeader title="How Privacy Works">
-            Starlit Pay uses client-side zero-knowledge cryptography to protect your transaction
-            amounts, recipient identities, and wallet balances on the Stellar blockchain.
+            Starlit Pay is designed to use client-side zero-knowledge cryptography to protect your
+            transaction amounts, recipient identities, and wallet balances on Stellar. On-chain proof
+            verification is in development during the testnet preview.
           </SectionHeader>
 
           <div className="mt-14 hidden lg:block">
