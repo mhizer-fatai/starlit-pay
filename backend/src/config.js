@@ -140,10 +140,15 @@ if (process.env.GATEWAY_SECRET_KEY) {
 }
 
 // Initialize Database Client with Connection Pooling Configuration
+// The backend must use the secret service-role key: tables are locked to that
+// role by RLS. The anon key is public (it ships in the frontend bundle).
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Critical security configuration error: SUPABASE_URL and SUPABASE_ANON_KEY must be configured in environment.");
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error("Critical security configuration error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured in environment.");
+}
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn("Security notice: SUPABASE_SERVICE_ROLE_KEY is not set; falling back to SUPABASE_ANON_KEY. Tables must not be readable by the public anon key.");
 }
 
 const DB_POOL_MAX_SOCKETS = parseInt(process.env.DB_POOL_MAX_SOCKETS || "50", 10);
@@ -159,7 +164,7 @@ const dbPoolConfig = {
 };
 
 // Configures Supabase client with connection pooling, keepalive, and schema settings
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
     persistSession: false,
     autoRefreshToken: false
