@@ -12,14 +12,6 @@
   VITE_BACKEND_URL = "https://starlit-pay.onrender.com"
   VITE_TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
-# Proxy the API through the site origin so passkey session cookies are first-party
-# (Safari and iOS block cross-site cookies). Must stay above the SPA fallback.
-[[redirects]]
-  from = "/api/*"
-  to = "https://starlit-pay.onrender.com/api/:splat"
-  status = 200
-  force = true
-
 # Configure redirects so SPA routing loads index.html for all sub-paths
 [[redirects]]
   from = "/*"
