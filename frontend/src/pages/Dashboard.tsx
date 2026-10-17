@@ -22,7 +22,7 @@ import { fetchStats, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
-import { usePrices, formatTokenPrice } from "@/lib/prices";
+import { usePrices, formatTokenPrice, PRICE_UNAVAILABLE } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
 import {
   activityTitle,
@@ -62,9 +62,12 @@ function DashboardPage() {
   const [balancesLoading, setBalancesLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  // Live prices via the backend CoinGecko proxy (static fallback until loaded).
+  // Live prices via the backend (Stellar DEX first). XLM is null when no real
+  // price is available; the total is then unknown rather than guessed.
   const prices = usePrices();
-  const totalUsd = usdcBalance * prices.USDC + xlmBalance * prices.XLM;
+  const usdcUsd = usdcBalance * prices.USDC;
+  const xlmUsd = prices.XLM === null ? null : xlmBalance * prices.XLM;
+  const totalUsd = xlmUsd === null && xlmBalance > 0 ? null : usdcUsd + (xlmUsd ?? 0);
 
   useEffect(() => {
     document.title = "Dashboard — Starlit Pay";
@@ -154,16 +157,17 @@ function DashboardPage() {
   // converted at live prices. Anchored so the line ends at today's balance —
   // spent input notes are invisible to history, so raw accumulation undershoots.
   const chartPoints: ChartPoint[] = useMemo(() => {
+    if (totalUsd === null) return [];
     const events: { t: number; usd: number }[] = [];
     for (const note of balanceNotes) {
-      events.push({ t: note.createdAt, usd: assetToUsd(note.asset, note.amount, prices) });
+      events.push({ t: note.createdAt, usd: assetToUsd(note.asset, note.amount, prices) ?? 0 });
     }
     for (const tx of allTxs) {
       const decoded = tx.encrypted_payload ? decodeTransactionPayload(tx.encrypted_payload) : null;
       if (decoded?.amount) {
         events.push({
           t: tx.created_at ? new Date(tx.created_at).getTime() : Date.now(),
-          usd: -assetToUsd(decoded.asset ?? "USDC", decoded.amount, prices),
+          usd: -(assetToUsd(decoded.asset ?? "USDC", decoded.amount, prices) ?? 0),
         });
       }
     }
@@ -215,7 +219,7 @@ function DashboardPage() {
 
   function onChartMove(event: React.MouseEvent<HTMLDivElement>) {
     const rect = chartRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || chartPoints.length === 0) return;
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     const svgX = (x / rect.width) * 620;
@@ -233,8 +237,9 @@ function DashboardPage() {
     setHoverBalance(null);
   }
 
-  const { dollars, cents } = splitDollarsCents(totalUsd);
-  const chartLoading = balancesLoading || activityLoading;
+  const { dollars, cents } = splitDollarsCents(totalUsd ?? 0);
+  const pricesLoading = prices.status === "loading";
+  const chartLoading = balancesLoading || activityLoading || pricesLoading;
 
   return (
     <div className="dashboard-frame">
@@ -340,8 +345,10 @@ function DashboardPage() {
               <div className="balance">
                 {balanceHidden ? (
                   "$ ••••••"
-                ) : balancesLoading ? (
+                ) : balancesLoading || pricesLoading ? (
                   <Skeleton className="h-9 w-52" label="Loading balance" />
+                ) : totalUsd === null ? (
+                  <span className="text-lg font-medium text-muted-foreground">{PRICE_UNAVAILABLE}</span>
                 ) : (
                   <span>
                     ${dollars}<sup>{cents}</sup>
@@ -366,6 +373,10 @@ function DashboardPage() {
                   label="Loading chart"
                   style={{ marginTop: 8 }}
                 />
+              ) : totalUsd === null ? (
+                <div className="flex h-[210px] w-full items-center justify-center text-center text-sm text-muted-foreground">
+                  Balance chart needs a live XLM price. Your holdings are shown on the right.
+                </div>
               ) : (
               <div
                 className="chart-wrap"
@@ -464,7 +475,7 @@ function DashboardPage() {
                           {balanceHidden ? "••••••" : formatGrouped(usdcBalance)}
                         </strong>
                         <span className="holding-fiat">
-                          {balanceHidden ? "••••••" : `≈ $${formatGrouped(usdcBalance * prices.USDC)}`}
+                          {balanceHidden ? "••••••" : `≈ ${formatGrouped(usdcUsd)}`}
                         </span>
                       </>
                     )}
@@ -474,7 +485,7 @@ function DashboardPage() {
                 <div className="holding-row">
                   <div className="holding-asset-col">
                     <span className="holding-label">XLM</span>
-                    <span className="holding-price">{formatTokenPrice(prices.XLM)}</span>
+                    <span className="holding-price">{pricesLoading ? "…" : formatTokenPrice(prices.XLM)}</span>
                   </div>
                   <div className="holding-values-col">
                     {balancesLoading ? (
@@ -485,7 +496,7 @@ function DashboardPage() {
                           {balanceHidden ? "••••••" : formatGrouped(xlmBalance)}
                         </strong>
                         <span className="holding-fiat">
-                          {balanceHidden ? "••••••" : `≈ $${formatGrouped(xlmBalance * prices.XLM)}`}
+                          {balanceHidden ? "••••••" : xlmUsd === null ? PRICE_UNAVAILABLE : `≈ ${formatGrouped(xlmUsd)}`}
                         </span>
                       </>
                     )}
