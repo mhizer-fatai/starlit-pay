@@ -12,20 +12,18 @@ import {
 } from "@/lib/backend";
 import { bytesToHex, decryptShieldedNote } from "@/lib/keys";
 
-// Static asset prices in USD (same basis as the previous frontend).
-// Live prices come from usePrices()/fetchPrices() in lib/prices.ts, which
-// proxy CoinGecko through the backend; this is the offline fallback.
-export const PRICES = { USDC: 1, XLM: 0.12 } as const;
-
+// Live prices come from usePrices()/fetchPrices() in lib/prices.ts. There is
+// deliberately no static fallback: an unknown price stays unknown (null).
 export interface PriceTable {
   USDC: number;
-  XLM: number;
+  XLM: number | null;
 }
 
-export function assetToUsd(asset: string, amount: number, prices: PriceTable = PRICES): number {
+/** USD value of an amount, or null when that asset has no live price. */
+export function assetToUsd(asset: string, amount: number, prices: PriceTable): number | null {
   const upper = asset.toUpperCase();
   if (upper === "USDC") return amount * prices.USDC;
-  if (upper === "XLM") return amount * prices.XLM;
+  if (upper === "XLM") return prices.XLM === null ? null : amount * prices.XLM;
   return 0;
 }
 
@@ -41,7 +39,6 @@ export interface BalanceNote {
 export interface PrivateBalances {
   usdc: number;
   xlm: number;
-  totalUsd: number;
   notes: BalanceNote[];
 }
 
@@ -58,7 +55,7 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
   const signature = bytesToHex(keypair.sign(Buffer.from(new TextEncoder().encode(timestamp))));
   const { notes } = await fetchNotes(user.public_encryption_key, timestamp, signature);
 
-  const out: PrivateBalances = { usdc: 0, xlm: 0, totalUsd: 0, notes: [] };
+  const out: PrivateBalances = { usdc: 0, xlm: 0, notes: [] };
   for (const note of notes) {
     if (!note.encrypted_note) continue;
     const decrypted = decryptShieldedNote(note.encrypted_note, keys.viewing.secretKey);
@@ -76,7 +73,6 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
       ledger: note.ledger,
     });
   }
-  out.totalUsd = out.usdc * PRICES.USDC + out.xlm * PRICES.XLM;
   return out;
 }
 

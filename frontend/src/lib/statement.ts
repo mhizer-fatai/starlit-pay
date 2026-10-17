@@ -1,14 +1,14 @@
 import { jsPDF } from "jspdf";
 
 import { drawWatermark, loadBrandLogo, makeWatermarkTile } from "@/lib/receiptPdf";
-import { assetToUsd, formatGrouped, type ActivityItem } from "@/lib/wallet";
+import { assetToUsd, formatGrouped, type ActivityItem, type PriceTable } from "@/lib/wallet";
 
 export type StatementFormat = "pdf" | "xls";
 
 const SOCIALS = ["starlitpay.xyz", "support@starlitpay.xyz"];
 
-function usd(value: number): string {
-  return `$${formatGrouped(value)}`;
+function usd(value: number | null): string {
+  return value === null ? "price unavailable" : `$${formatGrouped(value)}`;
 }
 
 function escapeHtml(value: string): string {
@@ -20,11 +20,11 @@ function escapeHtml(value: string): string {
 }
 
 /** Excel-compatible statement (HTML table saved as .xls). */
-export function buildStatementXls(items: ActivityItem[], period: string): string {
+export function buildStatementXls(items: ActivityItem[], period: string, prices: PriceTable): string {
   const chrono = [...items].reverse();
   const running: Record<string, number> = {};
   const cell = (asset: string, amount: number) =>
-    `${formatGrouped(amount)} ${asset.toUpperCase()} (${usd(assetToUsd(asset, amount))})`;
+    `${formatGrouped(amount)} ${asset.toUpperCase()} (${usd(assetToUsd(asset, amount, prices))})`;
   const rows = chrono
     .map((item) => {
       const asset = item.asset.toUpperCase();
@@ -45,6 +45,7 @@ export async function buildStatementPdf(
   items: ActivityItem[],
   period: string,
   email: string,
+  prices: PriceTable,
 ): Promise<ArrayBuffer> {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const margin = 48;
@@ -150,7 +151,7 @@ export async function buildStatementPdf(
   const running: Record<string, number> = {};
   const balanceOf = (asset: string) => running[asset.toUpperCase()] ?? 0;
   const balanceText = (asset: string, amount: number) =>
-    `${formatGrouped(amount)} ${asset.toUpperCase()} (${usd(assetToUsd(asset, amount))})`;
+    `${formatGrouped(amount)} ${asset.toUpperCase()} (${usd(assetToUsd(asset, amount, prices))})`;
   const pad = (n: number) => String(n).padStart(2, "0");
   const shortDate = (timestamp: number) => {
     if (!timestamp) return "—";
