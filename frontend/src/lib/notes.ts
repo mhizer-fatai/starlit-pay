@@ -81,45 +81,6 @@ export function decryptNotePayload(
   return null;
 }
 
-export interface ShieldedBalanceSummary {
-  usdc: number;
-  xlm: number;
-  totalUsd: number;
-  notesCount: number;
-}
-
-export function calculateShieldedBalances(
-  notes: ShieldedNote[],
-  viewingSecretHex: string | null,
-  xlmPrice = 0.12,
-): ShieldedBalanceSummary {
-  let usdc = 0;
-  let xlm = 0;
-  let notesCount = 0;
-
-  for (const note of notes) {
-    if (note.status && note.status !== "unspent") continue;
-    const decrypted = decryptNotePayload(note.encrypted_note, viewingSecretHex);
-    if (decrypted) {
-      notesCount++;
-      if (decrypted.asset === "XLM") {
-        xlm += decrypted.amount;
-      } else {
-        usdc += decrypted.amount;
-      }
-    }
-  }
-
-  const totalUsd = usdc + xlm * xlmPrice;
-
-  return {
-    usdc,
-    xlm,
-    totalUsd,
-    notesCount,
-  };
-}
-
 export interface DecodedTransaction {
   id?: string;
   type: "send" | "receive" | "withdraw" | "faucet" | "other";
