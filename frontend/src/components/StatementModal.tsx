@@ -5,6 +5,7 @@ import { Check, Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { emailStatement } from "@/lib/backend";
+import { usePrices } from "@/lib/prices";
 import {
   buildStatementPdf,
   buildStatementXls,
@@ -68,6 +69,7 @@ export function StatementModal({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const prices = usePrices();
 
   async function handleDownload() {
     setBusy(true);
@@ -82,13 +84,13 @@ export function StatementModal({
       let bytes: ArrayBuffer | Uint8Array;
 
       if (format === "pdf") {
-        const buffer = await buildStatementPdf(items, period, email);
+        const buffer = await buildStatementPdf(items, period, email, prices);
         filename = statementFilename(owner, "pdf");
         mime = "application/pdf";
         bytes = buffer;
         downloadBlob(new Blob([buffer as BlobPart], { type: mime }), filename);
       } else {
-        const html = buildStatementXls(items, period);
+        const html = buildStatementXls(items, period, prices);
         filename = statementFilename(owner, "xls");
         mime = "application/vnd.ms-excel";
         bytes = new TextEncoder().encode(html);
