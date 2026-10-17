@@ -2,42 +2,57 @@ import { useEffect, useState } from "react";
 
 import { BACKEND_URL } from "@/lib/backend";
 
+/**
+ * Live prices. `XLM` is null whenever no real market price is available, so the
+ * UI says "Price unavailable" instead of valuing balances at a made-up rate.
+ * USDC is pegged to $1.
+ */
+export type PriceStatus = "loading" | "live" | "unavailable";
+
 export interface Prices {
   USDC: number;
-  XLM: number;
+  XLM: number | null;
+  status: PriceStatus;
 }
 
-/** Static fallback (same basis as the previous frontend) until live prices load. */
-export const FALLBACK_PRICES: Prices = { USDC: 1, XLM: 0.12 };
+export const PRICE_UNAVAILABLE = "Price unavailable";
 
 const POLL_MS = 60 * 1000;
+// A cached upstream price older than this is no longer shown as current.
+const MAX_PRICE_AGE_MS = 15 * 60 * 1000;
+
+const LOADING: Prices = { USDC: 1, XLM: null, status: "loading" };
+const UNAVAILABLE: Prices = { USDC: 1, XLM: null, status: "unavailable" };
 
 interface PricesResponse {
   USDC?: unknown;
   XLM?: unknown;
   updatedAt?: unknown;
-  stale?: unknown;
+  source?: unknown;
 }
 
-function sanitize(value: unknown, fallback: number): number {
+function positive(value: unknown): number | null {
   const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** One fetch of live prices through the backend proxy (never CoinGecko direct). */
+/** One fetch of live prices through the backend proxy. */
 export async function fetchPrices(): Promise<Prices> {
   const res = await fetch(`${BACKEND_URL}/api/prices`);
   if (!res.ok) throw new Error(`Prices ${res.status}`);
   const data = (await res.json()) as PricesResponse;
-  return {
-    USDC: sanitize(data.USDC, FALLBACK_PRICES.USDC),
-    XLM: sanitize(data.XLM, FALLBACK_PRICES.XLM),
-  };
+
+  const updatedAt = Number(data.updatedAt);
+  const xlm = positive(data.XLM);
+  const fresh = Number.isFinite(updatedAt) && updatedAt > 0 && Date.now() - updatedAt < MAX_PRICE_AGE_MS;
+  if (!xlm || !fresh || data.source === "fallback") return UNAVAILABLE;
+
+  return { USDC: positive(data.USDC) ?? 1, XLM: xlm, status: "live" };
 }
 
-/** Live prices, refreshed every 60s. Falls back to static prices on failure. */
+/** Live prices, refreshed every 60s. Never substitutes a placeholder XLM price. */
 export function usePrices(): Prices {
-  const [prices, setPrices] = useState<Prices>(FALLBACK_PRICES);
+  const [prices, setPrices] = useState<Prices>(LOADING);
   useEffect(() => {
     let cancelled = false;
     const poll = () => {
@@ -45,7 +60,9 @@ export function usePrices(): Prices {
         .then((p) => {
           if (!cancelled) setPrices(p);
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!cancelled) setPrices(UNAVAILABLE);
+        });
     };
     poll();
     const timer = window.setInterval(poll, POLL_MS);
@@ -58,8 +75,8 @@ export function usePrices(): Prices {
 }
 
 /** Formats unit price with appropriate decimal precision (e.g. $1.00 for USDC, $0.1972 for XLM). */
-export function formatTokenPrice(price: number): string {
-  if (!Number.isFinite(price) || price <= 0) return "$0.00";
+export function formatTokenPrice(price: number | null): string {
+  if (price === null || !Number.isFinite(price) || price <= 0) return PRICE_UNAVAILABLE;
   if (price >= 0.999 && price <= 1.001) {
     return "$1.00";
   }
