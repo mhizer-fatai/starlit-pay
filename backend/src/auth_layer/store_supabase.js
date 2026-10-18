@@ -201,5 +201,14 @@ export function createSupabaseStore(supabase) {
     async revokeSessionsForPasskey(passkeyId) {
       check(await supabase.from("auth_sessions").update({ revoked_at: nowIso() }).eq("passkey_id", passkeyId).is("revoked_at", null));
     },
+
+    async purgeExpiredChallenges(now) {
+      const rows = check(await supabase.from("webauthn_challenges").delete().lt("expires_at", now).select("id"));
+      return rows?.length ?? 0;
+    },
+    async purgeExpiredSessions(cutoff) {
+      const rows = check(await supabase.from("auth_sessions").delete().lt("expires_at", cutoff).select("id"));
+      return rows?.length ?? 0;
+    },
   };
 }

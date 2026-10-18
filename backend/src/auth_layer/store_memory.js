@@ -182,5 +182,16 @@ export function createMemoryStore({ now = () => Date.now(), users = [] } = {}) {
     async revokeSessionsForPasskey(passkeyId) {
       for (const row of db.sessions.values()) if (row.passkey_id === passkeyId && !row.revoked_at) row.revoked_at = iso();
     },
+
+    async purgeExpiredChallenges(nowIso) {
+      let removed = 0;
+      for (const [id, row] of db.challenges) if (row.expires_at < nowIso) (db.challenges.delete(id), removed++);
+      return removed;
+    },
+    async purgeExpiredSessions(cutoffIso) {
+      let removed = 0;
+      for (const [hash, row] of db.sessions) if (row.expires_at < cutoffIso) (db.sessions.delete(hash), removed++);
+      return removed;
+    },
   };
 }

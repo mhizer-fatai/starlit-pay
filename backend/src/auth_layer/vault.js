@@ -122,22 +122,44 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
     res.json({ ok: true });
   });
 
-  router.post("/api/vault/pin/salt", async (req, res) => {
+  // The PIN account is identified by Google email proof, or by an existing
+  // session (e.g. signed in with a passkey on a device without PRF support).
+  // Per-account attempt limits apply either way.
+  async function pinAccount(req, res) {
+    const auth = sessions.authenticate(req);
+    if (auth?.error === "csrf") {
+      res.status(403).json({ error: "Missing CSRF header.", code: "csrf" });
+      return null;
+    }
+    const session = auth?.session ?? null;
     const email = await provenEmail(identity, req);
-    if (!email) return res.status(401).json({ error: "Confirm your email first.", code: "email_proof_required" });
-    const user = await store.findUserByEmail(email);
+    if (!email && !session) {
+      res.status(401).json({ error: "Confirm your email first.", code: "email_proof_required" });
+      return null;
+    }
+    const user = email ? await store.findUserByEmail(email) : await store.findUserById(session.id);
+    if (user && session && session.id !== user.id) {
+      res.status(403).json({ error: "Signed in as a different account.", code: "account_mismatch" });
+      return null;
+    }
+    return { user, session };
+  }
+
+  router.post("/api/vault/pin/salt", async (req, res) => {
+    const account = await pinAccount(req, res);
+    if (!account) return;
+    const { user } = account;
     const guard = user ? await store.getPinGuard(user.id) : null;
     if (!guard) return res.status(404).json({ error: "No PIN is set for this account.", code: "no_pin" });
     res.json({ salt: guard.salt, params: guard.params });
   });
 
   router.post("/api/vault/pin/unlock", async (req, res) => {
-    const email = await provenEmail(identity, req);
-    if (!email) return res.status(401).json({ error: "Confirm your email first.", code: "email_proof_required" });
     const { pinVerifier } = req.body ?? {};
     if (!isB64uOfLength(pinVerifier, VERIFIER_BYTES)) return res.status(400).json({ error: "Invalid PIN payload." });
-
-    const user = await store.findUserByEmail(email);
+    const account = await pinAccount(req, res);
+    if (!account) return;
+    const { user, session } = account;
     const guard = user ? await store.getPinGuard(user.id) : null;
     if (!guard) return res.status(404).json({ error: "No PIN is set for this account.", code: "no_pin" });
 
@@ -159,7 +181,8 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
     const serverShare = open(keys.serverShare, guard.server_share_enc, `pin-share:${user.id}`);
     if (!serverShare) return res.status(500).json({ error: "PIN data is unreadable on the server." });
 
-    await sessions.issue(res, user, { amr: ["pin"], userAgent: req.headers["user-agent"] });
+    if (session) sessions.markFresh(res, user, session, "pin");
+    else await sessions.issue(res, user, { amr: ["pin"], userAgent: req.headers["user-agent"] });
     const vault = await store.getVault(user.id);
     const wrap = await store.getWrap(user.id, "pin", null);
     res.json({

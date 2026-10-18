@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { startHarness, TEST_ENV } from "./helpers/harness.js";
 import { createSoftAuthenticator } from "./helpers/soft_authenticator.js";
+import { purgeExpired } from "../src/auth_layer/maintenance.js";
 
 const EMAIL_PROOF = { "x-supabase-auth": "google-token-alice" };
 const b64u32 = () => crypto.randomBytes(32).toString("base64url");
@@ -270,6 +271,42 @@ describe("vault and PIN", () => {
     assert.deepEqual((await device.get("/api/auth/session")).body.amr, ["pin"]);
   });
 
+  test("a signed-in session can unlock with the PIN without Google proof", async () => {
+    const { pinVerifier, serverShare, authenticator } = await setUpVaultWithPin();
+    // A device whose passkey has no PRF: signed in, vault still locked.
+    const device = h.client();
+    assert.equal((await passkeyLogin(device, authenticator)).status, 200);
+
+    assert.equal((await device.post("/api/vault/pin/salt", {})).status, 200);
+    const res = await device.post("/api/vault/pin/unlock", { pinVerifier });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.serverShare, serverShare);
+    const session = await device.get("/api/auth/session");
+    assert.ok(session.body.amr.includes("pin") && session.body.amr.includes("passkey"));
+    assert.equal(session.body.fresh, true);
+  });
+
+  test("session-based PIN guesses still count toward the lockout", async () => {
+    const { authenticator } = await setUpVaultWithPin();
+    const device = h.client();
+    await passkeyLogin(device, authenticator);
+    for (let i = 0; i < 4; i++) await device.post("/api/vault/pin/unlock", { pinVerifier: b64u32() });
+    const fifth = await device.post("/api/vault/pin/unlock", { pinVerifier: b64u32() });
+    assert.equal(fifth.status, 429);
+  });
+
+  test("email proof for another account cannot be combined with this session", async () => {
+    const { authenticator } = await setUpVaultWithPin();
+    const bob = { id: crypto.randomUUID(), email: "bob@example.com", username: "bob" };
+    h.store.db.users.set(bob.id, bob);
+    h.emailTokens.set("google-token-bob", bob.email);
+    const device = h.client();
+    await passkeyLogin(device, authenticator);
+    const res = await device.post("/api/vault/pin/salt", {}, { headers: { "x-supabase-auth": "google-token-bob" } });
+    assert.equal(res.status, 403);
+    assert.equal(res.body.code, "account_mismatch");
+  });
+
   test("PIN unlock requires email proof", async () => {
     const { pinVerifier } = await setUpVaultWithPin();
     const res = await h.client().post("/api/vault/pin/unlock", { pinVerifier });
@@ -366,5 +403,26 @@ describe("passkey management", () => {
     assert.equal((await otherDevice.post("/api/auth/refresh")).status, 401, "sessions from that passkey are revoked");
     assert.equal((await passkeyLogin(h.client(), authenticator)).status, 401, "revoked passkey cannot sign in");
     assert.equal((await client.get("/api/auth/passkeys")).body.passkeys.length, 0);
+  });
+});
+
+describe("maintenance", () => {
+  test("purges expired challenges and long-expired sessions only", async () => {
+    const { client } = await enrolFirstPasskey();
+    await client.post("/api/auth/passkey/login/options", {});
+    await h.client().post("/api/auth/passkey/login/options", {});
+    const challengesBefore = h.store.db.challenges.size;
+    const sessionsBefore = h.store.db.sessions.size;
+    assert.ok(challengesBefore >= 2 && sessionsBefore >= 1);
+
+    assert.deepEqual(await purgeExpired(h.store, h.clock.t), { challenges: 0, sessions: 0 }, "nothing is expired yet");
+
+    h.advance(6 * MIN);
+    const afterChallenges = await purgeExpired(h.store, h.clock.t);
+    assert.equal(afterChallenges.challenges, challengesBefore);
+    assert.equal(afterChallenges.sessions, 0, "live refresh tokens are kept");
+
+    h.advance(32 * 24 * 60 * MIN);
+    assert.equal((await purgeExpired(h.store, h.clock.t)).sessions, sessionsBefore);
   });
 });

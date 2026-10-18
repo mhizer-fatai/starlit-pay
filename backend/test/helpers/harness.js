@@ -43,6 +43,7 @@ export async function startHarness({ env = TEST_ENV } = {}) {
     store,
     layer,
     alice,
+    emailTokens,
     clock,
     advance: (ms) => {
       clock.t += ms;
