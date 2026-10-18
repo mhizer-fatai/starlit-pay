@@ -2,7 +2,8 @@
 // Preserves every read/write the old JSX frontend used.
 
 const DEFAULT_LOCAL = "http://localhost:3001";
-const DEFAULT_REMOTE = "https://starlit-pay.onrender.com";
+// Same site as starlitpay.xyz, so session cookies are first-party (Safari/iOS block cross-site cookies).
+const DEFAULT_REMOTE = "https://api.starlitpay.xyz";
 
 export const BACKEND_URL =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ||
