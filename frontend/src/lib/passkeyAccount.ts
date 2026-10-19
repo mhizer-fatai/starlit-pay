@@ -3,8 +3,9 @@
 
 import { BackendError, register } from "@/lib/backend";
 import { identityCommitment } from "@/lib/keys";
-import { unlockFromVault } from "@/lib/auth";
-import { createVault, VaultError, type NewVault } from "@/lib/vault";
+import { unlockFromVault, type SessionUser } from "@/lib/auth";
+import { needsMigrationFinish } from "@/lib/migration";
+import { createVault, VaultError, type NewVault, type OpenedVault } from "@/lib/vault";
 import { AuthApiError } from "@/lib/vault/api";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { NoVaultError, PasskeyNeedsPinError } from "@/lib/vault/flows";
@@ -60,27 +61,46 @@ export async function createPasskeyAccount(input: {
       public_encryption_key: vault.keys.viewing.publicKey,
       avatar_url: input.avatarUrl,
       stellar_address: vault.keys.stellar.publicKey,
-    });
+    }, emailProof);
     pendingSignup = { email, vault };
   }
 
   status("Confirm with your fingerprint, face or screen lock…");
-  const result = await passkeyFlows.signUp({ emailProof, pin: input.pin, deviceName: guessDeviceName(), vault });
+  const result = await passkeyFlows.signUp({ emailProof, pin: input.pin, deviceName: guessDeviceName(), vault, profileBound: true });
   pendingSignup = null;
   unlockFromVault(result.vault, result.user);
   return { recoveryCode: result.recoveryCode, passkeyCanUnlock: result.passkeyCanUnlock };
 }
 
-export async function signInWithPasskey(): Promise<void> {
+/**
+ * The result of unlocking. When an upgrade from the older email+PIN keys did
+ * not finish, the vault is NOT signed in yet: the caller must finish the
+ * upgrade (see lib/migration) with the returned vault.
+ */
+export type UnlockOutcome = { status: "unlocked" } | { status: "finish-upgrade"; user: SessionUser; opened: OpenedVault };
+
+function settle(opened: OpenedVault, user: SessionUser): UnlockOutcome {
+  if (needsMigrationFinish(user, opened)) return { status: "finish-upgrade", user, opened };
+  unlockFromVault(opened, user);
+  return { status: "unlocked" };
+}
+
+export async function signInWithPasskey(): Promise<UnlockOutcome> {
   const { vault, user } = await passkeyFlows.unlockWithPasskey();
-  unlockFromVault(vault, user);
+  return settle(vault, user as SessionUser);
 }
 
 /** PIN unlock for passkey accounts: uses the current session, or Google proof when there is none. */
-export async function unlockWithVaultPin(pin: string, { useEmailProof }: { useEmailProof: boolean }): Promise<void> {
+export async function unlockWithVaultPin(pin: string, { useEmailProof }: { useEmailProof: boolean }): Promise<UnlockOutcome> {
   const proof = useEmailProof ? await requireEmailProof() : null;
   const { vault, user } = await passkeyFlows.unlockWithPin(pin, proof);
-  unlockFromVault(vault, user);
+  return settle(vault, user as SessionUser);
+}
+
+/** Recovery code unlock (needs Google). Returns the replacement code to show once. */
+export async function unlockWithRecovery(code: string): Promise<{ outcome: UnlockOutcome; newRecoveryCode: string; opened: OpenedVault }> {
+  const { vault, user, newRecoveryCode } = await passkeyFlows.unlockWithRecoveryCode(code, await requireEmailProof());
+  return { outcome: settle(vault, user as SessionUser), newRecoveryCode, opened: vault };
 }
 
 /**
@@ -112,12 +132,13 @@ export function friendlyAuthError(err: unknown): string {
   if (err instanceof PasskeyUnsupportedError) return "This browser doesn't support passkeys. Try a recent Chrome, Safari, Edge or Firefox.";
   if (err instanceof PasskeyNeedsPinError) return err.message;
   if (err instanceof NoVaultError) return "Your account setup wasn't finished. Please contact support@starlitpay.xyz.";
-  if (err instanceof VaultError) return "Your wallet couldn't be unlocked on this device. Try your PIN instead.";
+  if (err instanceof VaultError) return err.message.startsWith("That doesn't look like") ? err.message : "Your wallet couldn't be unlocked on this device. Try your PIN instead.";
   if (err instanceof AuthApiError) {
     if (err.code === "pin_incorrect") {
       const left = err.attemptsRemaining;
       return left === null ? "Incorrect PIN." : `Incorrect PIN. ${left} attempt${left === 1 ? "" : "s"} left.`;
     }
+    if (err.code === "recovery_invalid") return "That recovery code isn't valid for this account. It may already have been used.";
     if (err.code === "pin_locked" && err.retryAfterSec) {
       const minutes = Math.ceil(err.retryAfterSec / 60);
       return `Too many incorrect PINs. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;

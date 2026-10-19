@@ -202,35 +202,6 @@ export async function lookupByEmail(
 }
 
 /**
- * New account: derives wallet keys from email + PIN and registers.
- * Stores identity_commitment = sha256(spendingKey) so the PIN can be
- * verified later without ever persisting the keys.
- */
-export async function registerWithPin(args: {
-  email: string;
-  username: string;
-  displayName: string;
-  pin: string;
-  avatarUrl?: string;
-}): Promise<SessionUser> {
-  const clean = args.email.toLowerCase().trim();
-  const derived = await deriveKeysFromEmailAndPin(clean, args.pin);
-  const res = await register({
-    email: clean,
-    username: args.username.toLowerCase().trim().replace(/^@/, ""),
-    display_name: args.displayName.trim() || args.username.trim(),
-    identity_commitment: await identityCommitment(derived.spendingKey),
-    public_encryption_key: derived.viewing.publicKey,
-    avatar_url: args.avatarUrl,
-    stellar_address: derived.stellar.publicKey,
-  });
-  if (!res.token || !res.user) throw new Error("Registration failed.");
-  setSession(res.token, res.user);
-  markUnlocked(derived, clean);
-  return res.user;
-}
-
-/**
  * Existing account: re-derives keys from email + PIN and lets the backend
  * verify the commitment before it issues a JWT (401 on wrong PIN).
  */

@@ -136,7 +136,13 @@ export const register = (body: {
   display_name?: string;
   avatar_url?: string;
   stellar_address?: string;
-}) => req<AuthResponse>("/api/users/register", { method: "POST", body: JSON.stringify(body) });
+}, emailProof?: string) =>
+  // The backend requires Google proof that the caller owns this email.
+  req<AuthResponse>("/api/users/register", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: emailProof ? { "X-Supabase-Auth": emailProof } : undefined,
+  });
 
 export const lookupUser = (username: string) =>
   req<{ user: BackendUser }>(`/api/users/lookup/${encodeURIComponent(username.replace(/^@/, ""))}`);

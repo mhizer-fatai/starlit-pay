@@ -3,11 +3,31 @@ import path from "path";
 import jwt from "jsonwebtoken";
 import { app, supabase, rpc, GATEWAY_ADDRESS } from "./config.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { authLayer } from "./auth_layer/mount.js";
 
 const JWT_SECRET =
   process.env.JWT_SECRET || "starlit_jwt_secure_signing_secret_prod_2026";
 if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
   console.warn("Security notice: Using default JWT_SECRET. Configure JWT_SECRET in environment for maximum security.");
+}
+
+/**
+ * Id of the signed-in user (legacy Bearer JWT or passkey session cookie), or
+ * null. Note routes compare it with the note owner, so a session only ever
+ * grants access to its own notes.
+ */
+function sessionUserId(req) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    try {
+      const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET, { algorithms: ["HS256"] });
+      if (decoded && decoded.id) return decoded.id;
+    } catch {
+      // not a legacy token; try the passkey session below
+    }
+  }
+  const result = authLayer.sessions?.authenticate(req);
+  return result?.session?.id ?? null;
 }
 
 // Helper to verify cryptographic signatures of current requests
@@ -31,18 +51,8 @@ app.get("/api/notes/:viewingKey", async (req, res) => {
   const { viewingKey } = req.params;
   const { timestamp, signature } = req.query;
 
-  const authHeader = req.headers.authorization;
-  let authViaJwt = false;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    try {
-      const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET, { algorithms: ["HS256"] });
-      if (decoded && decoded.id) authViaJwt = true;
-    } catch {
-      // fallback to signature verification
-    }
-  }
-
-  if (!authViaJwt && (!timestamp || !signature)) {
+  const signedInUserId = sessionUserId(req);
+  if (!signedInUserId && (!timestamp || !signature)) {
     return res.status(401).json({ error: "Authentication parameters (timestamp, signature) or Bearer token are required." });
   }
 
@@ -58,7 +68,8 @@ app.get("/api/notes/:viewingKey", async (req, res) => {
       return res.status(404).json({ error: "User profile matching this viewing key not found." });
     }
 
-    // 2. Cryptographically verify signature if not authenticated via JWT
+    // 2. A session must belong to the note owner; otherwise verify the signature
+    const authViaJwt = signedInUserId !== null && signedInUserId === user.id;
     if (!authViaJwt) {
       const signer = user.stellar_address || (user.public_encryption_key?.startsWith("G") ? user.public_encryption_key : null);
       if (!signer) {
@@ -140,16 +151,7 @@ app.post("/api/notes/spend", async (req, res) => {
     }
 
     // 3. Cryptographically verify signature or JWT
-    let authViaJwt = false;
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      try {
-        const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET);
-        if (decoded && (decoded.id === user.id || decoded.username === user.username)) {
-          authViaJwt = true;
-        }
-      } catch {}
-    }
+    const authViaJwt = sessionUserId(req) === user.id;
 
     if (!authViaJwt) {
       if (!timestamp || !signature) {

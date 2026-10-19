@@ -5,6 +5,7 @@ import { createSessionService } from "./sessions.js";
 import { registerPasskeyRoutes } from "./passkeys.js";
 import { registerVaultRoutes } from "./vault.js";
 import { provenEmail, safeUser } from "./identity.js";
+import { noAlerts } from "./alerts.js";
 
 /** Express 4 ignores rejected promises; route them to the error handler instead. */
 function catchAsync(router) {
@@ -40,7 +41,7 @@ const LAYER_PATHS = [
  * vault and PIN limiter. Returns an Express router plus the session service so
  * existing routes can accept the new sessions.
  */
-export function createAuthLayer({ store, identity, env = process.env, settings: overrides = {} }) {
+export function createAuthLayer({ store, identity, alerts = noAlerts, env = process.env, settings: overrides = {} }) {
   const settings = { ...readAuthSettings(env), ...overrides };
   const router = catchAsync(express.Router());
   router.use(LAYER_PATHS, express.json({ limit: "64kb" }), cookieParser());
@@ -53,7 +54,7 @@ export function createAuthLayer({ store, identity, env = process.env, settings: 
   }
 
   const sessions = createSessionService({ store, settings });
-  const deps = { store, sessions, identity, settings };
+  const deps = { store, sessions, identity, settings, alerts };
 
   router.get("/api/auth/session", sessions.requireSession, async (req, res) => {
     const user = await store.findUserById(req.session.id);

@@ -31,7 +31,11 @@ function cleanDeviceName(value) {
   return clean || null;
 }
 
-export function registerPasskeyRoutes(router, { store, sessions, identity, settings }) {
+// A passkey added with only a recovery-code sign-in waits this long before it
+// works, giving the real owner time to react to the alert email.
+const RECOVERY_PASSKEY_DELAY_MS = 24 * 60 * 60 * 1000;
+
+export function registerPasskeyRoutes(router, { store, sessions, identity, settings, alerts }) {
   const nowMs = () => settings.now();
   const expiresAt = () => new Date(nowMs() + settings.challengeTtlMs).toISOString();
   const activePasskeys = async (userId) =>
@@ -121,6 +125,10 @@ export function registerPasskeyRoutes(router, { store, sessions, identity, setti
     const user = await store.findUserById(challenge.user_id);
     if (!user) return res.status(400).json({ error: "Account not found.", code: "challenge_invalid" });
 
+    const current = sessions.authenticate(req)?.session;
+    const recoveryOnly =
+      current?.id === user.id && current.amr.includes("recovery") && !current.amr.some((m) => m === "passkey" || m === "pin");
+
     const passkey = await store.insertPasskey({
       userId: user.id,
       credentialId: credential.id,
@@ -131,7 +139,9 @@ export function registerPasskeyRoutes(router, { store, sessions, identity, setti
       backedUp: credentialBackedUp,
       prfEnabled: prfEnabled === true,
       deviceName: cleanDeviceName(deviceName),
+      pendingUntil: recoveryOnly ? new Date(nowMs() + RECOVERY_PASSKEY_DELAY_MS).toISOString() : null,
     });
+    void alerts.send(user, "passkey_added", { deviceName: passkey.device_name, pending: recoveryOnly });
 
     // Enrolling the first passkey (via email proof) also signs the user in.
     const auth = sessions.authenticate(req);
