@@ -17,7 +17,8 @@ import {
   type WalletToken,
 } from "@/lib/smartWallet";
 import { isStellarAddress } from "@/lib/stellar";
-import { formatGrouped } from "@/lib/wallet";
+import type { Prices } from "@/lib/prices";
+import { AssetRow, WalletCardHeader, WalletTotal } from "@/components/WalletCard";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-6)}`;
 
@@ -25,7 +26,7 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-6)}`;
  * Public smart wallet (C-address) controlled by the user's passkey. For spending
  * public XLM/USDC; it is funded by withdrawing from the private balance.
  */
-export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
+export function SmartWalletCard({ hidden = false, prices }: { hidden?: boolean; prices: Prices }) {
   const navigate = useNavigate();
   const [info, setInfo] = useState<SmartWalletInfo | null>(null);
   const [balances, setBalances] = useState<Record<WalletToken, number> | null>(null);
@@ -57,7 +58,7 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
     if (isVaultMode()) void refresh();
   }, [refresh]);
 
-  if (!isVaultMode() || !info) return null;
+  if (!isVaultMode()) return null;
 
   async function run(action: () => Promise<void>) {
     setError("");
@@ -90,7 +91,7 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
     });
 
   const copy = async () => {
-    if (!info.address) return;
+    if (!info?.address) return;
     try {
       await navigator.clipboard.writeText(info.address);
       setCopied(true);
@@ -118,58 +119,70 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
     });
   };
 
-  const hasWalletPasskey = info.passkeys.length > 0;
+  const hasWalletPasskey = info?.passkeys.length ? info.passkeys.length > 0 : false;
+  const loading = !info || (Boolean(info.address) && !balances);
+  const xlm = balances?.XLM ?? 0;
+  const usdc = balances?.USDC ?? 0;
+  const totalUsd = prices.XLM === null && xlm > 0 ? null : usdc * prices.USDC + xlm * (prices.XLM ?? 0);
 
   return (
-    <section className="dash-card smart-wallet-card" aria-label="Smart wallet">
-      <div className="card-title-row">
-        <span>Smart Wallet</span>
-        {info.address && (
-          <button type="button" className="smart-wallet-icon-btn" onClick={() => void refresh()} aria-label="Refresh smart wallet">
-            <RefreshCw />
-          </button>
-        )}
-      </div>
-      <p className="smart-wallet-sub">
-        A public Stellar wallet you control with your passkey (Face ID, fingerprint or phone). Use it to hold and spend public
-        XLM and USDC. Fees are covered by Starlit.
-      </p>
+    <section className="dash-card wallet-card" aria-label="Public wallet">
+      <WalletCardHeader
+        icon={<Fingerprint />}
+        tone="public"
+        title="Public wallet"
+        badge="Passkey"
+        actions={
+          info?.address ? (
+            <button type="button" className="balance-eye" onClick={() => void refresh()} aria-label="Refresh public wallet">
+              <RefreshCw />
+            </button>
+          ) : undefined
+        }
+      />
 
-      {!info.address ? (
-        <div className="smart-wallet-actions">
+      {!info ? (
+        <WalletTotal usd={null} hidden={false} loading />
+      ) : !info.address ? (
+        <div className="wallet-empty">
+          <p>
+            A public Stellar wallet you control with your passkey (Face ID, fingerprint or phone). Hold and spend public
+            XLM and USDC; fees are covered by Starlit.
+          </p>
           {hasWalletPasskey && !needsPasskey ? (
-            <>
-              <p className="smart-wallet-note">Choose the passkey that will control your wallet:</p>
+            <div className="wallet-actions wallet-actions-stack">
               {info.passkeys.map((p) => (
                 <Button key={p.credentialId} type="button" onClick={() => create(p.credentialId)} disabled={busy}>
                   {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Create with {p.deviceName ?? "passkey"}
                 </Button>
               ))}
-              <Button type="button" variant="outline" onClick={createWithNewPasskey} disabled={busy}>
+              <Button type="button" variant="secondary" onClick={createWithNewPasskey} disabled={busy}>
                 <Smartphone /> Use a new phone passkey
               </Button>
-            </>
+            </div>
           ) : (
             <>
-              <p className="smart-wallet-note">
+              <p className="wallet-caption">
                 Your passkeys on this account can't control an on-chain wallet (Windows Hello uses RSA keys; Stellar needs
                 ES256). Create a wallet passkey with your phone (scan the QR code) or a security key.
               </p>
-              <Button type="button" onClick={createWithNewPasskey} disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" /> : <Smartphone />} Create wallet passkey
-              </Button>
+              <div className="wallet-actions">
+                <Button type="button" onClick={createWithNewPasskey} disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Smartphone />} Create wallet passkey
+                </Button>
+              </div>
             </>
           )}
         </div>
       ) : (
         <>
-          <div className="smart-wallet-address">
+          <WalletTotal usd={totalUsd} hidden={hidden} loading={loading || prices.status === "loading"} />
+          <div className="wallet-address">
             <code title={info.address}>{short(info.address)}</code>
-            <button type="button" className="smart-wallet-icon-btn" onClick={copy} aria-label="Copy smart wallet address">
+            <button type="button" onClick={copy} aria-label="Copy public wallet address">
               {copied ? <Check /> : <Copy />}
             </button>
             <a
-              className="smart-wallet-icon-btn"
               href={`https://stellar.expert/explorer/testnet/contract/${info.address}`}
               target="_blank"
               rel="noreferrer"
@@ -178,31 +191,26 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
               <ExternalLink />
             </a>
           </div>
-          <div className="smart-wallet-balances">
-            {(["XLM", "USDC"] as WalletToken[]).map((t) => (
-              <div key={t}>
-                <span className="holding-label">{t}</span>
-                <strong className="holding-amount">
-                  {hidden ? "••••••" : balances ? formatGrouped(balances[t]) : "…"}
-                </strong>
-              </div>
-            ))}
+          <div className="wallet-assets">
+            <AssetRow asset="USDC" amount={usdc} price={prices.USDC} hidden={hidden} loading={loading} />
+            <AssetRow asset="XLM" amount={xlm} price={prices.XLM} hidden={hidden} loading={loading} />
           </div>
-          <div className="smart-wallet-actions">
+          <p className="wallet-caption">Visible on Stellar. Fees covered by Starlit.</p>
+          <div className="wallet-actions">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               onClick={() => navigate(`/send?mode=external&to=${encodeURIComponent(info.address!)}`)}
             >
-              <Plus /> Add funds from private balance
+              <Plus /> Add funds
             </Button>
             <Button type="button" onClick={() => setSendOpen((v) => !v)} disabled={busy}>
-              <Send /> Send
+              <Send /> Send with passkey
             </Button>
           </div>
           {sendOpen && (
-            <form className="smart-wallet-form" onSubmit={send} noValidate>
-              <div className="smart-wallet-tokens" role="radiogroup" aria-label="Asset">
+            <form className="wallet-send-form" onSubmit={send} noValidate>
+              <div className="wallet-token-toggle" role="radiogroup" aria-label="Asset">
                 {(["XLM", "USDC"] as WalletToken[]).map((t) => (
                   <button
                     key={t}
@@ -219,12 +227,12 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
               <Input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="Recipient address (G… or C…)" />
               <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Amount in ${token}`} inputMode="decimal" />
               <Button type="submit" disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Send with passkey
+                {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Confirm and send
               </Button>
             </form>
           )}
           {lastHash && (
-            <p className="smart-wallet-note">
+            <p className="wallet-caption">
               Sent.{" "}
               <a href={`https://stellar.expert/explorer/testnet/tx/${lastHash}`} target="_blank" rel="noreferrer">
                 View transaction
@@ -234,9 +242,9 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
         </>
       )}
 
-      {status && <p className="smart-wallet-note">{status}</p>}
+      {status && <p className="wallet-caption">{status}</p>}
       {error && (
-        <p className="smart-wallet-error" role="alert">
+        <p className="wallet-error" role="alert">
           {error}
         </p>
       )}

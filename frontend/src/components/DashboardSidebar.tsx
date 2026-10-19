@@ -108,7 +108,6 @@ export function DashboardSidebar({
   const otherActions = [
     { label: "Settings", icon: Settings, to: "/settings" as string | undefined },
     { label: themeLabel, icon: ThemeIcon, action: toggleTheme },
-    { label: "Install App", icon: Download, soon: true },
     { label: "Log Out", icon: LogOut, action: async () => { await signOut(); navigate("/", { replace: true }); } },
   ];
 
@@ -131,11 +130,9 @@ export function DashboardSidebar({
               key={item.label}
               className={`nav-item ${isActive ? "active" : ""}`}
               onClick={item.action ? item.action : item.to ? () => navigate(item.to as string) : undefined}
-              disabled={item.soon}
             >
               <Icon />
               <span>{item.label}</span>
-              {item.soon && <span className="soon-badge">Soon</span>}
             </button>
           );
           if (collapsed) {
