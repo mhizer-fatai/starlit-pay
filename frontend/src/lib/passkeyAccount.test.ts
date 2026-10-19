@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   pinSalt: vi.fn(),
   getEmailProof: vi.fn(),
   unlockFromVault: vi.fn(),
+  stepUp: vi.fn(),
 }));
 
 vi.mock("@/lib/backend", async (importOriginal) => ({
@@ -18,11 +19,13 @@ vi.mock("@/lib/auth", () => ({ unlockFromVault: mocks.unlockFromVault }));
 vi.mock("@/lib/vault/client", () => ({
   authApi: { pinSalt: mocks.pinSalt },
   getEmailProof: mocks.getEmailProof,
-  passkeyFlows: { signUp: mocks.signUp, unlockWithPasskey: mocks.unlockWithPasskey, unlockWithPin: mocks.unlockWithPin },
+  passkeyFlows: { signUp: mocks.signUp, unlockWithPasskey: mocks.unlockWithPasskey, unlockWithPin: mocks.unlockWithPin, stepUp: mocks.stepUp },
 }));
 
 import {
   accountUsesVault,
+  confirmPaymentWithPasskey,
+  confirmPaymentWithPin,
   createPasskeyAccount,
   friendlyAuthError,
   unlockWithVaultPin,
@@ -113,5 +116,32 @@ describe("friendlyAuthError", () => {
       "Too many incorrect PINs. Try again in 30 minutes."
     );
     expect(friendlyAuthError(new PasskeyCancelledError())).toMatch(/cancelled/);
+  });
+});
+
+describe("payment confirmation", () => {
+  test("a passkey confirmation runs a backend-verified step-up ceremony", async () => {
+    mocks.stepUp.mockResolvedValue({ credentialId: "c", prfOutput: null });
+    await confirmPaymentWithPasskey();
+    expect(mocks.stepUp).toHaveBeenCalledOnce();
+  });
+
+  test("a cancelled passkey prompt does not confirm the payment", async () => {
+    mocks.stepUp.mockRejectedValue(new PasskeyCancelledError());
+    await expect(confirmPaymentWithPasskey()).rejects.toBeInstanceOf(PasskeyCancelledError);
+  });
+
+  test("the PIN fallback checks the PIN with the server and wipes the extra vault copy", async () => {
+    const secrets = { seed: new Uint8Array(32).fill(7), dek: new Uint8Array(32).fill(9) };
+    mocks.unlockWithPin.mockResolvedValue({ user: { id: "u1" }, vault: { secrets, keys: {} } });
+    await confirmPaymentWithPin("135790");
+    expect(mocks.unlockWithPin).toHaveBeenCalledWith("135790", null);
+    expect(secrets.seed.every((b) => b === 0) && secrets.dek.every((b) => b === 0)).toBe(true);
+    expect(mocks.unlockFromVault).not.toHaveBeenCalled();
+  });
+
+  test("a wrong PIN does not confirm the payment", async () => {
+    mocks.unlockWithPin.mockRejectedValue(new AuthApiError(401, "Incorrect PIN.", { code: "pin_incorrect", attemptsRemaining: 3 }));
+    await expect(confirmPaymentWithPin("000000")).rejects.toMatchObject({ code: "pin_incorrect" });
   });
 });
