@@ -23,6 +23,7 @@ const m = vi.hoisted(() => ({
 vi.mock("@/lib/backend", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/backend")>()),
   clearSession: m.clearSession,
+  getPoolRoot: vi.fn(async () => ({ root: "cd".repeat(32) })),
   fetchNotes: vi.fn(async (viewingKey: string) => ({
     notes: m.notesStore.filter((n) => n.recipient_viewing_key === viewingKey && n.status === "unspent"),
   })),
@@ -53,7 +54,7 @@ vi.mock("@/lib/stellar", async (importOriginal) => ({
 vi.mock("@/lib/vault/client", () => ({
   authApi: { pinSalt: m.pinSalt, bindProfileKeys: m.bindProfileKeys, getSession: m.getSession, createVault: vi.fn() },
   getEmailProof: async () => "google-token",
-  passkeyFlows: { signUp: m.signUp, unlockWithPin: m.unlockWithPin, stepUp: m.stepUp, setPin: vi.fn(), setRecoveryCode: vi.fn() },
+  passkeyFlows: { signUp: m.signUp, unlockWithPin: m.unlockWithPin, stepUp: m.stepUp, setPin: vi.fn(), setRecoveryCode: vi.fn(async () => "FRESH-CODE") },
 }));
 
 import { encryptNote } from "@/lib/crypto";
@@ -66,7 +67,7 @@ import { migrateLegacyAccount, needsMigrationFinish } from "./migration";
 const EMAIL = "alice@example.com";
 const PIN = "135790";
 
-async function seedOldNotes(amounts: { asset: string; amount: number }[]) {
+async function seedOldNotes(amounts: { asset: string; amount: number }[], { withRoot = true } = {}) {
   const oldKeys = await deriveKeysFromEmailAndPin(EMAIL, PIN);
   for (const [i, { asset, amount }] of amounts.entries()) {
     const secret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
@@ -76,7 +77,7 @@ async function seedOldNotes(amounts: { asset: string; amount: number }[]) {
       encrypted_note: enc.ephemeralPublicKey + enc.nonce + enc.ciphertext,
       recipient_viewing_key: oldKeys.viewing.publicKey,
       status: "unspent",
-      root: "ab".repeat(32),
+      root: withRoot ? "ab".repeat(32) : undefined,
     });
   }
   return oldKeys;
@@ -188,7 +189,8 @@ describe("migrateLegacyAccount", () => {
     expect(m.signUp).toHaveBeenCalledOnce();
     expect(m.unlockWithPin).toHaveBeenCalledWith(PIN, "google-token");
     expect(m.transfers).toHaveLength(2);
-    expect(result.recoveryCode).toBeNull();
+    // a resumed upgrade always shows a fresh recovery code
+    expect(result.recoveryCode).toBe("FRESH-CODE");
     expect(m.notesStore.filter((n) => n.status === "unspent" && n.recipient_viewing_key !== newVault.keys.viewing.publicKey)).toHaveLength(0);
   });
 
@@ -236,6 +238,15 @@ describe("migrateLegacyAccount", () => {
     m.bindProfileKeys.mockResolvedValue({ user: { id: "u1", public_encryption_key: "something-else" } });
     await expect(migrateLegacyAccount({ user: await oldUser(), pin: PIN })).rejects.toThrow(/different keys/);
     expect(m.unlockFromVault).not.toHaveBeenCalled();
+  });
+});
+
+describe("notes without a recorded root", () => {
+  test("are spent against a root the pool currently accepts, never zeros", async () => {
+    await seedOldNotes([{ asset: "XLM", amount: 5 }], { withRoot: false });
+    await migrateLegacyAccount({ user: await oldUser(), pin: PIN });
+    expect(m.transfers).toHaveLength(1);
+    expect(m.transfers[0].root).toBe("cd".repeat(32));
   });
 });
 

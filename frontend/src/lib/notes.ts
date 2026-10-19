@@ -1,5 +1,6 @@
 import nacl from "tweetnacl";
 import type { BackendTransaction, ShieldedNote } from "./backend";
+import { getPoolRoot } from "./backend";
 
 function hexToBytes(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
@@ -156,7 +157,9 @@ export function getSpendableNotes(
         amount: decrypted.amount,
         asset: decrypted.asset.toUpperCase(),
         secret: decrypted.secret || note.commitment,
-        root: note.root || "0000000000000000000000000000000000000000000000000000000000000000",
+        // Notes posted by clients (received payments, change) have no recorded
+        // root; spenders fetch a currently valid one with spendRootFor().
+        root: note.root || undefined,
       });
     }
   }
@@ -164,3 +167,13 @@ export function getSpendableNotes(
   return result.sort((a, b) => b.amount - a.amount);
 }
 
+
+/**
+ * Merkle root to spend a note against: the note's own root when the indexer
+ * recorded one, otherwise any root the pool currently accepts.
+ */
+export async function spendRootFor(note: { root?: string }): Promise<string> {
+  if (note.root) return note.root;
+  const { root } = await getPoolRoot();
+  return root;
+}

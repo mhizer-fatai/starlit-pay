@@ -22,7 +22,7 @@ import {
 } from "@/lib/backend";
 import { encryptNote } from "@/lib/crypto";
 import { bytesToHex, deriveKeysFromEmailAndPin, identityCommitment, type DerivedKeys } from "@/lib/keys";
-import { getSpendableNotes } from "@/lib/notes";
+import { getSpendableNotes, spendRootFor } from "@/lib/notes";
 import { horizon, NETWORK_PASSPHRASE, TOKENS } from "@/lib/stellar";
 import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
 import { unlockFromVault, type SessionUser } from "@/lib/auth";
@@ -36,7 +36,7 @@ const ASSETS = ["XLM", "USDC"] as const;
 const MAX_SWEEP_PASSES = 3;
 
 export interface MigrationResult {
-  /** New recovery code to show once, or null when resuming an earlier upgrade. */
+  /** New recovery code to show once (a resumed upgrade issues a fresh one too). */
   recoveryCode: string | null;
   passkeyCanUnlock: boolean;
   notesMoved: number;
@@ -108,7 +108,7 @@ async function sweepNotes(oldKeys: DerivedKeys, newKeys: DerivedKeys, username: 
           encrypted_note_1: encHex,
           output_commitment_2: ZERO_COMMITMENT,
           encrypted_note_2: "00",
-          root: input1.root || ZERO_COMMITMENT,
+          root: await spendRootFor(input1),
         });
 
         // Record the new note before retiring the old ones, so funds are never
@@ -227,6 +227,12 @@ export async function migrateLegacyAccount(input: {
     opened = result.opened;
     recoveryCode = result.recoveryCode;
     passkeyCanUnlock = result.passkeyCanUnlock;
+  }
+  // Resuming: an earlier attempt may have set a recovery code the user never
+  // saw (it stopped before the code was shown), so always issue a fresh one.
+  if (!recoveryCode) {
+    await ensureFreshSession();
+    recoveryCode = await passkeyFlows.setRecoveryCode(opened.secrets);
   }
   const newKeys = opened.keys;
 
