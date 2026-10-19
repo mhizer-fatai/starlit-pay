@@ -22,6 +22,7 @@ import { fetchStats, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
+import { SmartWalletCard } from "@/components/SmartWalletCard";
 import { usePrices, formatTokenPrice, PRICE_UNAVAILABLE } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
 import {
@@ -505,6 +506,8 @@ function DashboardPage() {
               </div>
             </section>
           </div>
+
+          <SmartWalletCard hidden={balanceHidden} />
 
           <section className="dash-card activity-card">
             <div className="card-title-row">

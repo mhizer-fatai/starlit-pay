@@ -192,8 +192,12 @@ export function createAuthApi({ baseUrl, fetchImpl }: AuthApiOptions) {
     logout: () => call<{ ok: true }>("POST", "/api/auth/logout"),
 
     // passkeys
-    passkeyRegisterOptions: (emailProof?: string | null) =>
-      call<{ challengeId: string; options: CreationOptionsJSON }>("POST", "/api/auth/passkey/register/options", { body: {}, emailProof }),
+    /** es256Only: the passkey must also control an on-chain smart wallet (Stellar verifies P-256 only). */
+    passkeyRegisterOptions: (emailProof?: string | null, opts: { es256Only?: boolean } = {}) =>
+      call<{ challengeId: string; options: CreationOptionsJSON }>("POST", "/api/auth/passkey/register/options", {
+        body: opts.es256Only ? { es256Only: true } : {},
+        emailProof,
+      }),
     passkeyRegisterVerify: (body: { challengeId: string; response: CredentialJSON; deviceName?: string; prfEnabled: boolean }) =>
       call<{ passkey: PublicPasskey; user: AuthUser }>("POST", "/api/auth/passkey/register/verify", { body }),
     passkeyLoginOptions: (purpose: "login" | "stepup") =>

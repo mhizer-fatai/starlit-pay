@@ -56,8 +56,12 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
    * passkey is used, not when it is created; in that case it is used once
    * straight away to fetch it.
    */
-  async function registerPasskey(emailProof: string | null, deviceName?: string): Promise<EnrolledPasskey> {
-    const { challengeId, options } = await api.passkeyRegisterOptions(emailProof);
+  async function registerPasskey(
+    emailProof: string | null,
+    deviceName?: string,
+    opts: { es256Only?: boolean } = {}
+  ): Promise<EnrolledPasskey> {
+    const { challengeId, options } = await api.passkeyRegisterOptions(emailProof, opts);
     const created = await ceremonies.create(options, true);
     const { passkey, user } = await api.passkeyRegisterVerify({
       challengeId,
@@ -179,8 +183,12 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
    * (the caller should stepUp() first if the session is not fresh).
    * Returns whether the new passkey can unlock the vault by itself.
    */
-  async function addPasskey(secrets: VaultSecrets, deviceName?: string): Promise<{ passkey: PublicPasskey; canUnlock: boolean }> {
-    const enrolled = await registerPasskey(null, deviceName);
+  async function addPasskey(
+    secrets: VaultSecrets,
+    deviceName?: string,
+    opts: { es256Only?: boolean } = {}
+  ): Promise<{ passkey: PublicPasskey; canUnlock: boolean }> {
+    const enrolled = await registerPasskey(null, deviceName, opts);
     try {
       if (!enrolled.prfOutput) return { passkey: enrolled.passkey, canUnlock: false };
       const wrappedDek = await addUnlockMethod(secrets, await kekFromPrf(enrolled.prfOutput), "passkey");

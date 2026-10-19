@@ -32,6 +32,7 @@ import { confirmPaymentWithPasskey, confirmPaymentWithPin, friendlyAuthError } f
 import { selfNoteSecret } from "@/lib/ownedNotes";
 import { withNoteLock } from "@/lib/reshield";
 import {
+  getSmartWallet,
   lookupUser,
   postNote,
   postTransaction,
@@ -44,7 +45,7 @@ import {
 import { getSpendableNotes, spendRootFor } from "@/lib/notes";
 import { bytesToHex, encryptNote } from "@/lib/crypto";
 import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
-import { TOKENS } from "@/lib/stellar";
+import { TOKENS, isStellarAddress } from "@/lib/stellar";
 import {
   formatGrouped,
   loadPrivateBalances,
@@ -195,6 +196,14 @@ function SendPage() {
   const [confirmPin, setConfirmPin] = useState("");
   const [confirmError, setConfirmError] = useState("");
   const [errors, setErrors] = useState<{ username?: string; amount?: string }>({});
+  // The user's public smart wallet (C-address), offered as a withdrawal destination.
+  const [smartWalletAddress, setSmartWalletAddress] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isVaultMode()) return;
+    getSmartWallet()
+      .then((info) => setSmartWalletAddress(info.address))
+      .catch(() => undefined);
+  }, []);
   const scanInputRef = useRef<HTMLInputElement>(null);
 
   async function handleScanQR(event: React.ChangeEvent<HTMLInputElement>) {
@@ -263,8 +272,8 @@ function SendPage() {
           : "Recipient Stellar wallet address is required";
     } else if (mode === "starlit" && !/^[A-Za-z0-9._-]+$/.test(trimmedUsername.replace(/^@/, ""))) {
       nextErrors.username = "Use only letters, numbers, dots, dashes or underscores";
-    } else if (mode === "external" && (!trimmedUsername.startsWith("G") || trimmedUsername.length !== 56)) {
-      nextErrors.username = "Enter a valid 56-character Stellar public address starting with G";
+    } else if (mode === "external" && !isStellarAddress(trimmedUsername)) {
+      nextErrors.username = "Enter a valid Stellar address (G… account or C… smart wallet)";
     }
     if (!amount.trim()) {
       nextErrors.amount = "Amount is required";
@@ -427,8 +436,8 @@ function SendPage() {
 
       if (mode === "external") {
         // WITHDRAWAL FLOW
-        if (!rawTarget.startsWith("G") || rawTarget.length !== 56) {
-          throw new Error("Enter a valid 56-character Stellar public address starting with G");
+        if (!isStellarAddress(rawTarget)) {
+          throw new Error("Enter a valid Stellar address (G… account or C… smart wallet)");
         }
 
         setMessage("Preparing secure withdrawal...");
@@ -750,11 +759,23 @@ function SendPage() {
                             setUsername(event.target.value);
                             setErrors((prev) => ({ ...prev, username: undefined }));
                           }}
-                          placeholder="Recipient wallet address"
+                          placeholder="Recipient wallet address (G… or C…)"
                           aria-invalid={Boolean(errors.username)}
                           aria-describedby={errors.username ? "send-username-error" : undefined}
                         />
                       </div>
+                      {smartWalletAddress && username.trim() !== smartWalletAddress && (
+                        <button
+                          type="button"
+                          className="send-shortcut"
+                          onClick={() => {
+                            setUsername(smartWalletAddress);
+                            setErrors((prev) => ({ ...prev, username: undefined }));
+                          }}
+                        >
+                          <Wallet /> Send to my smart wallet
+                        </button>
+                      )}
                       {errors.username && (
                         <span className="send-error" id="send-username-error" role="alert">
                           <TriangleAlert />
