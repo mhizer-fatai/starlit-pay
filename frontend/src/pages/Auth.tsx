@@ -1,18 +1,29 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Lock, Mail, User } from "lucide-react";
+import { Fingerprint, KeyRound, Lock, Mail, User } from "lucide-react";
 
+import { RecoveryCodePanel } from "@/components/RecoveryCodePanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   getUser,
   isUnlocked,
+  isVaultMode,
   lookupByEmail,
-  registerWithPin,
   signOut,
   unlockWithPin,
 } from "@/lib/auth";
 import { isValidPin } from "@/lib/keys";
+import {
+  accountUsesVault,
+  createPasskeyAccount,
+  friendlyAuthError,
+  hasPasskeySession,
+  passkeysSupported,
+  signInWithPasskey,
+  unlockWithVaultPin,
+} from "@/lib/passkeyAccount";
+import { PasskeyNeedsPinError } from "@/lib/vault/flows";
 import { supabase } from "@/lib/supabase";
 
 function GoogleIcon() {
@@ -38,13 +49,41 @@ function GoogleIcon() {
   );
 }
 
-type Phase = "google" | "checking" | "pin-entry" | "pin-setup";
+// google      Continue with Google, or sign in with a passkey directly
+// checking    finishing Google sign-in
+// signup      new account: username + PIN, then create a passkey
+// recovery    show the new recovery code once
+// unlock      passkey account: unlock with passkey (PIN as fallback)
+// unlock-pin  passkey account: unlock with PIN
+// legacy-pin  older email+PIN account (moves to passkeys in a later update)
+type Phase = "google" | "checking" | "signup" | "recovery" | "unlock" | "unlock-pin" | "legacy-pin";
 
 const PIN_INPUT_STYLE = {
   textAlign: "center",
   letterSpacing: "8px",
   fontSize: "20px",
 } as const;
+
+const PRIMARY_BUTTON = "h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none";
+const SECONDARY_BUTTON = "h-12 w-full rounded-lg text-[15px]";
+
+function StatusLine({ status, error }: { status: string; error: string }) {
+  if (error) {
+    return (
+      <p className="text-sm text-red-500" role="alert">
+        {error}
+      </p>
+    );
+  }
+  if (status) {
+    return (
+      <p className="text-sm text-muted-foreground" role="status">
+        {status}
+      </p>
+    );
+  }
+  return null;
+}
 
 function AuthPage() {
   const navigate = useNavigate();
@@ -59,14 +98,19 @@ function AuthPage() {
   const [username, setUsername] = useState("");
   const [pin, setPin] = useState("");
   const [pinConfirm, setPinConfirm] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [passkeyCanUnlock, setPasskeyCanUnlock] = useState(true);
+  // PIN unlock identifies the account by the passkey session when there is one,
+  // otherwise by Google sign-in.
+  const [pinUsesEmailProof, setPinUsesEmailProof] = useState(true);
+  const canUsePasskeys = passkeysSupported();
 
   useEffect(() => {
     document.title = "Sign in — Starlit Pay";
     let cancelled = false;
     void (async () => {
-      // Returning from Google OAuth: resolve the Supabase session, then ask
-      // for the payment PIN (or create one for new accounts) before any
-      // backend session is issued.
+      // Returning from Google OAuth: resolve the Supabase session, then route
+      // the account to sign-up, passkey unlock, or the older PIN screen.
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
       const hash = window.location.hash;
@@ -123,7 +167,10 @@ function AuthPage() {
           setPinConfirm("");
           if (exists) {
             setUsername(user?.username ?? "");
-            setPhase("pin-entry");
+            const usesVault = await accountUsesVault();
+            if (cancelled) return;
+            setPinUsesEmailProof(true);
+            setPhase(usesVault ? "unlock" : "legacy-pin");
           } else {
             const base =
               googleEmail
@@ -132,11 +179,11 @@ function AuthPage() {
                 .slice(0, 24) || "user";
             setUsername(user?.username ?? base);
             if (!name) setDisplayName(base);
-            setPhase("pin-setup");
+            setPhase("signup");
           }
         } catch (e) {
           if (!cancelled) {
-            setError(e instanceof Error ? e.message : "Google sign-in failed.");
+            setError(friendlyAuthError(e));
             setPhase("google");
           }
           try {
@@ -152,21 +199,30 @@ function AuthPage() {
         }
         return;
       }
-      // Plain visit: a valid backend session alone is not enough — the PIN
-      // must have been entered during this page load (RequireUnlock enforces
-      // this on every protected route and sends locked visits here).
+      // Plain visit: signed in on an earlier page load, but keys only live in
+      // memory, so the wallet is locked after a refresh.
       const user = await getUser();
       if (cancelled || !user) return;
       if (isUnlocked()) {
         navigate("/dashboard", { replace: true });
         return;
       }
-      // Locked after a refresh: skip Google, go straight to PIN re-entry.
       setEmail(user.email);
       setUsername(user.username ?? "");
       setPin("");
       setPinConfirm("");
-      setPhase("pin-entry");
+      if (isVaultMode()) {
+        const sessionAlive = await hasPasskeySession();
+        if (cancelled) return;
+        if (!sessionAlive) {
+          await signOut();
+          return;
+        }
+        setPinUsesEmailProof(false);
+        setPhase("unlock");
+        return;
+      }
+      setPhase("legacy-pin");
     })();
     return () => {
       cancelled = true;
@@ -177,9 +233,13 @@ function AuthPage() {
     document.documentElement.classList.remove("dark");
   }, []);
 
-  async function handleGoogle() {
+  function resetMessages() {
     setError("");
     setStatus("");
+  }
+
+  async function handleGoogle() {
+    resetMessages();
     setBusy(true);
     try {
       try {
@@ -217,17 +277,58 @@ function AuthPage() {
     setUsername("");
     setPin("");
     setPinConfirm("");
-    setError("");
-    setStatus("");
+    resetMessages();
   }
 
-  async function handlePinUnlock(e: React.FormEvent) {
+  async function handlePasskeyUnlock() {
+    resetMessages();
+    setBusy(true);
+    setStatus("Confirm with your fingerprint, face or screen lock…");
+    try {
+      await signInWithPasskey();
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      if (err instanceof PasskeyNeedsPinError) {
+        // Signed in by the passkey; this device just can't open the vault with it.
+        setPinUsesEmailProof(false);
+        setEmail(err.user.email);
+        setPhase("unlock-pin");
+      }
+      setError(friendlyAuthError(err));
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  async function handleVaultPinUnlock(e: React.FormEvent) {
     e.preventDefault();
     if (!isValidPin(pin)) {
       setError("PIN must be exactly 6 digits.");
       return;
     }
-    setError("");
+    resetMessages();
+    setBusy(true);
+    setStatus("Unlocking wallet…");
+    try {
+      await unlockWithVaultPin(pin, { useEmailProof: pinUsesEmailProof });
+      navigate("/dashboard", { replace: true });
+    } catch (err) {
+      setError(friendlyAuthError(err));
+      setPin("");
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  async function handleLegacyPinUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    if (!isValidPin(pin)) {
+      setError("PIN must be exactly 6 digits.");
+      return;
+    }
+    resetMessages();
     setBusy(true);
     setStatus("Unlocking wallet…");
     try {
@@ -242,7 +343,7 @@ function AuthPage() {
     }
   }
 
-  async function handlePinSetup(e: React.FormEvent) {
+  async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     const cleanUsername = username.toLowerCase().trim().replace(/^@/, "");
     if (cleanUsername.length < 3 || !/^[a-z0-9_]+$/.test(cleanUsername)) {
@@ -257,27 +358,62 @@ function AuthPage() {
       setError("PINs do not match.");
       return;
     }
-    setError("");
+    if (!canUsePasskeys) {
+      setError("This browser doesn't support passkeys. Try a recent Chrome, Safari, Edge or Firefox.");
+      return;
+    }
+    resetMessages();
     setBusy(true);
-    setStatus("Creating secure account…");
     try {
-      await registerWithPin({
+      const result = await createPasskeyAccount({
         email,
         username: cleanUsername,
         displayName: displayName || cleanUsername,
-        pin,
         avatarUrl,
+        pin,
+        onStatus: setStatus,
       });
-      navigate("/dashboard", { replace: true });
+      setPin("");
+      setPinConfirm("");
+      setRecoveryCode(result.recoveryCode);
+      setPasskeyCanUnlock(result.passkeyCanUnlock);
+      setPhase("recovery");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create account.");
+      setError(friendlyAuthError(err));
     } finally {
       setBusy(false);
       setStatus("");
     }
   }
 
+  function finishRecovery() {
+    setRecoveryCode("");
+    navigate("/dashboard", { replace: true });
+  }
+
   const digitsOnly = (value: string) => value.replace(/\D/g, "").slice(0, 6);
+
+  const pinInput = (props: {
+    value: string;
+    onChange: (v: string) => void;
+    placeholder: string;
+    autoComplete: string;
+    autoFocus?: boolean;
+  }) => (
+    <Input
+      type="password"
+      inputMode="numeric"
+      autoComplete={props.autoComplete}
+      maxLength={6}
+      placeholder={props.placeholder}
+      value={props.value}
+      onChange={(e) => props.onChange(digitsOnly(e.target.value))}
+      required
+      autoFocus={props.autoFocus}
+      disabled={busy}
+      style={PIN_INPUT_STYLE}
+    />
+  );
 
   return (
     <main className="auth-stage">
@@ -301,19 +437,22 @@ function AuthPage() {
                     disabled={busy}
                     className="h-16 w-full rounded-lg bg-background text-[18px] font-semibold text-foreground shadow-md shadow-primary/10 hover:bg-white/50"
                   >
-                    <GoogleIcon /> {busy ? status || "Please wait…" : "Continue with Google"}
+                    <GoogleIcon /> {busy && phase === "checking" ? status || "Please wait…" : "Continue with Google"}
                   </Button>
 
-                  {status && !error && (
-                    <p className="text-sm text-muted-foreground" role="status">
-                      {status}
-                    </p>
+                  {canUsePasskeys && phase === "google" && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={handlePasskeyUnlock}
+                      disabled={busy}
+                      className="h-14 w-full rounded-lg text-[16px] font-semibold"
+                    >
+                      <Fingerprint /> {busy ? status || "Please wait…" : "Sign in with passkey"}
+                    </Button>
                   )}
-                  {error && (
-                    <p className="text-sm text-red-500" role="alert">
-                      {error}
-                    </p>
-                  )}
+
+                  <StatusLine status={phase === "checking" ? "" : status} error={error} />
 
                   <div>
                     <div className="flex items-center justify-between">
@@ -329,87 +468,23 @@ function AuthPage() {
                       <Input type="email" placeholder="Enter your email address" disabled />
                     </div>
                   </div>
-
-                  <Button
-                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
-                    disabled
-                    type="button"
-                  >
-                    Sign In
-                  </Button>
                 </div>
               </>
             )}
 
-            {phase === "pin-entry" && (
+            {phase === "signup" && (
               <>
                 <div className="text-center">
-                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
-                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Unlock Wallet</h1>
+                  <KeyRound className="mx-auto size-8 text-primary" aria-hidden="true" />
+                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Create your wallet</h1>
                   <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
-                    Enter the 6-digit payment PIN for{" "}
-                    <span className="font-semibold text-foreground">{email}</span>
+                    <span className="font-semibold text-foreground">{email}</span> is new here. Pick a username
+                    and a 6-digit backup PIN. Next, you'll create a passkey to unlock your wallet with your
+                    fingerprint, face or screen lock.
                   </p>
                 </div>
 
-                <form onSubmit={handlePinUnlock} className="mt-8 space-y-6">
-                  <Input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    maxLength={6}
-                    placeholder="••••••"
-                    value={pin}
-                    onChange={(e) => setPin(digitsOnly(e.target.value))}
-                    required
-                    autoFocus
-                    disabled={busy}
-                    style={PIN_INPUT_STYLE}
-                  />
-                  {status && !error && (
-                    <p className="text-sm text-muted-foreground" role="status">
-                      {status}
-                    </p>
-                  )}
-                  {error && (
-                    <p className="text-sm text-red-500" role="alert">
-                      {error}
-                    </p>
-                  )}
-                  <Button
-                    type="submit"
-                    disabled={busy}
-                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
-                  >
-                    {busy ? status || "Unlocking…" : "Unlock"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleSwitchAccount}
-                    disabled={busy}
-                    className="h-12 w-full rounded-lg text-[15px]"
-                  >
-                    Switch Account
-                  </Button>
-                </form>
-              </>
-            )}
-
-            {phase === "pin-setup" && (
-              <>
-                <div className="text-center">
-                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
-                  <h1 className="mt-4 text-[28px] font-medium text-foreground">
-                    Secure your wallet
-                  </h1>
-                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
-                    <span className="font-semibold text-foreground">{email}</span> is new here.
-                    Create a 6-digit payment PIN — it derives your wallet keys.
-                  </p>
-                </div>
-
-                <form onSubmit={handlePinSetup} className="mt-8 space-y-6">
+                <form onSubmit={handleSignup} className="mt-8 space-y-6">
                   <div>
                     <span className="text-[15px] font-semibold text-foreground">Username</span>
                     <div className="auth-input">
@@ -427,60 +502,108 @@ function AuthPage() {
                     </div>
                   </div>
                   <div>
-                    <span className="text-[15px] font-semibold text-foreground">
-                      6-digit payment PIN
-                    </span>
+                    <span className="text-[15px] font-semibold text-foreground">Backup PIN (6 digits)</span>
+                    <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+                      For devices where your passkey can't unlock the wallet.
+                    </p>
                     <div className="mt-2 space-y-3">
-                      <Input
-                        type="password"
-                        inputMode="numeric"
-                        autoComplete="new-password"
-                        maxLength={6}
-                        placeholder="Enter 6-digit PIN"
-                        value={pin}
-                        onChange={(e) => setPin(digitsOnly(e.target.value))}
-                        required
-                        disabled={busy}
-                        style={PIN_INPUT_STYLE}
-                      />
-                      <Input
-                        type="password"
-                        inputMode="numeric"
-                        autoComplete="new-password"
-                        maxLength={6}
-                        placeholder="Confirm 6-digit PIN"
-                        value={pinConfirm}
-                        onChange={(e) => setPinConfirm(digitsOnly(e.target.value))}
-                        required
-                        disabled={busy}
-                        style={PIN_INPUT_STYLE}
-                      />
+                      {pinInput({ value: pin, onChange: setPin, placeholder: "Enter 6-digit PIN", autoComplete: "new-password" })}
+                      {pinInput({ value: pinConfirm, onChange: setPinConfirm, placeholder: "Confirm 6-digit PIN", autoComplete: "new-password" })}
                     </div>
                   </div>
-                  {status && !error && (
-                    <p className="text-sm text-muted-foreground" role="status">
-                      {status}
-                    </p>
-                  )}
-                  {error && (
-                    <p className="text-sm text-red-500" role="alert">
-                      {error}
-                    </p>
-                  )}
-                  <Button
-                    type="submit"
-                    disabled={busy}
-                    className="h-16 w-full rounded-lg bg-primary text-[16px] font-medium shadow-none"
-                  >
-                    {busy ? status || "Creating…" : "Create Account"}
+                  <StatusLine status={status} error={error} />
+                  <Button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
+                    <Fingerprint /> {busy ? status || "Creating…" : "Create wallet with passkey"}
                   </Button>
+                  <Button type="button" variant="secondary" onClick={handleSwitchAccount} disabled={busy} className={SECONDARY_BUTTON}>
+                    Switch Account
+                  </Button>
+                </form>
+              </>
+            )}
+
+            {phase === "recovery" && (
+              <>
+                {!passkeyCanUnlock && (
+                  <p className="mb-6 rounded-lg bg-primary/5 p-3 text-[13px] leading-5 text-muted-foreground">
+                    This device's passkey signs you in, but can't unlock the wallet by itself, so you'll also
+                    enter your PIN here. Passkeys on most phones and newer computers unlock it directly.
+                  </p>
+                )}
+                <RecoveryCodePanel code={recoveryCode} onDone={finishRecovery} doneLabel="Go to my wallet" />
+              </>
+            )}
+
+            {phase === "unlock" && (
+              <>
+                <div className="text-center">
+                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
+                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Unlock Wallet</h1>
+                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
+                    Use your passkey for <span className="font-semibold text-foreground">{email}</span>
+                  </p>
+                </div>
+
+                <div className="mt-8 space-y-6">
+                  <Button type="button" onClick={handlePasskeyUnlock} disabled={busy || !canUsePasskeys} className={PRIMARY_BUTTON}>
+                    <Fingerprint /> {busy ? status || "Unlocking…" : "Unlock with passkey"}
+                  </Button>
+                  <StatusLine status="" error={error} />
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={handleSwitchAccount}
+                    onClick={() => {
+                      resetMessages();
+                      setPin("");
+                      setPhase("unlock-pin");
+                    }}
                     disabled={busy}
-                    className="h-12 w-full rounded-lg text-[15px]"
+                    className={SECONDARY_BUTTON}
                   >
+                    Use PIN instead
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={handleSwitchAccount} disabled={busy} className={SECONDARY_BUTTON}>
+                    Switch Account
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {(phase === "unlock-pin" || phase === "legacy-pin") && (
+              <>
+                <div className="text-center">
+                  <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
+                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Unlock Wallet</h1>
+                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
+                    Enter the 6-digit PIN for{" "}
+                    <span className="font-semibold text-foreground">{email}</span>
+                  </p>
+                </div>
+
+                <form
+                  onSubmit={phase === "unlock-pin" ? handleVaultPinUnlock : handleLegacyPinUnlock}
+                  className="mt-8 space-y-6"
+                >
+                  {pinInput({ value: pin, onChange: setPin, placeholder: "••••••", autoComplete: "off", autoFocus: true })}
+                  <StatusLine status={status} error={error} />
+                  <Button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
+                    {busy ? status || "Unlocking…" : "Unlock"}
+                  </Button>
+                  {phase === "unlock-pin" && canUsePasskeys && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => {
+                        resetMessages();
+                        setPhase("unlock");
+                      }}
+                      disabled={busy}
+                      className={SECONDARY_BUTTON}
+                    >
+                      <Fingerprint /> Use passkey instead
+                    </Button>
+                  )}
+                  <Button type="button" variant="ghost" onClick={handleSwitchAccount} disabled={busy} className={SECONDARY_BUTTON}>
                     Switch Account
                   </Button>
                 </form>
