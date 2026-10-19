@@ -283,6 +283,9 @@ export const fetchStats = () =>
     network: string;
     status: string;
   }>("/api/stats");
+/** A Merkle root the shielded pool currently accepts (checked on-chain by the backend). */
+export const getPoolRoot = () => req<{ root: string }>("/api/pool/root");
+
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
 export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
 export const notifyGatewayDeposit = (txHash: string) =>

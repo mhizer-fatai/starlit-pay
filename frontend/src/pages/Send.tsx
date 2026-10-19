@@ -36,7 +36,7 @@ import {
   submitRelayerTransfer,
   submitRelayerWithdraw,
 } from "@/lib/backend";
-import { getSpendableNotes } from "@/lib/notes";
+import { getSpendableNotes, spendRootFor } from "@/lib/notes";
 import { bytesToHex, encryptNote } from "@/lib/crypto";
 import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
 import { TOKENS } from "@/lib/stellar";
@@ -337,7 +337,7 @@ function SendPage() {
       const input2 = inputNotes[1] || null;
       const spendAmount = amt;
       const changeAmount = inputSum - spendAmount;
-      const spendRoot = input1.root || "0000000000000000000000000000000000000000000000000000000000000000";
+      const spendRoot = await spendRootFor(input1);
 
       // Dummy note setup if only 1 input note is used
       let secret2Hex = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
