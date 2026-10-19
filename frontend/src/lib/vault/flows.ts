@@ -186,9 +186,10 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
   async function addPasskey(
     secrets: VaultSecrets,
     deviceName?: string,
-    opts: { es256Only?: boolean } = {}
+    opts: { es256Only?: boolean; emailProof?: string | null } = {}
   ): Promise<{ passkey: PublicPasskey; canUnlock: boolean }> {
-    const enrolled = await registerPasskey(null, deviceName, opts);
+    // The first passkey on an account needs the Google sign-in proof.
+    const enrolled = await registerPasskey(opts.emailProof ?? null, deviceName, { es256Only: opts.es256Only });
     try {
       if (!enrolled.prfOutput) return { passkey: enrolled.passkey, canUnlock: false };
       const wrappedDek = await addUnlockMethod(secrets, await kekFromPrf(enrolled.prfOutput), "passkey");

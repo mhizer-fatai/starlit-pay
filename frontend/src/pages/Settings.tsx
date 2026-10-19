@@ -54,6 +54,8 @@ const notificationOptions = [
 ] as const;
 
 type NotificationKey = (typeof notificationOptions)[number]["key"];
+// Starlit does not send email yet, so email options are not shown.
+const HIDDEN_NOTIFICATIONS = new Set<NotificationKey>(["email", "marketing"]);
 
 const securityItems = [
   { key: "passkey", label: "Passkey", icon: Key, description: "Use biometric or hardware key" },
@@ -342,7 +344,7 @@ function SettingsPage() {
               </button>
               <div className={`settings-section-body ${collapsedSections.has("notifications") ? "settings-section-body-collapsed" : ""}`}>
                 <div className="settings-list">
-                  {notificationOptions.map((option) => (
+                  {notificationOptions.filter((option) => !HIDDEN_NOTIFICATIONS.has(option.key)).map((option) => (
                     <div key={option.key} className="settings-list-row">
                       <div className="settings-list-copy">
                         <b>{option.label}</b>
@@ -476,7 +478,7 @@ function SettingsPage() {
                 <PasskeySettings />
                 <div className="settings-list">
                   {/* The passkey row is the live PasskeySettings panel above, not a toggle. */}
-                  {securityItems.filter((item) => item.key !== "passkey").map((item) => {
+                  {securityItems.filter((item) => item.key !== "passkey" && item.key !== "email").map((item) => {
                     const Icon = item.icon;
                     return (
                       <div key={item.key} className="settings-list-row">

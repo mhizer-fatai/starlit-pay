@@ -142,6 +142,8 @@ export function friendlyAuthError(err: unknown): string {
       const left = err.attemptsRemaining;
       return left === null ? "Incorrect PIN." : `Incorrect PIN. ${left} attempt${left === 1 ? "" : "s"} left.`;
     }
+    if (err.code === "email_proof_required")
+      return "Your Google sign-in has expired. Sign out, sign in with Google again, then add the passkey.";
     if (err.code === "recovery_invalid") return "That recovery code isn't valid for this account. It may already have been used.";
     if (err.code === "pin_locked" && err.retryAfterSec) {
       const minutes = Math.ceil(err.retryAfterSec / 60);
