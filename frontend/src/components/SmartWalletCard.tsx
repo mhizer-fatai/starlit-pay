@@ -73,7 +73,7 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
     }
   }
 
-  const create = (credentialId?: string) =>
+  const create = (credentialId: string) =>
     run(async () => {
       await createSmartWallet({ credentialId, onStatus: setStatus });
       setNeedsPasskey(false);
@@ -137,16 +137,23 @@ export function SmartWalletCard({ hidden = false }: { hidden?: boolean }) {
 
       {!info.address ? (
         <div className="smart-wallet-actions">
-          {hasWalletPasskey && !needsPasskey && (
-            <Button type="button" onClick={() => create()} disabled={busy}>
-              {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Create smart wallet
-            </Button>
-          )}
-          {(!hasWalletPasskey || needsPasskey) && (
+          {hasWalletPasskey && !needsPasskey ? (
+            <>
+              <p className="smart-wallet-note">Choose the passkey that will control your wallet:</p>
+              {info.passkeys.map((p) => (
+                <Button key={p.credentialId} type="button" onClick={() => create(p.credentialId)} disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Create with {p.deviceName ?? "passkey"}
+                </Button>
+              ))}
+              <Button type="button" variant="outline" onClick={createWithNewPasskey} disabled={busy}>
+                <Smartphone /> Use a new phone passkey
+              </Button>
+            </>
+          ) : (
             <>
               <p className="smart-wallet-note">
-                This device's passkey can't control an on-chain wallet. Create a wallet passkey with your phone (scan the QR
-                code) or a security key.
+                Your passkeys on this account can't control an on-chain wallet (Windows Hello uses RSA keys; Stellar needs
+                ES256). Create a wallet passkey with your phone (scan the QR code) or a security key.
               </p>
               <Button type="button" onClick={createWithNewPasskey} disabled={busy}>
                 {busy ? <Loader2 className="animate-spin" /> : <Smartphone />} Create wallet passkey

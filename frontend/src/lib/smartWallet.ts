@@ -59,16 +59,41 @@ export function loadSmartWallet(): Promise<SmartWalletInfo> {
   return getSmartWallet();
 }
 
+/**
+ * The wallet address a passkey's wallet gets (the shared deployer uses
+ * salt = sha256(credential id)), so the app knows which passkey controls the
+ * wallet and can ask for exactly that one instead of showing a passkey picker.
+ */
+export function walletAddressFor(info: SmartWalletInfo, credentialId: string): string {
+  const preimage = StellarSdk.xdr.HashIdPreimage.envelopeTypeContractId(
+    new StellarSdk.xdr.HashIdPreimageContractId({
+      networkId: StellarSdk.hash(Buffer.from(info.config.networkPassphrase)),
+      contractIdPreimage: StellarSdk.xdr.ContractIdPreimage.contractIdPreimageFromAddress(
+        new StellarSdk.xdr.ContractIdPreimageFromAddress({
+          address: StellarSdk.Address.fromString(info.config.deployer).toScAddress(),
+          salt: StellarSdk.hash(Buffer.from(fromB64u(credentialId))),
+        })
+      ),
+    })
+  );
+  return StellarSdk.StrKey.encodeContract(StellarSdk.hash(preimage.toXDR()));
+}
+
+/** The registered passkey that controls the user's wallet, if it is still registered. */
+export function walletPasskey(info: SmartWalletInfo) {
+  return info.address ? info.passkeys.find((p) => walletAddressFor(info, p.credentialId) === info.address) ?? null : null;
+}
+
 function failure(result: { success: boolean; error?: { message?: string } | string }, fallback: string): Error {
   const message = typeof result.error === "string" ? result.error : result.error?.message;
   return new Error(message || fallback);
 }
 
 /**
- * Creates the user's smart wallet. Uses an existing ES256 passkey: the one the
- * user picks in the prompt, or `credentialId` when one was just created.
+ * Creates the user's smart wallet, controlled by one of their registered ES256
+ * passkeys (picked in the app, so no browser passkey picker is shown).
  */
-export async function createSmartWallet(options: { credentialId?: string; onStatus?: (m: string) => void } = {}): Promise<string> {
+export async function createSmartWallet(options: { credentialId: string; onStatus?: (m: string) => void }): Promise<string> {
   const status = options.onStatus ?? (() => undefined);
   const info = await loadSmartWallet();
   if (info.address) return info.address;
@@ -76,11 +101,7 @@ export async function createSmartWallet(options: { credentialId?: string; onStat
   if (!vaultKeys) throw new Error("Unlock your wallet first.");
 
   const kit = await createKit(info);
-  let credentialId = options.credentialId;
-  if (!credentialId) {
-    status("Choose the passkey that will control your wallet…");
-    credentialId = (await kit.authenticatePasskey()).credentialId;
-  }
+  const { credentialId } = options;
   const passkey = info.passkeys.find((p) => p.credentialId === credentialId);
   if (!passkey) throw new NeedsWalletPasskeyError();
 
@@ -141,9 +162,9 @@ export async function sendFromSmartWallet(token: WalletToken, recipient: string,
   if (!(amount > 0)) throw new Error("Enter an amount greater than 0.");
 
   const kit = await createKit(info);
-  // Silent restore from this browser's stored session, else prompt the passkey.
-  const restored = await kit.connectWallet();
-  if (!restored || kit.contractId !== info.address) await kit.connectWallet({ contractId: info.address, prompt: true });
+  const passkey = walletPasskey(info);
+  if (!passkey) throw new Error("The passkey that controls this wallet is no longer registered. Use your recovery key.");
+  await kit.connectWallet({ contractId: info.address, credentialId: passkey.credentialId });
 
   const result = await kit.transfer(tokenContract(info, token), recipient, amount);
   if (!result.success) throw failure(result, "The payment could not be sent.");
