@@ -21,6 +21,7 @@ const CONFIG = {
   usdcSac: process.env.USDC_SAC_CONTRACT_ID || "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
 };
 const XLM_SAC = StellarSdk.Asset.native().contractId(NETWORK_PASSPHRASE);
+const POOL_CONTRACT = process.env.SHIELDED_POOL_CONTRACT_ID || "CAHSOWD7JVCRO4U73MGXRET7DRJDM3K2CFS5EGYARWDEGACHWSR6ZEZM";
 const TOKEN_TTL_MS = 10 * 60 * 1000;
 const MAX_FEE_STROOPS = 50_000_000; // 5 XLM: refuse anything unusually expensive
 const RELAYS_PER_HOUR = 30;
@@ -79,6 +80,7 @@ async function walletContext(userId) {
     accountWasmHash: CONFIG.accountWasmHash,
     webauthnVerifier: CONFIG.webauthnVerifier,
     tokens: [XLM_SAC, CONFIG.usdcSac],
+    poolContract: POOL_CONTRACT,
     networkPassphrase: NETWORK_PASSPHRASE,
   };
 }
@@ -104,7 +106,7 @@ app.get("/api/smart-wallet", requireAuth, async (req, res) => {
       passkeys: ctx.passkeys
         .filter((p) => p.rawPublicKey)
         .map((p) => ({ credentialId: p.credentialId, publicKey: p.rawPublicKey.toString("base64url"), deviceName: p.deviceName })),
-      config: { ...CONFIG, xlmSac: XLM_SAC, networkPassphrase: NETWORK_PASSPHRASE },
+      config: { ...CONFIG, xlmSac: XLM_SAC, poolContract: POOL_CONTRACT, networkPassphrase: NETWORK_PASSPHRASE },
     });
   } catch (err) {
     console.error("Smart wallet lookup failed:", err.message);

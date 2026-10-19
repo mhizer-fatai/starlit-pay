@@ -14,6 +14,7 @@ const info = (address: string | null, ids: string[]): SmartWalletInfo => ({
     deployer: "GAAH4OT36RRCCAGKARGPN2HLHT2NOBVFHO4GUHA6CF7UKQ4MMV24WQ4N",
     usdcSac: "",
     xlmSac: "",
+    poolContract: "",
     networkPassphrase: StellarSdk.Networks.TESTNET,
   },
 });

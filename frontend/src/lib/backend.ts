@@ -295,6 +295,7 @@ export interface SmartWalletInfo {
     deployer: string;
     usdcSac: string;
     xlmSac: string;
+    poolContract: string;
     networkPassphrase: string;
   };
 }

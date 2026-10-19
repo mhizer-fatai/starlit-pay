@@ -171,3 +171,54 @@ export async function sendFromSmartWallet(token: WalletToken, recipient: string,
   if (!result.success) throw failure(result, "The payment could not be sent.");
   return result.hash ?? "";
 }
+
+/**
+ * Deposits from the smart wallet into the shielded pool (public -> private).
+ * The wallet authorises pool.deposit (and the token transfer inside it) with
+ * its passkey; the commitment/note were created for the user beforehand.
+ */
+export async function depositFromSmartWallet(
+  token: WalletToken,
+  amount: number,
+  commitmentHex: string,
+  encryptedNoteHex: string
+): Promise<string> {
+  const info = await loadSmartWallet();
+  if (!info.address) throw new Error("Create your public wallet first.");
+  if (!(amount > 0)) throw new Error("Enter an amount greater than 0.");
+  const passkey = walletPasskey(info);
+  if (!passkey) throw new Error("The passkey that controls this wallet is no longer registered. Use your recovery key.");
+
+  const kit = await createKit(info);
+  await kit.connectWallet({ contractId: info.address, credentialId: passkey.credentialId });
+
+  const func = StellarSdk.xdr.HostFunction.hostFunctionTypeInvokeContract(
+    new StellarSdk.xdr.InvokeContractArgs({
+      contractAddress: StellarSdk.Address.fromString(info.config.poolContract).toScAddress(),
+      functionName: "deposit",
+      args: [
+        StellarSdk.Address.fromString(info.address).toScVal(),
+        StellarSdk.Address.fromString(tokenContract(info, token)).toScVal(),
+        StellarSdk.nativeToScVal(BigInt(Math.round(amount * 1e7)), { type: "i128" }),
+        StellarSdk.nativeToScVal(Buffer.from(commitmentHex, "hex"), { type: "bytes" }),
+        StellarSdk.nativeToScVal(Buffer.from(encryptedNoteHex, "hex"), { type: "bytes" }),
+      ],
+    })
+  );
+  const tx = await StellarSdk.contract.AssembledTransaction.buildWithOp(
+    StellarSdk.Operation.invokeHostFunction({ func, auth: [] }),
+    {
+      contractId: info.config.poolContract,
+      networkPassphrase: info.config.networkPassphrase,
+      rpcUrl: RPC_URL,
+      method: "deposit",
+      parseResultXdr: (value: StellarSdk.xdr.ScVal) => value,
+    }
+  );
+  if (tx.simulation && StellarSdk.rpc.Api.isSimulationError(tx.simulation)) {
+    throw new Error("The deposit could not be prepared. Check your public wallet balance.");
+  }
+  const result = await kit.signAndSubmit(tx, { credentialId: passkey.credentialId });
+  if (!result.success) throw failure(result, "The transfer could not be completed.");
+  return result.hash ?? "";
+}

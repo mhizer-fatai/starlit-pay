@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
-import { Check, Copy, ExternalLink, Fingerprint, Loader2, Plus, RefreshCw, Send, Smartphone } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { ArrowLeftRight, Check, Copy, ExternalLink, Fingerprint, Loader2, RefreshCw, Send, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,8 +25,20 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-6)}`;
  * Public smart wallet (C-address) controlled by the user's passkey. For spending
  * public XLM/USDC; it is funded by withdrawing from the private balance.
  */
-export function SmartWalletCard({ hidden = false, prices }: { hidden?: boolean; prices: Prices }) {
-  const navigate = useNavigate();
+export function SmartWalletCard({
+  hidden = false,
+  prices,
+  refreshKey = 0,
+  onTransfer,
+  onBalances,
+}: {
+  hidden?: boolean;
+  prices: Prices;
+  /** Change to reload the wallet (e.g. after a transfer). */
+  refreshKey?: number;
+  onTransfer: () => void;
+  onBalances?: (balances: Record<WalletToken, number> | null) => void;
+}) {
   const [info, setInfo] = useState<SmartWalletInfo | null>(null);
   const [balances, setBalances] = useState<Record<WalletToken, number> | null>(null);
   const [status, setStatus] = useState("");
@@ -41,6 +52,9 @@ export function SmartWalletCard({ hidden = false, prices }: { hidden?: boolean; 
   const [amount, setAmount] = useState("");
   const [lastHash, setLastHash] = useState("");
 
+  const onBalancesRef = useRef(onBalances);
+  onBalancesRef.current = onBalances;
+
   const refresh = useCallback(async () => {
     try {
       const next = await loadSmartWallet();
@@ -48,6 +62,7 @@ export function SmartWalletCard({ hidden = false, prices }: { hidden?: boolean; 
       if (next.address) {
         const [XLM, USDC] = await Promise.all([smartWalletBalance(next, "XLM"), smartWalletBalance(next, "USDC")]);
         setBalances({ XLM, USDC });
+        onBalancesRef.current?.({ XLM, USDC });
       }
     } catch (err) {
       setError(friendlyAuthError(err));
@@ -56,7 +71,7 @@ export function SmartWalletCard({ hidden = false, prices }: { hidden?: boolean; 
 
   useEffect(() => {
     if (isVaultMode()) void refresh();
-  }, [refresh]);
+  }, [refresh, refreshKey]);
 
   if (!isVaultMode()) return null;
 
@@ -197,12 +212,8 @@ export function SmartWalletCard({ hidden = false, prices }: { hidden?: boolean; 
           </div>
           <p className="wallet-caption">Visible on Stellar. Fees covered by Starlit.</p>
           <div className="wallet-actions">
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => navigate(`/send?mode=external&to=${encodeURIComponent(info.address!)}`)}
-            >
-              <Plus /> Add funds
+            <Button type="button" variant="secondary" onClick={onTransfer} disabled={busy}>
+              <ArrowLeftRight /> Transfer
             </Button>
             <Button type="button" onClick={() => setSendOpen((v) => !v)} disabled={busy}>
               <Send /> Send with passkey
