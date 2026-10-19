@@ -10,6 +10,7 @@ import {
   AtSign,
   Check,
   ChevronDown,
+  Fingerprint,
   Hash,
   Loader2,
   QrCode,
@@ -25,7 +26,9 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { Input } from "@/components/ui/input";
-import { getSpendingKey, getUser, getViewingSecret, signAuthRequest, type SessionUser } from "@/lib/auth";
+import { getSpendingKey, getUser, getViewingSecret, isVaultMode, signAuthRequest, type SessionUser } from "@/lib/auth";
+import { isValidPin } from "@/lib/keys";
+import { confirmPaymentWithPasskey, confirmPaymentWithPin, friendlyAuthError } from "@/lib/passkeyAccount";
 import { selfNoteSecret } from "@/lib/ownedNotes";
 import { withNoteLock } from "@/lib/reshield";
 import {
@@ -186,6 +189,11 @@ function SendPage() {
   const [scanning, setScanning] = useState(false);
   const [scanTarget, setScanTarget] = useState<"username" | "tagId">("username");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Passkey accounts confirm each private payment with one biometric tap
+  // (or the PIN). slide -> passkey -> (pin fallback)
+  const [confirmStage, setConfirmStage] = useState<"slide" | "passkey" | "pin" | "pin-checking">("slide");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [confirmError, setConfirmError] = useState("");
   const [errors, setErrors] = useState<{ username?: string; amount?: string }>({});
   const scanInputRef = useRef<HTMLInputElement>(null);
 
@@ -275,15 +283,56 @@ function SendPage() {
     setConfirmOpen(true);
   }
 
-  function confirmAndSend() {
+  function closeConfirm() {
     setConfirmOpen(false);
+    setConfirmStage("slide");
+    setConfirmPin("");
+    setConfirmError("");
+  }
+
+  function sendConfirmed() {
+    closeConfirm();
     void submitPayment();
+  }
+
+  async function confirmAndSend() {
+    if (!isVaultMode()) {
+      sendConfirmed();
+      return;
+    }
+    setConfirmStage("passkey");
+    setConfirmError("");
+    try {
+      await confirmPaymentWithPasskey();
+      sendConfirmed();
+    } catch (err) {
+      setConfirmStage("pin");
+      setConfirmError(`${friendlyAuthError(err)} You can confirm with your PIN instead.`);
+    }
+  }
+
+  async function confirmWithPin(event: FormEvent) {
+    event.preventDefault();
+    if (!isValidPin(confirmPin)) {
+      setConfirmError("PIN must be exactly 6 digits.");
+      return;
+    }
+    setConfirmStage("pin-checking");
+    setConfirmError("");
+    try {
+      await confirmPaymentWithPin(confirmPin);
+      sendConfirmed();
+    } catch (err) {
+      setConfirmPin("");
+      setConfirmStage("pin");
+      setConfirmError(friendlyAuthError(err));
+    }
   }
 
   useEffect(() => {
     if (!confirmOpen) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setConfirmOpen(false);
+      if (event.key === "Escape") closeConfirm();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -847,7 +896,7 @@ function SendPage() {
                 className="send-modal"
                 role="presentation"
                 onMouseDown={(event) => {
-                  if (event.target === event.currentTarget) setConfirmOpen(false);
+                  if (event.target === event.currentTarget && confirmStage !== "passkey") closeConfirm();
                 }}
               >
                 <div
@@ -863,7 +912,7 @@ function SendPage() {
                     <button
                       type="button"
                       className="modal-close"
-                      onClick={() => setConfirmOpen(false)}
+                      onClick={closeConfirm}
                       aria-label="Close"
                     >
                       <X />
@@ -892,10 +941,50 @@ function SendPage() {
                         <span className="modal-value">{tagId}</span>
                       </div>
                     )}
-                    <SlideToConfirm
-                      label="Slide to Confirm Transaction"
-                      onComplete={confirmAndSend}
-                    />
+                    {confirmStage === "slide" && (
+                      <SlideToConfirm
+                        label={isVaultMode() ? "Slide, then confirm with your passkey" : "Slide to Confirm Transaction"}
+                        onComplete={() => void confirmAndSend()}
+                      />
+                    )}
+                    {confirmStage === "passkey" && (
+                      <p className="flex items-center justify-center gap-2 py-3 text-[14px] text-muted-foreground" role="status">
+                        <Fingerprint className="size-5 text-primary" /> Confirm with your fingerprint, face or screen lock…
+                      </p>
+                    )}
+                    {(confirmStage === "pin" || confirmStage === "pin-checking") && (
+                      <form onSubmit={confirmWithPin} className="space-y-3 pt-2">
+                        <Input
+                          type="password"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={6}
+                          placeholder="Enter your 6-digit PIN"
+                          value={confirmPin}
+                          onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                          autoFocus
+                          disabled={confirmStage === "pin-checking"}
+                          style={{ textAlign: "center", letterSpacing: "6px" }}
+                        />
+                        <Button type="submit" className="w-full" disabled={confirmStage === "pin-checking"}>
+                          {confirmStage === "pin-checking" ? "Checking…" : "Confirm with PIN"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full"
+                          disabled={confirmStage === "pin-checking"}
+                          onClick={() => void confirmAndSend()}
+                        >
+                          <Fingerprint /> Try passkey again
+                        </Button>
+                      </form>
+                    )}
+                    {confirmError && (
+                      <p className="pt-2 text-sm text-red-500" role="alert">
+                        {confirmError}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

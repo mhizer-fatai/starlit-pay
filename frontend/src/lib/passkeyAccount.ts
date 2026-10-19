@@ -5,7 +5,7 @@ import { BackendError, register } from "@/lib/backend";
 import { identityCommitment } from "@/lib/keys";
 import { unlockFromVault, type SessionUser } from "@/lib/auth";
 import { needsMigrationFinish } from "@/lib/migration";
-import { createVault, VaultError, type NewVault, type OpenedVault } from "@/lib/vault";
+import { closeVault, createVault, VaultError, type NewVault, type OpenedVault } from "@/lib/vault";
 import { AuthApiError } from "@/lib/vault/api";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { NoVaultError, PasskeyNeedsPinError } from "@/lib/vault/flows";
@@ -89,6 +89,22 @@ export async function unlockWithVaultPin(pin: string, { useEmailProof }: { useEm
 export async function unlockWithRecovery(code: string): Promise<{ outcome: UnlockOutcome; newRecoveryCode: string; opened: OpenedVault }> {
   const { vault, user, newRecoveryCode } = await passkeyFlows.unlockWithRecoveryCode(code, await requireEmailProof());
   return { outcome: settle(vault, user as SessionUser), newRecoveryCode, opened: vault };
+}
+
+/**
+ * One confirmation per private payment: a passkey ceremony (Face ID, Touch ID,
+ * Windows Hello) verified by the backend. Proves the account owner is present,
+ * so an unlocked device or a rogue script cannot send on its own.
+ */
+export async function confirmPaymentWithPasskey(): Promise<void> {
+  await passkeyFlows.stepUp();
+}
+
+/** PIN fallback for the payment confirmation (same per-account attempt limits as unlock). */
+export async function confirmPaymentWithPin(pin: string): Promise<void> {
+  const { vault } = await passkeyFlows.unlockWithPin(pin, null);
+  // Only the check matters here; the wallet is already open.
+  closeVault(vault.secrets);
 }
 
 /**
