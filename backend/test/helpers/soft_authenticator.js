@@ -77,6 +77,10 @@ export function createSoftAuthenticator({ rpId = "localhost", origin = "http://l
           clientDataJSON: b64u(clientData),
           attestationObject: b64u(cbor({ fmt: "none", attStmt: new Map(), authData: data })),
           transports: ["internal"],
+          // Convenience fields browsers add to the JSON (getPublicKey() etc.)
+          publicKey: b64u(publicKey.export({ format: "der", type: "spki" })),
+          publicKeyAlgorithm: -7,
+          authenticatorData: b64u(data),
         },
         clientExtensionResults: {},
         authenticatorAttachment: "platform",
