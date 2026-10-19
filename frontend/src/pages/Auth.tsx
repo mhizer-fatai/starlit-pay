@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Fingerprint, KeyRound, LifeBuoy, Lock, Mail, ShieldCheck, User } from "lucide-react";
+import { Fingerprint, KeyRound, LifeBuoy, Lock, ShieldCheck, User } from "lucide-react";
 
 import { RecoveryCodePanel } from "@/components/RecoveryCodePanel";
 import { Button } from "@/components/ui/button";
@@ -624,21 +624,6 @@ function AuthPage() {
                   )}
 
                   <StatusLine status={phase === "checking" ? "" : status} error={error} />
-
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[15px] font-semibold text-foreground">
-                        Login with Email
-                      </span>
-                      <span className="rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                        Coming Soon
-                      </span>
-                    </div>
-                    <div className="auth-input" aria-disabled="true">
-                      <Mail />
-                      <Input type="email" placeholder="Enter your email address" disabled />
-                    </div>
-                  </div>
                 </div>
               </>
             )}

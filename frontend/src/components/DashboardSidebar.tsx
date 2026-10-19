@@ -2,7 +2,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import {
   ArrowDownLeft,
-  ArrowLeftRight,
   ChevronRight,
   Download,
   Droplets,
@@ -28,7 +27,6 @@ const navItems = [
   { label: "Home", icon: Home, to: "/dashboard" },
   { label: "Send", icon: Send, to: "/send" },
   { label: "Receive", icon: ArrowDownLeft, to: "/receive" },
-  { label: "Swap", icon: ArrowLeftRight, soon: true },
   { label: "Transactions", icon: Receipt, to: "/transactions" },
   { label: "Payments Links", icon: Link2, to: "/payment-links" },
   { label: "Faucet", icon: Droplets, to: "/faucet" },

@@ -3,9 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   ArrowDownLeft,
-  ArrowLeftRight,
   ArrowUp,
-  Download,
   Droplets,
   Eye,
   EyeOff,
@@ -296,11 +294,6 @@ function DashboardPage() {
               <ArrowDownLeft />
               Receive
             </Button>
-            <Button variant="secondary" className={actionButtonClass} disabled>
-              <ArrowLeftRight />
-              Swap
-              <span className="soon-pill">Soon</span>
-            </Button>
             <Button
               variant="secondary"
               className={actionButtonClass}
@@ -316,16 +309,6 @@ function DashboardPage() {
             >
               <Droplets />
               Faucet
-            </Button>
-            <Button
-              variant="secondary"
-              className={actionButtonClass}
-              disabled
-              aria-label="Download Statement — coming soon"
-            >
-              <Download />
-              Download Statement
-              <span className="soon-pill">Soon</span>
             </Button>
           </div>
           </motion.div>
