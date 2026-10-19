@@ -283,6 +283,26 @@ export const fetchStats = () =>
     network: string;
     status: string;
   }>("/api/stats");
+// --- Public smart wallet (OpenZeppelin smart account, passkey-controlled) ---
+export interface SmartWalletInfo {
+  address: string | null;
+  /** The user's passkeys that can control an on-chain wallet (ES256), raw P-256 keys. */
+  passkeys: { credentialId: string; publicKey: string; deviceName: string | null }[];
+  config: {
+    accountWasmHash: string;
+    webauthnVerifier: string;
+    ed25519Verifier: string;
+    deployer: string;
+    usdcSac: string;
+    xlmSac: string;
+    networkPassphrase: string;
+  };
+}
+export const getSmartWallet = () => req<SmartWalletInfo>("/api/smart-wallet", undefined, true);
+/** Short-lived token for the sponsored relayer (smart-account-kit cannot send cookies). */
+export const getSmartWalletRelayToken = () =>
+  req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" }, true);
+
 /** A Merkle root the shielded pool currently accepts (checked on-chain by the backend). */
 export const getPoolRoot = () => req<{ root: string }>("/api/pool/root");
 
