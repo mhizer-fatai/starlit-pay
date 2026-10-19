@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   ArrowDownLeft,
+  ArrowLeftRight,
   ArrowUp,
   Droplets,
   Eye,
@@ -22,6 +23,7 @@ import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
 import { SmartWalletCard } from "@/components/SmartWalletCard";
+import { TransferModal, type TransferDirection } from "@/components/TransferModal";
 import { AssetRow, WalletCardHeader, WalletTotal } from "@/components/WalletCard";
 import { usePrices } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
@@ -53,6 +55,10 @@ function DashboardPage() {
   const [balancesLoading, setBalancesLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [transferDirection, setTransferDirection] = useState<TransferDirection | null>(null);
+  const [publicBalances, setPublicBalances] = useState<Record<"XLM" | "USDC", number> | null>(null);
+  const [walletRefreshKey, setWalletRefreshKey] = useState(0);
+  const openTransfer = (direction: TransferDirection) => setTransferDirection(direction);
   // Live prices via the backend (Stellar DEX first). XLM is null when no real
   // price is available; the total is then unknown rather than guessed.
   const prices = usePrices();
@@ -258,16 +264,22 @@ function DashboardPage() {
               </div>
               <p className="wallet-caption">Only you can see this balance. Payments from it stay private.</p>
               <div className="wallet-actions">
-                <Button type="button" onClick={() => navigate("/send")}>
-                  <Send /> Send privately
-                </Button>
-                <Button type="button" variant="secondary" onClick={() => navigate("/receive")}>
-                  <ArrowDownLeft /> Receive
+                <Button type="button" onClick={() => openTransfer("to-public")} disabled={!publicBalances}>
+                  <ArrowLeftRight /> Transfer
                 </Button>
               </div>
+              {!publicBalances && !balancesLoading && (
+                <small className="wallet-caption">Create your public wallet to transfer between balances.</small>
+              )}
             </section>
 
-            <SmartWalletCard hidden={balanceHidden} prices={prices} />
+            <SmartWalletCard
+              hidden={balanceHidden}
+              prices={prices}
+              refreshKey={walletRefreshKey}
+              onTransfer={() => openTransfer("to-private")}
+              onBalances={setPublicBalances}
+            />
           </div>
 
           <section className="dash-card activity-card">
@@ -340,6 +352,18 @@ function DashboardPage() {
             </ul>
           </section>
         </motion.main>
+        {transferDirection && publicBalances && (
+          <TransferModal
+            initialDirection={transferDirection}
+            privateBalances={{ XLM: xlmBalance, USDC: usdcBalance }}
+            publicBalances={publicBalances}
+            onClose={() => setTransferDirection(null)}
+            onDone={() => {
+              void handleSync();
+              setWalletRefreshKey((k) => k + 1);
+            }}
+          />
+        )}
         {selected && (
           <ReceiptModal item={selected} userName={displayName} onClose={() => setSelected(null)} />
         )}

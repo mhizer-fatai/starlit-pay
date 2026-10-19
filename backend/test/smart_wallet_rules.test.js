@@ -12,6 +12,7 @@ const WASM = "1b5f4534a76322da2ad7c745f6900857a6802b0ca79850c35a03561df997785a";
 const VERIFIER = "CC7EKIHQP3TN4CARQDND6CEOY2UXLWWC2X5GHTD5NLAT7BG5GPZIOM3F";
 const XLM = S.Asset.native().contractId(NP);
 const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const POOL = "CAHSOWD7JVCRO4U73MGXRET7DRJDM3K2CFS5EGYARWDEGACHWSR6ZEZM";
 
 const randomContract = () => S.StrKey.encodeContract(crypto.randomBytes(32));
 const p256 = () => Buffer.concat([Buffer.from([4]), crypto.randomBytes(64)]);
@@ -78,6 +79,7 @@ function context(overrides = {}) {
     accountWasmHash: WASM,
     webauthnVerifier: VERIFIER,
     tokens: [XLM, USDC],
+    poolContract: POOL,
     networkPassphrase: NP,
     ...overrides,
   };
@@ -145,6 +147,24 @@ describe("spending from the wallet", () => {
     assert.throws(() => checkRelayRequest(invokePayload({ contract: XLM, fn: "transfer", args: [new Address(other).toScVal(), to, amount], authBy: [wallet] }), ctx), /own smart wallet/);
     assert.throws(() => checkRelayRequest(invokePayload({ contract: randomContract(), fn: "transfer", args: [new Address(wallet).toScVal(), to, amount], authBy: [wallet] }), ctx), /not sponsored/);
     assert.throws(() => checkRelayRequest(invokePayload({ contract: XLM, fn: "approve", args: [new Address(wallet).toScVal(), to, amount], authBy: [wallet] }), ctx), /not sponsored/);
+  });
+
+  test("sponsors shielded pool deposits from the user's own wallet only", () => {
+    const deposit = (from, token = XLM) =>
+      invokePayload({
+        contract: POOL,
+        fn: "deposit",
+        args: [new Address(from).toScVal(), new Address(token).toScVal(), amount, xdr.ScVal.scvBytes(Buffer.alloc(32)), xdr.ScVal.scvBytes(Buffer.alloc(1))],
+        authBy: [from],
+      });
+    assert.equal(checkRelayRequest(deposit(wallet), ctx).kind, "pool-deposit");
+    assert.equal(checkRelayRequest(deposit(wallet, USDC), ctx).kind, "pool-deposit");
+    const other = randomContract();
+    assert.throws(() => checkRelayRequest(deposit(other), ctx), /your smart wallet/);
+    assert.throws(() => checkRelayRequest({ ...deposit(other), auth: deposit(wallet).auth }, ctx), /own smart wallet/);
+    assert.throws(() => checkRelayRequest(deposit(wallet, randomContract()), ctx), /not sponsored/);
+    const withdraw = invokePayload({ contract: POOL, fn: "withdraw", args: [], authBy: [wallet] });
+    assert.throws(() => checkRelayRequest(withdraw, ctx), /not sponsored/);
   });
 
   test("sponsors admin calls on the user's own wallet (e.g. adding the backup signer)", () => {
