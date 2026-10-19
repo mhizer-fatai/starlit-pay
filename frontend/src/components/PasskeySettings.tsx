@@ -8,7 +8,7 @@ import { getVaultSecrets, isVaultMode } from "@/lib/auth";
 import { isValidPin } from "@/lib/keys";
 import { friendlyAuthError, guessDeviceName, passkeysSupported } from "@/lib/passkeyAccount";
 import type { PublicPasskey } from "@/lib/vault/api";
-import { authApi, passkeyFlows } from "@/lib/vault/client";
+import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 
 const PIN_INPUT_STYLE = { textAlign: "center", letterSpacing: "6px" } as const;
 
@@ -75,8 +75,9 @@ export function PasskeySettings() {
   const addPasskey = () =>
     run(async () => {
       const secrets = openSecrets();
-      await ensureFresh();
-      const { canUnlock } = await passkeyFlows.addPasskey(secrets, guessDeviceName());
+      // With no passkey yet there is nothing to confirm with; the Google proof is used instead.
+      if (passkeys.length > 0) await ensureFresh();
+      const { canUnlock } = await passkeyFlows.addPasskey(secrets, guessDeviceName(), { emailProof: await getEmailProof() });
       setNotice(
         canUnlock
           ? "Passkey added. It can unlock your wallet on this device."

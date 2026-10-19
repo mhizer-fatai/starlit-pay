@@ -20,7 +20,7 @@ import { getUnlockedKeys, getVaultSecrets } from "@/lib/auth";
 import { BACKEND_URL, getSmartWallet, getSmartWalletRelayToken, type SmartWalletInfo } from "@/lib/backend";
 import { RPC_URL, rpc } from "@/lib/stellar";
 import { fromB64u } from "@/lib/vault/crypto";
-import { authApi, passkeyFlows } from "@/lib/vault/client";
+import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 
 export type { SmartWalletInfo };
 export type WalletToken = "XLM" | "USDC";
@@ -131,9 +131,10 @@ export async function addWalletPasskey(deviceName?: string): Promise<string> {
   const secrets = getVaultSecrets();
   if (!secrets) throw new Error("Your wallet is locked. Sign in again first.");
   const before = new Set((await loadSmartWallet()).passkeys.map((p) => p.credentialId));
-  const session = await authApi.getSession();
-  if (!session.fresh) await passkeyFlows.stepUp();
-  await passkeyFlows.addPasskey(secrets, deviceName ?? "Wallet passkey", { es256Only: true });
+  const [session, { passkeys }] = await Promise.all([authApi.getSession(), authApi.listPasskeys()]);
+  // With no passkey yet there is nothing to confirm with; the Google proof is used instead.
+  if (!session.fresh && passkeys.length > 0) await passkeyFlows.stepUp();
+  await passkeyFlows.addPasskey(secrets, deviceName ?? "Wallet passkey", { es256Only: true, emailProof: await getEmailProof() });
   const added = (await loadSmartWallet()).passkeys.find((p) => !before.has(p.credentialId));
   if (!added) throw new NeedsWalletPasskeyError();
   return added.credentialId;
