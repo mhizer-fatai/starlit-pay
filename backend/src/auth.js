@@ -101,6 +101,15 @@ app.post("/api/users/register", async (req, res) => {
     return res.status(400).json({ error: "Missing required registration parameters" });
   }
 
+  // The caller must prove they own the email (Google sign-in verified by
+  // Supabase), so nobody can register an account under someone else's address.
+  if (authLayer.provenEmail) {
+    const proven = await authLayer.provenEmail(req);
+    if (!proven || proven !== String(email).toLowerCase().trim()) {
+      return res.status(401).json({ error: "Sign in with Google to create your account.", code: "email_proof_required" });
+    }
+  }
+
   try {
     // Generate unique 6-digit deposit memo
     let depositMemo = 0;

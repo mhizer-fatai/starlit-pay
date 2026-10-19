@@ -76,9 +76,27 @@ export function createMemoryStore({ now = () => Date.now(), users = [] } = {}) {
     async getVault(userId) {
       return copy(db.vaults.get(userId));
     },
-    async createVault(userId, { encryptedSeed, version }) {
+    async createVault(userId, { encryptedSeed, version, profileBound = false }) {
       if (db.vaults.has(userId)) return false;
-      db.vaults.set(userId, { user_id: userId, encrypted_seed: encryptedSeed, version, created_at: iso(), updated_at: iso() });
+      db.vaults.set(userId, {
+        user_id: userId,
+        encrypted_seed: encryptedSeed,
+        version,
+        profile_bound_at: profileBound ? iso() : null,
+        created_at: iso(),
+        updated_at: iso(),
+      });
+      return true;
+    },
+    async bindProfileKeys(userId, { publicEncryptionKey, stellarAddress, identityCommitment }) {
+      const vault = db.vaults.get(userId);
+      if (!vault || vault.profile_bound_at) return false;
+      vault.profile_bound_at = iso();
+      Object.assign(db.users.get(userId), {
+        public_encryption_key: publicEncryptionKey,
+        stellar_address: stellarAddress,
+        identity_commitment: identityCommitment,
+      });
       return true;
     },
 
@@ -149,6 +167,12 @@ export function createMemoryStore({ now = () => Date.now(), users = [] } = {}) {
     },
     async setRecovery(userId, codeMac) {
       db.recovery.set(userId, { user_id: userId, code_mac: codeMac, created_at: iso(), used_at: null });
+    },
+    async consumeRecoveryCode(userId) {
+      const row = db.recovery.get(userId);
+      if (!row || row.used_at) return false;
+      row.used_at = iso();
+      return true;
     },
 
     async insertSession(s) {

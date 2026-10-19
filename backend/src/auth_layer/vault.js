@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { StrKey } from "@stellar/stellar-sdk";
 import { isB64uOfLength, isB64uWithin, isUuid, mac, open, safeEqual, seal, toB64u } from "./crypto.js";
 import { provenEmail, safeUser } from "./identity.js";
 
@@ -11,7 +12,9 @@ const WRAPPED_DEK = { min: 40, max: 512 };
 const ENCRYPTED_SEED = { min: 40, max: 2048 };
 const VERIFIER_BYTES = 32;
 
-export function registerVaultRoutes(router, { store, sessions, identity, settings }) {
+const HEX_32 = /^[0-9a-f]{64}$/;
+
+export function registerVaultRoutes(router, { store, sessions, identity, settings, alerts }) {
   const { keys } = settings;
   const nowMs = () => settings.now();
   const { requireSession, requireFreshAuth } = sessions;
@@ -38,7 +41,9 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
   });
 
   router.post("/api/vault", requireSession, requireFreshAuth, async (req, res) => {
-    const { encryptedSeed, version = 1, passkeyWrap } = req.body ?? {};
+    // profileBound: a new sign-up whose profile was registered with this vault's
+    // keys. Migrating accounts leave it false and bind once their funds moved.
+    const { encryptedSeed, version = 1, passkeyWrap, profileBound = false } = req.body ?? {};
     if (!isB64uWithin(encryptedSeed, ENCRYPTED_SEED.min, ENCRYPTED_SEED.max) || version !== 1) {
       return res.status(400).json({ error: "Invalid vault payload." });
     }
@@ -49,7 +54,7 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
       if (!ok) return res.status(400).json({ error: "Invalid passkey wrap." });
     }
 
-    const created = await store.createVault(userId, { encryptedSeed, version });
+    const created = await store.createVault(userId, { encryptedSeed, version, profileBound: profileBound === true });
     if (!created) return res.status(409).json({ error: "A vault already exists for this account.", code: "vault_exists" });
 
     if (passkeyWrap) {
@@ -65,6 +70,30 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
     if (!ok) return res.status(400).json({ error: "Invalid passkey wrap." });
     await store.upsertWrap(userId, "passkey", req.params.passkeyId, req.body.wrappedDek);
     res.json({ ok: true });
+  });
+
+  // Migration from email+PIN keys: after the client moved the funds to the
+  // vault's keys, point the profile at them. Allowed exactly once per vault.
+  router.post("/api/vault/migrate/profile-keys", requireSession, requireFreshAuth, async (req, res) => {
+    const { publicEncryptionKey, stellarAddress, identityCommitment } = req.body ?? {};
+    if (
+      !HEX_32.test(publicEncryptionKey ?? "") ||
+      !HEX_32.test(identityCommitment ?? "") ||
+      typeof stellarAddress !== "string" ||
+      !StrKey.isValidEd25519PublicKey(stellarAddress)
+    ) {
+      return res.status(400).json({ error: "Invalid key payload." });
+    }
+    const userId = req.session.id;
+    if (!(await store.getVault(userId))) return res.status(404).json({ error: "No vault yet.", code: "no_vault" });
+
+    const bound = await store.bindProfileKeys(userId, { publicEncryptionKey, stellarAddress, identityCommitment });
+    if (!bound) {
+      return res.status(409).json({ error: "This account already uses its vault keys.", code: "already_bound" });
+    }
+    const user = await store.findUserById(userId);
+    void alerts.send(user, "keys_migrated");
+    res.json({ user: safeUser(user) });
   });
 
   async function validPasskeyWrap(userId, passkeyId, wrappedDek) {
@@ -169,7 +198,11 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
 
     if (!safeEqual(mac(keys.pinVerifier, user.id, pinVerifier), guard.verifier_mac)) {
       const lockedUntil = await store.recordPinFailure(user.id, maxAttempts, baseLockSec, maxLockSec);
-      if (lockedUntil) return lockedResponse(res, lockedUntil);
+      if (lockedUntil) {
+        const lockSeconds = Math.round((new Date(lockedUntil).getTime() - nowMs()) / 1000);
+        void alerts.send(user, "pin_locked", { lockSeconds });
+        return lockedResponse(res, lockedUntil);
+      }
       return res.status(401).json({
         error: "Incorrect PIN.",
         code: "pin_incorrect",
@@ -201,7 +234,35 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
     return res.status(429).json({ error: "Too many incorrect PINs. Try again later.", code: "pin_locked", retryAfterSec });
   }
 
-  // --- Recovery code (setup only; the recovery unlock flow is built separately) ---
+  // --- Recovery code ---------------------------------------------------------
+  // Unlock needs Google email proof plus the code. Each code works once; the
+  // client sets a new one straight away. The 128-bit code makes guessing
+  // hopeless, and the IP rate limit bounds attempts anyway.
+  router.post("/api/vault/recovery/unlock", async (req, res) => {
+    const email = await provenEmail(identity, req);
+    if (!email) return res.status(401).json({ error: "Confirm your email first.", code: "email_proof_required" });
+    const { codeVerifier } = req.body ?? {};
+    if (!isB64uOfLength(codeVerifier, VERIFIER_BYTES)) return res.status(400).json({ error: "Invalid recovery payload." });
+
+    const failed = () => res.status(401).json({ error: "That recovery code isn't valid for this account.", code: "recovery_invalid" });
+    const user = await store.findUserByEmail(email);
+    const recovery = user ? await store.getRecovery(user.id) : null;
+    if (!recovery || recovery.used_at) return failed();
+    if (!safeEqual(mac(keys.recoveryCode, user.id, codeVerifier), recovery.code_mac)) return failed();
+    if (!(await store.consumeRecoveryCode(user.id))) return failed();
+
+    await sessions.issue(res, user, { amr: ["recovery"], userAgent: req.headers["user-agent"] });
+    void alerts.send(user, "recovery_used");
+    const vault = await store.getVault(user.id);
+    const wrap = await store.getWrap(user.id, "recovery", null);
+    res.json({
+      user: safeUser(user),
+      vault: vault ? { encryptedSeed: vault.encrypted_seed, version: vault.version } : null,
+      wrappedDek: wrap?.wrapped_dek ?? null,
+    });
+  });
+
+  // Setting a code replaces the previous one.
   router.post("/api/vault/recovery", requireSession, requireFreshAuth, async (req, res) => {
     const userId = req.session.id;
     const { codeVerifier, wrappedDek } = req.body ?? {};

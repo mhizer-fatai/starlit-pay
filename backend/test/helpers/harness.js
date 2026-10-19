@@ -29,7 +29,9 @@ export async function startHarness({ env = TEST_ENV } = {}) {
   const emailTokens = new Map([["google-token-alice", alice.email]]);
   const identity = { verifyEmail: async (token) => emailTokens.get(token) ?? null };
 
-  const layer = createAuthLayer({ store, identity, env, settings: { now } });
+  const sentAlerts = [];
+  const alerts = { send: async (user, event, details) => void sentAlerts.push({ to: user.email, event, details }) };
+  const layer = createAuthLayer({ store, identity, alerts, env, settings: { now } });
   const app = express();
   app.use(layer.router);
 
@@ -44,6 +46,7 @@ export async function startHarness({ env = TEST_ENV } = {}) {
     layer,
     alice,
     emailTokens,
+    sentAlerts,
     clock,
     advance: (ms) => {
       clock.t += ms;

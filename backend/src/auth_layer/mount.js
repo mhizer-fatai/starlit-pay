@@ -3,12 +3,14 @@ import { createAuthLayer } from "./index.js";
 import { createSupabaseStore } from "./store_supabase.js";
 import { createSupabaseIdentity } from "./identity.js";
 import { startAuthMaintenance } from "./maintenance.js";
+import { createEmailAlerts } from "./alerts.js";
 
 const store = createSupabaseStore(supabase);
 
 export const authLayer = createAuthLayer({
   store,
   identity: createSupabaseIdentity(supabase),
+  alerts: createEmailAlerts(),
 });
 
 if (authLayer.settings.configured) {

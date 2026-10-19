@@ -205,7 +205,8 @@ export function createAuthApi({ baseUrl, fetchImpl }: AuthApiOptions) {
 
     // vault
     getVaultStatus: () => call<VaultStatus>("GET", "/api/vault"),
-    createVault: (body: { encryptedSeed: string; version?: 1; passkeyWrap?: { passkeyId: string; wrappedDek: string } }) =>
+    /** profileBound: the profile already holds this vault's public keys (new sign-ups). */
+    createVault: (body: { encryptedSeed: string; version?: 1; passkeyWrap?: { passkeyId: string; wrappedDek: string }; profileBound?: boolean }) =>
       call<{ ok: true }>("POST", "/api/vault", { body: { version: 1, ...body } }),
     putPasskeyWrap: (passkeyId: string, wrappedDek: string) =>
       call<{ ok: true }>("PUT", `/api/vault/wraps/passkey/${encodeURIComponent(passkeyId)}`, { body: { wrappedDek } }),
@@ -219,9 +220,15 @@ export function createAuthApi({ baseUrl, fetchImpl }: AuthApiOptions) {
     pinUnlock: (pinVerifier: string, emailProof?: string | null) =>
       call<PinUnlockResult>("POST", "/api/vault/pin/unlock", { body: { pinVerifier }, emailProof }),
 
-    // recovery code (setup only for now)
+    // recovery code
     setRecovery: (body: { codeVerifier: string; wrappedDek: string }) =>
       call<{ ok: true }>("POST", "/api/vault/recovery", { body }),
+    recoveryUnlock: (codeVerifier: string, emailProof: string) =>
+      call<{ user: AuthUser; vault: EncryptedVault | null; wrappedDek: string | null }>("POST", "/api/vault/recovery/unlock", { body: { codeVerifier }, emailProof }),
+
+    // migration from email+PIN keys: point the profile at the vault keys (once)
+    bindProfileKeys: (body: { publicEncryptionKey: string; stellarAddress: string; identityCommitment: string }) =>
+      call<{ user: AuthUser }>("POST", "/api/vault/migrate/profile-keys", { body }),
   };
 }
 

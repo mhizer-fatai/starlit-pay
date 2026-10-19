@@ -12,7 +12,7 @@ import {
   type VaultSecrets,
 } from "./crypto";
 import { addUnlockMethod, createVault, openVault, type NewVault, type OpenedVault } from "./index";
-import { generateRecoveryCode, recoveryMaterial } from "./recovery";
+import { generateRecoveryCode, parseRecoveryCode, recoveryMaterial } from "./recovery";
 import type { Ceremonies } from "./webauthn";
 
 /** Signed in, but this passkey cannot open the vault on this device (no PRF, or no wrap yet). */
@@ -80,12 +80,17 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
    * supports PRF. Pass a vault created earlier (whose public keys were already
    * registered) or let one be created here.
    */
-  async function createWalletVault(passkeyId: string, prfOutput: Uint8Array | null, existing?: NewVault): Promise<NewVault> {
+  async function createWalletVault(
+    passkeyId: string,
+    prfOutput: Uint8Array | null,
+    existing?: NewVault,
+    profileBound = false
+  ): Promise<NewVault> {
     const vault = existing ?? (await createVault());
     const passkeyWrap = prfOutput
       ? { passkeyId, wrappedDek: await addUnlockMethod(vault.secrets, await kekFromPrf(prfOutput), "passkey") }
       : undefined;
-    await api.createVault({ encryptedSeed: vault.encryptedSeed, passkeyWrap });
+    await api.createVault({ encryptedSeed: vault.encryptedSeed, passkeyWrap, profileBound });
     return vault;
   }
 
@@ -116,10 +121,15 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
    * New account: register the first passkey (with Google email proof), create
    * the vault, set the PIN fallback and a recovery code.
    */
-  async function signUp(input: { emailProof: string; pin: string; deviceName?: string; vault?: NewVault }) {
+  /**
+   * profileBound: true for brand-new accounts (the profile was registered with
+   * these keys); false when migrating, where the profile is re-pointed after
+   * the funds move.
+   */
+  async function signUp(input: { emailProof: string; pin: string; deviceName?: string; vault?: NewVault; profileBound?: boolean }) {
     const enrolled = await registerPasskey(input.emailProof, input.deviceName);
     const passkeyCanUnlock = enrolled.prfOutput !== null;
-    const vault = await createWalletVault(enrolled.passkey.id, enrolled.prfOutput, input.vault);
+    const vault = await createWalletVault(enrolled.passkey.id, enrolled.prfOutput, input.vault, input.profileBound ?? false);
     wipe(enrolled.prfOutput);
     await setPin(vault.secrets, input.pin);
     const recoveryCode = await setRecoveryCode(vault.secrets);
@@ -181,7 +191,38 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
     }
   }
 
-  return { stepUp, registerPasskey, createWalletVault, setPin, setRecoveryCode, signUp, unlockWithPasskey, unlockWithPin, addPasskey };
+  /**
+   * Lost every passkey and the PIN: Google proof plus the recovery code opens
+   * the vault. The code is then used up, so a new one is set straight away.
+   */
+  async function unlockWithRecoveryCode(code: string, emailProof: string): Promise<UnlockResult & { newRecoveryCode: string }> {
+    const bytes = await parseRecoveryCode(code);
+    if (!bytes) throw new VaultError("That doesn't look like a recovery code. Check it and try again.");
+    try {
+      const material = await recoveryMaterial(bytes);
+      const result = await api.recoveryUnlock(material.verifier, emailProof);
+      if (!result.vault) throw new NoVaultError(result.user);
+      if (!result.wrappedDek) throw new VaultError("No recovery key is stored for this account.");
+      const vault = await openVault(result.vault.encryptedSeed, result.wrappedDek, material.kek, "recovery");
+      const newRecoveryCode = await setRecoveryCode(vault.secrets);
+      return { user: result.user, vault, newRecoveryCode };
+    } finally {
+      wipe(bytes);
+    }
+  }
+
+  return {
+    stepUp,
+    registerPasskey,
+    createWalletVault,
+    setPin,
+    setRecoveryCode,
+    signUp,
+    unlockWithPasskey,
+    unlockWithPin,
+    unlockWithRecoveryCode,
+    addPasskey,
+  };
 }
 
 export type PasskeyFlows = ReturnType<typeof createPasskeyFlows>;

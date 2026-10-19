@@ -68,13 +68,27 @@ export function createSupabaseStore(supabase) {
     async getVault(userId) {
       return check(await supabase.from("key_vault").select("*").eq("user_id", userId).maybeSingle());
     },
-    async createVault(userId, { encryptedSeed, version }) {
-      const { error } = await supabase
-        .from("key_vault")
-        .insert({ user_id: userId, encrypted_seed: encryptedSeed, version });
+    async createVault(userId, { encryptedSeed, version, profileBound = false }) {
+      const { error } = await supabase.from("key_vault").insert({
+        user_id: userId,
+        encrypted_seed: encryptedSeed,
+        version,
+        profile_bound_at: profileBound ? nowIso() : null,
+      });
       if (error?.code === "23505") return false;
       if (error) throw new Error(`Auth store error: ${error.message}`);
       return true;
+    },
+
+    async bindProfileKeys(userId, { publicEncryptionKey, stellarAddress, identityCommitment }) {
+      return check(
+        await supabase.rpc("bind_profile_keys", {
+          p_user: userId,
+          p_public_encryption_key: publicEncryptionKey,
+          p_stellar_address: stellarAddress,
+          p_identity_commitment: identityCommitment,
+        })
+      ) === true;
     },
 
     async listWraps(userId) {
@@ -154,6 +168,9 @@ export function createSupabaseStore(supabase) {
 
     async getRecovery(userId) {
       return check(await supabase.from("recovery_codes").select("*").eq("user_id", userId).maybeSingle());
+    },
+    async consumeRecoveryCode(userId) {
+      return check(await supabase.rpc("consume_recovery_code", { p_user: userId })) === true;
     },
     async setRecovery(userId, codeMac) {
       check(
