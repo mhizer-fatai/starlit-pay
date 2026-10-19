@@ -4,7 +4,6 @@ import {
   ArrowDownLeft,
   ChevronLeft,
   ChevronRight,
-  Download,
   Send,
 } from "lucide-react";
 
@@ -98,11 +97,6 @@ function TransactionsPage() {
             <section className="dash-card activity-card transactions-card">
               <div className="card-title-row transactions-title-row">
                 <span>Transactions</span>
-                <Button variant="ghost" className="export-btn" disabled aria-label="Export — coming soon">
-                  <Download />
-                  Export
-                  <span className="soon-pill">Soon</span>
-                </Button>
               </div>
               <div className="table-scroll">
               <table className="transactions-table">
