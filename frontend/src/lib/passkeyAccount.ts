@@ -9,21 +9,9 @@ import { createVault, VaultError, type NewVault, type OpenedVault } from "@/lib/
 import { AuthApiError } from "@/lib/vault/api";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { NoVaultError, PasskeyNeedsPinError } from "@/lib/vault/flows";
-import { PasskeyCancelledError, PasskeyUnsupportedError } from "@/lib/vault/webauthn";
+import { guessDeviceName, PasskeyCancelledError, PasskeyUnsupportedError } from "@/lib/vault/webauthn";
 
-export { passkeysSupported } from "@/lib/vault/webauthn";
-
-/** A readable name for this device, shown in the passkey list. */
-export function guessDeviceName(): string {
-  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
-  if (/iPhone/.test(ua)) return "iPhone";
-  if (/iPad/.test(ua)) return "iPad";
-  if (/Android/.test(ua)) return "Android device";
-  if (/Mac OS X/.test(ua)) return "Mac";
-  if (/Windows/.test(ua)) return "Windows PC";
-  if (/Linux/.test(ua)) return "Linux PC";
-  return "This device";
-}
+export { guessDeviceName, passkeysSupported } from "@/lib/vault/webauthn";
 
 async function requireEmailProof(): Promise<string> {
   const proof = await getEmailProof();

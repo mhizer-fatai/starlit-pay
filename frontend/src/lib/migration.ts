@@ -30,6 +30,7 @@ import { createVault, type OpenedVault } from "@/lib/vault";
 import { AuthApiError } from "@/lib/vault/api";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { NoVaultError } from "@/lib/vault/flows";
+import { guessDeviceName } from "@/lib/vault/webauthn";
 
 const ZERO_COMMITMENT = "0".repeat(64);
 const ASSETS = ["XLM", "USDC"] as const;
@@ -187,7 +188,7 @@ async function openOrCreateVault(pin: string, emailProof: string, status: Status
   status("Confirm with your fingerprint, face or screen lock…");
   const vault = await createVault();
   try {
-    const result = await passkeyFlows.signUp({ emailProof, pin, vault, profileBound: false });
+    const result = await passkeyFlows.signUp({ emailProof, pin, vault, profileBound: false, deviceName: guessDeviceName() });
     return { opened: result.vault, recoveryCode: result.recoveryCode, passkeyCanUnlock: result.passkeyCanUnlock };
   } catch (err) {
     // A passkey was registered in an earlier attempt but the vault was not:
