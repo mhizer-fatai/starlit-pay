@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
+import { PasskeySettings } from "@/components/PasskeySettings";
 import { getUser } from "@/lib/auth";
 import { fetchSettings, updateSettings, type SettingsUpdate } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
@@ -472,8 +473,10 @@ function SettingsPage() {
                 </span>
               </button>
               <div className={`settings-section-body ${collapsedSections.has("security") ? "settings-section-body-collapsed" : ""}`}>
+                <PasskeySettings />
                 <div className="settings-list">
-                  {securityItems.map((item) => {
+                  {/* The passkey row is the live PasskeySettings panel above, not a toggle. */}
+                  {securityItems.filter((item) => item.key !== "passkey").map((item) => {
                     const Icon = item.icon;
                     return (
                       <div key={item.key} className="settings-list-row">

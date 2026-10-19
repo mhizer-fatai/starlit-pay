@@ -46,6 +46,14 @@ export function clearSession() {
     /* ignore */
   }
 }
+/** Remembers the (non-secret) profile for passkey sessions, which use cookies instead of a stored token. */
+export function setStoredUser(user: unknown) {
+  try {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {
+    /* ignore */
+  }
+}
 export function getStoredUser<T>(): T | null {
   try {
     const raw = localStorage.getItem(USER_KEY);
@@ -64,12 +72,18 @@ export class BackendError extends Error {
 }
 
 async function req<T>(path: string, init?: RequestInit, auth = false): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // X-Requested-With is the CSRF header the backend requires when a request is
+  // authenticated by the passkey session cookie (credentials: "include").
+  const headers: Record<string, string> = { "Content-Type": "application/json", "X-Requested-With": "starlit" };
   if (auth) {
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`${BACKEND_URL}${path}`, { ...init, headers: { ...headers, ...init?.headers } });
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: { ...headers, ...init?.headers },
+  });
   if (!res.ok) {
     let msg = `Backend ${res.status}: ${path}`;
     try {

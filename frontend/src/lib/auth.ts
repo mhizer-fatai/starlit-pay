@@ -6,6 +6,7 @@ import {
   login,
   register,
   setSession,
+  setStoredUser,
   updateProfile,
   type BackendUser,
 } from "@/lib/backend";
@@ -19,6 +20,8 @@ import {
   sha256,
   type DerivedKeys,
 } from "@/lib/keys";
+import { closeVault, type OpenedVault, type VaultSecrets } from "@/lib/vault";
+import { authApi } from "@/lib/vault/client";
 
 export { sha256 };
 
@@ -30,6 +33,39 @@ const SPENDING_KEY_SUFFIX = (email: string) => `starlit_spending:${email.toLower
 
 let unlockedKeys: DerivedKeys | null = null;
 let unlockedThisLoad = false;
+
+// Passkey accounts: the session is an httpOnly cookie and the keys exist only
+// in memory while unlocked. This flag (not a secret) records which kind of
+// account is signed in on this browser.
+const AUTH_MODE_KEY = "starlit_auth_mode";
+let vaultSecrets: VaultSecrets | null = null;
+
+export function isVaultMode(): boolean {
+  try {
+    return localStorage.getItem(AUTH_MODE_KEY) === "vault";
+  } catch {
+    return false;
+  }
+}
+
+/** Signs in a passkey account: keys and vault secrets stay in memory only. */
+export function unlockFromVault(opened: OpenedVault, user: SessionUser) {
+  if (vaultSecrets && vaultSecrets !== opened.secrets) closeVault(vaultSecrets);
+  vaultSecrets = opened.secrets;
+  unlockedKeys = opened.keys;
+  unlockedThisLoad = true;
+  setStoredUser(user);
+  try {
+    localStorage.setItem(AUTH_MODE_KEY, "vault");
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Secrets of the open vault, needed to add unlock methods. Null when locked. */
+export function getVaultSecrets(): VaultSecrets | null {
+  return vaultSecrets;
+}
 
 export function isUnlocked(): boolean {
   return unlockedThisLoad || (typeof window !== "undefined" && !!getUnlockedKeys());
@@ -85,6 +121,8 @@ export function markUnlocked(keys: DerivedKeys, email?: string) {
 export function lockSession() {
   unlockedKeys = null;
   unlockedThisLoad = false;
+  closeVault(vaultSecrets);
+  vaultSecrets = null;
 }
 
 export function getSpendingKey(email: string): string | null {
@@ -150,7 +188,7 @@ export async function unlockWalletWithPin(
 }
 
 export async function getUser(): Promise<SessionUser | null> {
-  if (!getToken()) return null;
+  if (!getToken() && !isVaultMode()) return null;
   return getStoredUser<SessionUser>();
 }
 
@@ -209,6 +247,7 @@ export async function unlockWithPin(email: string, pin: string): Promise<Session
 }
 
 export async function signOut(): Promise<void> {
+  if (isVaultMode()) await authApi.logout().catch(() => undefined);
   clearSession();
   lockSession();
   try {

@@ -75,9 +75,13 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
     return { passkey, user, prfOutput };
   }
 
-  /** Stores a brand-new vault, protected by the passkey when the device supports PRF. */
-  async function createWalletVault(passkeyId: string, prfOutput: Uint8Array | null): Promise<NewVault> {
-    const vault = await createVault();
+  /**
+   * Stores a vault on the server, protected by the passkey when the device
+   * supports PRF. Pass a vault created earlier (whose public keys were already
+   * registered) or let one be created here.
+   */
+  async function createWalletVault(passkeyId: string, prfOutput: Uint8Array | null, existing?: NewVault): Promise<NewVault> {
+    const vault = existing ?? (await createVault());
     const passkeyWrap = prfOutput
       ? { passkeyId, wrappedDek: await addUnlockMethod(vault.secrets, await kekFromPrf(prfOutput), "passkey") }
       : undefined;
@@ -112,10 +116,10 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
    * New account: register the first passkey (with Google email proof), create
    * the vault, set the PIN fallback and a recovery code.
    */
-  async function signUp(input: { emailProof: string; pin: string; deviceName?: string }) {
+  async function signUp(input: { emailProof: string; pin: string; deviceName?: string; vault?: NewVault }) {
     const enrolled = await registerPasskey(input.emailProof, input.deviceName);
     const passkeyCanUnlock = enrolled.prfOutput !== null;
-    const vault = await createWalletVault(enrolled.passkey.id, enrolled.prfOutput);
+    const vault = await createWalletVault(enrolled.passkey.id, enrolled.prfOutput, input.vault);
     wipe(enrolled.prfOutput);
     await setPin(vault.secrets, input.pin);
     const recoveryCode = await setRecoveryCode(vault.secrets);
