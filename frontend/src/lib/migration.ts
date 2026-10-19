@@ -12,19 +12,11 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 
-import {
-  BackendError,
-  clearSession,
-  fetchNotes,
-  postNote,
-  spendNote,
-  submitRelayerTransfer,
-} from "@/lib/backend";
-import { encryptNote } from "@/lib/crypto";
-import { bytesToHex, deriveKeysFromEmailAndPin, identityCommitment, type DerivedKeys } from "@/lib/keys";
-import { getSpendableNotes, spendRootFor } from "@/lib/notes";
-import { horizon, NETWORK_PASSPHRASE, TOKENS } from "@/lib/stellar";
-import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
+import { BackendError, clearSession, fetchNotes } from "@/lib/backend";
+import { deriveKeysFromEmailAndPin, identityCommitment, type DerivedKeys } from "@/lib/keys";
+import { getSpendableNotes, type SpendableNote } from "@/lib/notes";
+import { moveNotes, signedTimestamp } from "@/lib/selfTransfer";
+import { horizon, NETWORK_PASSPHRASE } from "@/lib/stellar";
 import { unlockFromVault, type SessionUser } from "@/lib/auth";
 import { createVault, type OpenedVault } from "@/lib/vault";
 import { AuthApiError } from "@/lib/vault/api";
@@ -32,7 +24,6 @@ import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { NoVaultError } from "@/lib/vault/flows";
 import { guessDeviceName } from "@/lib/vault/webauthn";
 
-const ZERO_COMMITMENT = "0".repeat(64);
 const ASSETS = ["XLM", "USDC"] as const;
 const MAX_SWEEP_PASSES = 3;
 
@@ -51,13 +42,6 @@ export type PublicSweepResult =
 
 type Status = (message: string) => void;
 
-/** Signs a fresh timestamp with the old Stellar key (the legacy note API's proof of ownership). */
-function signedTimestamp(keys: DerivedKeys) {
-  const timestamp = Date.now().toString();
-  const keypair = StellarSdk.Keypair.fromSecret(keys.stellar.secretKey);
-  return { timestamp, signature: bytesToHex(keypair.sign(Buffer.from(timestamp))) };
-}
-
 async function loadOldNotes(oldKeys: DerivedKeys) {
   const { timestamp, signature } = signedTimestamp(oldKeys);
   const { notes } = await fetchNotes(oldKeys.viewing.publicKey, timestamp, signature);
@@ -72,52 +56,12 @@ async function sweepNotes(oldKeys: DerivedKeys, newKeys: DerivedKeys, username: 
     let movedThisPass = 0;
 
     for (const asset of ASSETS) {
-      const tokenAddress = TOKENS[asset];
       const notes = getSpendableNotes(all, oldKeys.viewing.secretKey, asset);
-
       while (notes.length > 0) {
-        const input1 = notes.shift()!;
-        const input2 = notes.shift() ?? null;
-        const amount = input1.amount + (input2?.amount ?? 0);
-        status(`Moving your ${asset} (${moved + movedThisPass + 1} of ${moved + movedThisPass + 1 + Math.ceil(notes.length / 2)})…`);
-
-        // A single input is padded with a zero-value dummy, as in Send.
-        const secret2 = input2?.secret ?? bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-        const commitment2 =
-          input2?.commitment ?? (await calculateCommitment(0, oldKeys.viewing.publicKey, tokenAddress, secret2));
-
-        const newSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-        const newCommitment = await calculateCommitment(amount, newKeys.viewing.publicKey, tokenAddress, newSecret);
-        const enc = encryptNote(amount, asset, newSecret, username, newKeys.viewing.publicKey);
-        const encHex = enc.ephemeralPublicKey + enc.nonce + enc.ciphertext;
-
-        const zk = await generateShieldedPaymentProof(
-          input1.secret,
-          input1.commitment,
-          secret2,
-          commitment2,
-          newKeys.stellar.publicKey,
-          tokenAddress,
-          amount,
-          0
-        );
-        await submitRelayerTransfer({
-          proof: zk.proofHex,
-          nullifier_1: zk.nullifier1Hex,
-          nullifier_2: zk.nullifier2Hex,
-          output_commitment_1: newCommitment,
-          encrypted_note_1: encHex,
-          output_commitment_2: ZERO_COMMITMENT,
-          encrypted_note_2: "00",
-          root: await spendRootFor(input1),
-        });
-
-        // Record the new note before retiring the old ones, so funds are never
-        // invisible: at worst an old note shows until the next pass marks it.
-        await postNote({ commitment: newCommitment, encrypted_note: encHex, recipient_viewing_key: newKeys.viewing.publicKey });
-        for (const spent of [input1, input2]) {
-          if (spent) await spendNote({ commitment: spent.commitment, ...signedTimestamp(oldKeys) });
-        }
+        const pair = notes.splice(0, 2) as [SpendableNote] | [SpendableNote, SpendableNote];
+        const done = moved + movedThisPass + 1;
+        status(`Moving your ${asset} (${done} of ${done + Math.ceil(notes.length / 2)})…`);
+        await moveNotes({ notes: pair, asset, from: oldKeys, to: newKeys, username });
         movedThisPass += 1;
       }
     }

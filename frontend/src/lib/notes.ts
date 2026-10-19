@@ -16,6 +16,8 @@ export interface DecryptedNoteData {
   sender?: string;
   secret?: string;
   timestamp?: number;
+  /** Nonce of a self-created note secret (see lib/ownedNotes). */
+  n?: string;
 }
 
 export function decryptNotePayload(
@@ -72,6 +74,7 @@ export function decryptNotePayload(
           sender: parsed.sender,
           secret: parsed.secret,
           timestamp: parsed.timestamp,
+          n: typeof parsed.n === "string" ? parsed.n : undefined,
         };
       }
     } catch {
@@ -138,6 +141,7 @@ export interface SpendableNote {
   secret: string;
   root?: string;
   tokenAddress?: string;
+  n?: string;
 }
 
 export function getSpendableNotes(
@@ -157,6 +161,7 @@ export function getSpendableNotes(
         amount: decrypted.amount,
         asset: decrypted.asset.toUpperCase(),
         secret: decrypted.secret || note.commitment,
+        n: decrypted.n,
         // Notes posted by clients (received payments, change) have no recorded
         // root; spenders fetch a currently valid one with spendRootFor().
         root: note.root || undefined,
