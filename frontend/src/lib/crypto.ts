@@ -38,7 +38,9 @@ export function encryptNote(
   asset: string,
   secret: string,
   senderUsername: string,
-  recipientPublicEncryptionKeyHex: string
+  recipientPublicEncryptionKeyHex: string,
+  /** n: nonce of a self-created note secret (see lib/ownedNotes). */
+  extra?: { n?: string }
 ): EncryptedNotePayload {
   const payload = JSON.stringify({
     amount: amount.toString(),
@@ -46,6 +48,7 @@ export function encryptNote(
     secret,
     sender: senderUsername,
     timestamp: Date.now(),
+    ...(extra?.n ? { n: extra.n } : {}),
   });
 
   const payloadBytes = stringToBytes(payload);

@@ -22,6 +22,7 @@ import {
 } from "@/lib/keys";
 import { closeVault, type OpenedVault, type VaultSecrets } from "@/lib/vault";
 import { authApi } from "@/lib/vault/client";
+import { startAutoReshield, stopAutoReshield } from "@/lib/reshield";
 
 export { sha256 };
 
@@ -55,6 +56,8 @@ export function unlockFromVault(opened: OpenedVault, user: SessionUser) {
   unlockedKeys = opened.keys;
   unlockedThisLoad = true;
   setStoredUser(user);
+  // Move notes created by others (gateway, faucet, senders) into ones only this user can spend.
+  startAutoReshield({ keys: opened.keys, username: user.username });
   try {
     localStorage.setItem(AUTH_MODE_KEY, "vault");
   } catch {
@@ -119,6 +122,7 @@ export function markUnlocked(keys: DerivedKeys, email?: string) {
 }
 
 export function lockSession() {
+  stopAutoReshield();
   unlockedKeys = null;
   unlockedThisLoad = false;
   closeVault(vaultSecrets);

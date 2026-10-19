@@ -25,7 +25,9 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { Input } from "@/components/ui/input";
-import { getUser, getViewingSecret, signAuthRequest, type SessionUser } from "@/lib/auth";
+import { getSpendingKey, getUser, getViewingSecret, signAuthRequest, type SessionUser } from "@/lib/auth";
+import { selfNoteSecret } from "@/lib/ownedNotes";
+import { withNoteLock } from "@/lib/reshield";
 import {
   lookupUser,
   postNote,
@@ -287,7 +289,12 @@ function SendPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [confirmOpen]);
 
-  async function submitPayment() {
+  // Shares the note lock with background re-shielding, so both never spend the same note.
+  function submitPayment() {
+    return withNoteLock(submitPaymentUnlocked);
+  }
+
+  async function submitPaymentUnlocked() {
     setBusy(true);
     setMessage("Initializing transaction...");
     try {
@@ -352,14 +359,19 @@ function SendPage() {
       let changeCommitmentHex = "0000000000000000000000000000000000000000000000000000000000000000";
       let changeEncryptedHex = "00";
       if (changeAmount > 0.0001) {
-        const changeSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+        // Change goes back to the sender, so its secret is derived from their own
+        // spending key: only they can spend it (see lib/ownedNotes).
+        const spendingKey = getSpendingKey(me.email);
+        if (!spendingKey) throw new Error("Wallet is locked. Please unlock your wallet first.");
+        const { secret: changeSecret, n: changeN } = await selfNoteSecret(spendingKey);
         changeCommitmentHex = await calculateCommitment(changeAmount, me.public_encryption_key || "", tokenAddress, changeSecret);
         const changeEncrypted = encryptNote(
           changeAmount,
           asset,
           changeSecret,
           me.username,
-          me.public_encryption_key || ""
+          me.public_encryption_key || "",
+          { n: changeN }
         );
         changeEncryptedHex = changeEncrypted.ephemeralPublicKey + changeEncrypted.nonce + changeEncrypted.ciphertext;
       }
