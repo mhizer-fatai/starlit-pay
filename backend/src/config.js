@@ -43,7 +43,8 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Supabase-Auth"]
+    // X-Client-*: sent by smart-account-kit's relayer client
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Supabase-Auth", "X-Client-Name", "X-Client-Version"]
   })
 );
 

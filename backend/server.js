@@ -12,6 +12,7 @@ import "./src/settings.js";
 import "./src/statements.js";
 import "./src/transactions.js";
 import "./src/pool_root.js";
+import "./src/smart_wallet.js";
 import { startIndexer } from "./src/indexer.js";
 import { startGateway } from "./src/gateway.js";
 import { startRelayerMonitor } from "./src/relayer_monitor.js";

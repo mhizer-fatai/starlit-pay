@@ -82,7 +82,9 @@ export function registerPasskeyRoutes(router, { store, sessions, identity, setti
       attestationType: "none",
       excludeCredentials: existing.map((p) => ({ id: p.credential_id, transports: p.transports?.length ? p.transports : undefined })),
       authenticatorSelection: { residentKey: "required", userVerification: "required" },
-      supportedAlgorithmIDs: SUPPORTED_ALGS,
+      // es256Only: a passkey that must also control an on-chain smart wallet
+      // (Stellar verifies secp256r1 / ES256 only, not RSA).
+      supportedAlgorithmIDs: req.body?.es256Only === true ? [-7] : SUPPORTED_ALGS,
       timeout: CEREMONY_TIMEOUT_MS,
     });
 
