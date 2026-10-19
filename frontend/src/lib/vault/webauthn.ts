@@ -137,6 +137,18 @@ export function assertionToJSON(credential: PublicKeyCredential): AssertedCreden
 
 // --- the real browser ceremonies --------------------------------------------
 
+/** A readable name for this device, shown in the passkey list. */
+export function guessDeviceName(): string {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent;
+  if (/iPhone/.test(ua)) return "iPhone";
+  if (/iPad/.test(ua)) return "iPad";
+  if (/Android/.test(ua)) return "Android device";
+  if (/Mac OS X/.test(ua)) return "Mac";
+  if (/Windows/.test(ua)) return "Windows PC";
+  if (/Linux/.test(ua)) return "Linux PC";
+  return "This device";
+}
+
 export function passkeysSupported(): boolean {
   return typeof window !== "undefined" && typeof window.PublicKeyCredential === "function" && !!navigator.credentials;
 }
