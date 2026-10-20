@@ -10,9 +10,12 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 import {
+  Ed25519Signer,
   IndexedDBStorage,
   SmartAccountKit,
+  computeEntryAuthDigest,
   createDefaultContext,
+  signerToScVal,
   createEd25519Signer,
 } from "smart-account-kit";
 
@@ -105,13 +108,15 @@ export interface WalletSigners {
   passkeys: { credentialId: string; publicKey: Uint8Array }[];
   /** Whether the vault's backup key (recovery) is a signer. */
   hasRecoveryKey: boolean;
+  /** Context rules whose signer is an Ed25519 backup key: rule id and 32-byte key (hex). */
+  recoveryRules: { ruleId: number; publicKeyHex: string }[];
 }
 
 const MAX_RULES = 10;
 
 /** Reads the wallet's signers from its context rules on Stellar (read-only simulation). */
 export async function readWalletSigners(info: SmartWalletInfo): Promise<WalletSigners> {
-  const result: WalletSigners = { passkeyCredentialIds: [], passkeys: [], hasRecoveryKey: false };
+  const result: WalletSigners = { passkeyCredentialIds: [], passkeys: [], hasRecoveryKey: false, recoveryRules: [] };
   if (!info.address) return result;
   const source = new StellarSdk.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
   for (let id = 0; id < MAX_RULES; id++) {
@@ -134,6 +139,7 @@ export async function readWalletSigners(info: SmartWalletInfo): Promise<WalletSi
         result.passkeys.push({ credentialId, publicKey: new Uint8Array(keyData.subarray(0, 65)) });
       } else if (verifier === info.config.ed25519Verifier) {
         result.hasRecoveryKey = true;
+        result.recoveryRules.push({ ruleId: id, publicKeyHex: Buffer.from(keyData).toString("hex") });
       }
     }
   }
@@ -323,26 +329,16 @@ export async function depositFromSmartWallet(
   token: WalletToken,
   amount: number,
   commitmentHex: string,
-  encryptedNoteHex: string
+  encryptedNoteHex: string,
+  options: { useRecoveryKey?: boolean } = {}
 ): Promise<string> {
   const info = await loadSmartWallet();
   if (!info.address) throw new Error("Create your public wallet first.");
   if (!(amount > 0)) throw new Error("Enter an amount greater than 0.");
-  const { kit, credentialId } = await connectedKit(info);
+  const func = depositFunction(info, token, amount, commitmentHex, encryptedNoteHex);
+  if (options.useRecoveryKey) return submitWithRecoveryKey(info, func);
 
-  const func = StellarSdk.xdr.HostFunction.hostFunctionTypeInvokeContract(
-    new StellarSdk.xdr.InvokeContractArgs({
-      contractAddress: StellarSdk.Address.fromString(info.config.poolContract).toScAddress(),
-      functionName: "deposit",
-      args: [
-        StellarSdk.Address.fromString(info.address).toScVal(),
-        StellarSdk.Address.fromString(tokenContract(info, token)).toScVal(),
-        StellarSdk.nativeToScVal(BigInt(Math.round(amount * 1e7)), { type: "i128" }),
-        StellarSdk.nativeToScVal(Buffer.from(commitmentHex, "hex"), { type: "bytes" }),
-        StellarSdk.nativeToScVal(Buffer.from(encryptedNoteHex, "hex"), { type: "bytes" }),
-      ],
-    })
-  );
+  const { kit, credentialId } = await connectedKit(info);
   const tx = await StellarSdk.contract.AssembledTransaction.buildWithOp(
     StellarSdk.Operation.invokeHostFunction({ func, auth: [] }),
     {
@@ -359,4 +355,88 @@ export async function depositFromSmartWallet(
   const result = await kit.signAndSubmit(tx, { credentialId });
   if (!result.success) throw failure(result, "The transfer could not be completed.");
   return result.hash ?? "";
+}
+
+function depositFunction(info: SmartWalletInfo, token: WalletToken, amount: number, commitmentHex: string, encryptedNoteHex: string) {
+  return StellarSdk.xdr.HostFunction.hostFunctionTypeInvokeContract(
+    new StellarSdk.xdr.InvokeContractArgs({
+      contractAddress: StellarSdk.Address.fromString(info.config.poolContract).toScAddress(),
+      functionName: "deposit",
+      args: [
+        StellarSdk.Address.fromString(info.address!).toScVal(),
+        StellarSdk.Address.fromString(tokenContract(info, token)).toScVal(),
+        StellarSdk.nativeToScVal(BigInt(Math.round(amount * 1e7)), { type: "i128" }),
+        StellarSdk.nativeToScVal(Buffer.from(commitmentHex, "hex"), { type: "bytes" }),
+        StellarSdk.nativeToScVal(Buffer.from(encryptedNoteHex, "hex"), { type: "bytes" }),
+      ],
+    })
+  );
+}
+
+/** Number of authorised calls in an auth entry (the root call plus every nested one). */
+function countInvocations(invocation: StellarSdk.xdr.SorobanAuthorizedInvocation): number {
+  return 1 + invocation.subInvocations().reduce((sum, sub) => sum + countInvocations(sub), 0);
+}
+
+/**
+ * Lost wallet passkey: the vault's backup key (unlocked by PIN, passkey or the
+ * recovery code) signs the wallet's authorisation itself, through the wallet's
+ * "Recovery" rule. No passkey and no smart-account-kit connection is needed.
+ * The relayer submits it under the same rules as any wallet request.
+ */
+async function submitWithRecoveryKey(info: SmartWalletInfo, func: StellarSdk.xdr.HostFunction): Promise<string> {
+  const vaultKeys = getUnlockedKeys();
+  if (!vaultKeys) throw new Error("Unlock your wallet first.");
+  const keypair = StellarSdk.Keypair.fromSecret(vaultKeys.stellar.secretKey);
+  const ownKeyHex = Buffer.from(keypair.rawPublicKey()).toString("hex");
+  const rule = (await readWalletSigners(info)).recoveryRules.find((r) => r.publicKeyHex === ownKeyHex);
+  if (!rule) throw new Error("This wallet is not protected with your recovery code, so only its passkey can move the funds.");
+
+  // Simulate to get the wallet's authorisation entry (recording mode).
+  const { token } = await getSmartWalletRelayToken();
+  const placeholder = new StellarSdk.Account(StellarSdk.Keypair.random().publicKey(), "0");
+  const simTx = new StellarSdk.TransactionBuilder(placeholder, { fee: StellarSdk.BASE_FEE, networkPassphrase: info.config.networkPassphrase })
+    .addOperation(StellarSdk.Operation.invokeHostFunction({ func, auth: [] }))
+    .setTimeout(60)
+    .build();
+  const sim = await rpc.simulateTransaction(simTx);
+  if (StellarSdk.rpc.Api.isSimulationError(sim) || !sim.result) {
+    throw new Error("The transfer could not be prepared. Check your public wallet balance.");
+  }
+
+  const signer = new Ed25519Signer(keypair, info.config.ed25519Verifier);
+  const expiration = (await rpc.getLatestLedger()).sequence + 100;
+  const entries = sim.result.auth;
+  for (const entry of entries) {
+    const credentials = entry.credentials();
+    if (credentials.switch().name !== "sorobanCredentialsAddress") continue;
+    if (StellarSdk.Address.fromScAddress(credentials.address().address()).toString() !== info.address) continue;
+    // One context rule id per authorised call (e.g. deposit + the token transfer inside it).
+    const ruleIds = Array.from({ length: countInvocations(entry.rootInvocation()) }, () => rule.ruleId);
+    const { authDigest } = computeEntryAuthDigest(info.config.networkPassphrase, entry, expiration, ruleIds);
+    const signature = signer.signAuthDigest(authDigest);
+    credentials.address().signature(
+      StellarSdk.xdr.ScVal.scvMap([
+        new StellarSdk.xdr.ScMapEntry({
+          key: StellarSdk.xdr.ScVal.scvSymbol("context_rule_ids"),
+          val: StellarSdk.xdr.ScVal.scvVec(ruleIds.map((id) => StellarSdk.xdr.ScVal.scvU32(id))),
+        }),
+        new StellarSdk.xdr.ScMapEntry({
+          key: StellarSdk.xdr.ScVal.scvSymbol("signers"),
+          val: StellarSdk.xdr.ScVal.scvMap([
+            new StellarSdk.xdr.ScMapEntry({ key: signerToScVal(signer.signer), val: StellarSdk.xdr.ScVal.scvBytes(Buffer.from(signature)) }),
+          ]),
+        }),
+      ])
+    );
+  }
+
+  const res = await fetch(`${BACKEND_URL}/api/smart-wallet/relay/${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ func: func.toXDR("base64"), auth: entries.map((e) => e.toXDR("base64")) }),
+  });
+  const body = (await res.json().catch(() => null)) as { success?: boolean; error?: string; data?: { hash?: string } } | null;
+  if (!res.ok || !body?.success) throw new Error(body?.error || "The transfer could not be completed.");
+  return body.data?.hash ?? "";
 }
