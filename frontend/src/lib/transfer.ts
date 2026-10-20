@@ -124,7 +124,12 @@ export function transferToPublic(asset: WalletToken, amount: number, onStatus: (
 }
 
 /** The user's public smart wallet -> their private balance. Returns the transaction hash. */
-export async function transferToPrivate(asset: WalletToken, amount: number, onStatus: (m: string) => void = () => undefined) {
+export async function transferToPrivate(
+  asset: WalletToken,
+  amount: number,
+  onStatus: (m: string) => void = () => undefined,
+  options: { useRecoveryKey?: boolean } = {}
+) {
   const me = await signedInUser();
   const spendingKey = getSpendingKey(me.email);
   if (!spendingKey) throw new Error("Your wallet is locked. Unlock it first.");
@@ -138,10 +143,10 @@ export async function transferToPrivate(asset: WalletToken, amount: number, onSt
 
   // Register the note first (as the gateway does) so the indexer can attach its root.
   await postNote({ commitment, encrypted_note: encryptedNote, recipient_viewing_key: viewingKey });
-  onStatus("Confirm with your wallet passkey…");
+  onStatus(options.useRecoveryKey ? `Moving ${amount} ${asset} with your recovery key…` : "Confirm with your wallet passkey…");
   let hash: string;
   try {
-    hash = await depositFromSmartWallet(asset, amount, commitment, encryptedNote);
+    hash = await depositFromSmartWallet(asset, amount, commitment, encryptedNote, options);
   } catch (err) {
     // Nothing was deposited; the note must not count towards the balance.
     await spendNote({ commitment, ...signedSpend(me.email) }).catch(() => undefined);
@@ -149,6 +154,23 @@ export async function transferToPrivate(asset: WalletToken, amount: number, onSt
   }
   await recordTransaction(me.id, { from: "public wallet", amount, asset, type: "deposit", hash, transfer: "to-private" });
   return hash;
+}
+
+/**
+ * Lost wallet passkey: moves everything in the public wallet into the private
+ * balance, signed by the recovery key from the (unlocked) vault.
+ */
+export async function recoverPublicFunds(
+  balances: Record<WalletToken, number>,
+  onStatus: (m: string) => void = () => undefined
+): Promise<string[]> {
+  const hashes: string[] = [];
+  for (const asset of ["USDC", "XLM"] as WalletToken[]) {
+    const amount = Math.floor((balances[asset] ?? 0) * 1e7) / 1e7;
+    if (amount > 0) hashes.push(await transferToPrivate(asset, amount, onStatus, { useRecoveryKey: true }));
+  }
+  if (hashes.length === 0) throw new Error("Your public wallet is empty; there is nothing to recover.");
+  return hashes;
 }
 
 function signedSpend(email: string) {

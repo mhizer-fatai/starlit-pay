@@ -3433,3 +3433,34 @@
   min-width: 0;
   overflow-x: clip;
 }
+
+/* Public wallet: recovery with the recovery code */
+.wallet-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--dashboard-blue);
+  font-size: 13px;
+  font-weight: 500;
+}
+.wallet-link svg {
+  width: 15px;
+  height: 15px;
+}
+.wallet-recover {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.wallet-recover .wallet-caption {
+  margin-top: 0;
+}
+.wallet-recover .wallet-actions {
+  padding-top: 4px;
+}

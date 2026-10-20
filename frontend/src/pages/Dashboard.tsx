@@ -284,6 +284,7 @@ function DashboardPage() {
               prices={prices}
               refreshKey={walletRefreshKey}
               onBalances={setPublicBalances}
+              onRecovered={() => void handleSync()}
             />
           </div>
 
