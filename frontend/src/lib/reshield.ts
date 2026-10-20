@@ -29,6 +29,12 @@ export function withNoteLock<T>(task: () => Promise<T>): Promise<T> {
 export interface ReshieldContext {
   keys: DerivedKeys;
   username: string;
+  /**
+   * Whether the server will accept a spend now. Relayer spends need a recent
+   * passkey/PIN confirmation, so runs outside that window are skipped (the
+   * next unlock or payment confirmation opens it again).
+   */
+  canSpend?: () => Promise<boolean>;
 }
 
 /** Notes that someone else created (so someone else knows their secret). */
@@ -69,15 +75,17 @@ let current: ReshieldContext | null = null;
 export function startAutoReshield(ctx: ReshieldContext) {
   stopAutoReshield();
   current = ctx;
-  const run = () => {
-    if (!current) return;
-    reshieldIncomingNotes(current).catch((err) => {
+  const run = async () => {
+    const ctx = current;
+    if (!ctx) return;
+    if (ctx.canSpend && !(await ctx.canSpend().catch(() => false))) return;
+    await reshieldIncomingNotes(ctx).catch((err) => {
       // Best effort: the next run retries. Funds stay where they are.
       console.warn("Re-shielding paused:", err instanceof Error ? err.message : err);
     });
   };
-  run();
-  timer = setInterval(run, INTERVAL_MS);
+  void run();
+  timer = setInterval(() => void run(), INTERVAL_MS);
 }
 
 export function stopAutoReshield() {

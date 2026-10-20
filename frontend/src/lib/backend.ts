@@ -366,10 +366,11 @@ export interface RelayerTransferPayload {
 }
 
 export const submitRelayerTransfer = (body: RelayerTransferPayload) =>
-  req<{ success: boolean; hash: string; ledger?: number }>("/api/relayer/transfer", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  req<{ success: boolean; hash: string; ledger?: number }>(
+    "/api/relayer/transfer",
+    { method: "POST", body: JSON.stringify(body) },
+    true // legacy accounts authorise with their token; passkey sessions via cookie
+  );
 
 export interface RelayerWithdrawPayload {
   proof: string;
@@ -384,8 +385,9 @@ export interface RelayerWithdrawPayload {
 }
 
 export const submitRelayerWithdraw = (body: RelayerWithdrawPayload) =>
-  req<{ success: boolean; hash: string; ledger?: number }>("/api/relayer/withdraw", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  req<{ success: boolean; hash: string; ledger?: number }>(
+    "/api/relayer/withdraw",
+    { method: "POST", body: JSON.stringify(body) },
+    true
+  );
 
