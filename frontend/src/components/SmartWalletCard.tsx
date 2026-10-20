@@ -148,8 +148,8 @@ export function SmartWalletCard({
       ) : !info.address ? (
         <div className="wallet-empty">
           <p>
-            A public Stellar wallet you control with your passkey (Face ID, fingerprint or phone). Hold and spend public
-            XLM and USDC; fees are covered by Starlit.
+            A public Stellar wallet you control with your passkey (Face ID, fingerprint or phone). Hold public
+            XLM and USDC, and move them to and from your private balance; fees are covered by Starlit.
           </p>
           {hasWalletPasskey && !needsPasskey ? (
             <div className="wallet-actions wallet-actions-stack">

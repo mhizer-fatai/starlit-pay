@@ -42,6 +42,16 @@ export interface UnlockResult {
   vault: OpenedVault;
 }
 
+/**
+ * Names a new passkey after where it lives. A passkey made on another device
+ * (phone over QR, or a security key) must not be named after this browser.
+ */
+export function passkeyName(response: Record<string, unknown>, thisDevice?: string): string | undefined {
+  if (response.authenticatorAttachment !== "cross-platform") return thisDevice;
+  const transports = (response.response as { transports?: unknown } | undefined)?.transports;
+  return Array.isArray(transports) && transports.includes("hybrid") ? "Phone" : "Security key";
+}
+
 export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremonies: Ceremonies }) {
   /** Re-confirms the signed-in user (fresh auth for sensitive actions). Returns the PRF output if asked for. */
   async function stepUp(wantPrf = false): Promise<{ credentialId: string; prfOutput: Uint8Array | null }> {
@@ -66,7 +76,7 @@ export function createPasskeyFlows({ api, ceremonies }: { api: AuthApi; ceremoni
     const { passkey, user } = await api.passkeyRegisterVerify({
       challengeId,
       response: created.response,
-      deviceName,
+      deviceName: passkeyName(created.response, deviceName),
       prfEnabled: created.prfEnabled,
     });
 
