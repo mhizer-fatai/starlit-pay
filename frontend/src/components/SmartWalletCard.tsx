@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Check, Copy, ExternalLink, Fingerprint, Loader2, RefreshCw, Send, ShieldCheck, Smartphone } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Copy, ExternalLink, Fingerprint, Loader2, RefreshCw, ShieldCheck, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { isVaultMode } from "@/lib/auth";
 import { friendlyAuthError } from "@/lib/passkeyAccount";
 import {
@@ -12,12 +11,10 @@ import {
   createSmartWallet,
   loadSmartWallet,
   readWalletSigners,
-  sendFromSmartWallet,
   smartWalletBalance,
   type SmartWalletInfo,
   type WalletToken,
 } from "@/lib/smartWallet";
-import { isStellarAddress } from "@/lib/stellar";
 import type { Prices } from "@/lib/prices";
 import { AssetRow, WalletCardHeader, WalletTotal } from "@/components/WalletCard";
 
@@ -46,11 +43,6 @@ export function SmartWalletCard({
   const [busy, setBusy] = useState(false);
   const [needsPasskey, setNeedsPasskey] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [sendOpen, setSendOpen] = useState(false);
-  const [token, setToken] = useState<WalletToken>("XLM");
-  const [recipient, setRecipient] = useState("");
-  const [amount, setAmount] = useState("");
-  const [lastHash, setLastHash] = useState("");
 
   const onBalancesRef = useRef(onBalances);
   onBalancesRef.current = onBalances;
@@ -129,24 +121,6 @@ export function SmartWalletCard({
     }
   };
 
-  const send = (event: FormEvent) => {
-    event.preventDefault();
-    const to = recipient.trim();
-    const value = Number(amount);
-    if (!isStellarAddress(to)) return setError("Enter a valid Stellar address (G… or C…).");
-    if (!(value > 0)) return setError("Enter an amount greater than 0.");
-    if (balances && value > balances[token]) return setError(`Not enough ${token} in your smart wallet.`);
-    void run(async () => {
-      setStatus("Confirm with your passkey…");
-      const hash = await sendFromSmartWallet(token, to, value);
-      setLastHash(hash);
-      setRecipient("");
-      setAmount("");
-      setSendOpen(false);
-      await refresh();
-    });
-  };
-
   const hasWalletPasskey = info?.passkeys.length ? info.passkeys.length > 0 : false;
   const loading = !info || (Boolean(info.address) && !balances);
   const xlm = balances?.XLM ?? 0;
@@ -223,7 +197,7 @@ export function SmartWalletCard({
             <AssetRow asset="USDC" amount={usdc} price={prices.USDC} hidden={hidden} loading={loading} />
             <AssetRow asset="XLM" amount={xlm} price={prices.XLM} hidden={hidden} loading={loading} />
           </div>
-          <p className="wallet-caption">Visible on Stellar. Fees covered by Starlit.</p>
+          <p className="wallet-caption">Public funds, visible on Stellar. Use Transfer to move them into your private balance.</p>
           {hasRecovery === false && (
             <div className="wallet-warning" role="status">
               <p>
@@ -234,42 +208,6 @@ export function SmartWalletCard({
                 {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Add recovery key
               </Button>
             </div>
-          )}
-          <div className="wallet-actions">
-            <Button type="button" onClick={() => setSendOpen((v) => !v)} disabled={busy}>
-              <Send /> Send with passkey
-            </Button>
-          </div>
-          {sendOpen && (
-            <form className="wallet-send-form" onSubmit={send} noValidate>
-              <div className="wallet-token-toggle" role="radiogroup" aria-label="Asset">
-                {(["XLM", "USDC"] as WalletToken[]).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    role="radio"
-                    aria-checked={token === t}
-                    className={token === t ? "active" : ""}
-                    onClick={() => setToken(t)}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
-              <Input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="Recipient address (G… or C…)" />
-              <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={`Amount in ${token}`} inputMode="decimal" />
-              <Button type="submit" disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Confirm and send
-              </Button>
-            </form>
-          )}
-          {lastHash && (
-            <p className="wallet-caption">
-              Sent.{" "}
-              <a href={`https://stellar.expert/explorer/testnet/tx/${lastHash}`} target="_blank" rel="noreferrer">
-                View transaction
-              </a>
-            </p>
           )}
         </>
       )}
