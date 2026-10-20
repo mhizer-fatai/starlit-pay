@@ -3,29 +3,15 @@ import { useNavigate } from "react-router-dom";
 import {
   Check,
   ChevronDown,
-  Copy,
-  ExternalLink,
   Globe,
-  Key,
-  Lock,
-  Mail,
-  MessageSquare,
-  Phone,
-  Share2,
-  Star,
-  Users,
-  Link2,
   Shield,
-  Bell,
   DollarSign,
 } from "lucide-react";
 
-import { AppStoreButton, GalaxyStoreButton, GooglePlayButton } from "@/components/base/buttons/app-store-buttons";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
+import { PasskeySettings } from "@/components/PasskeySettings";
 import { getUser } from "@/lib/auth";
 import { fetchSettings, updateSettings, type SettingsUpdate } from "@/lib/backend";
 import { useSidebar } from "@/lib/sidebar";
@@ -44,48 +30,6 @@ const currencies = [
   { value: "GBP", label: "GBP — British Pound" },
   { value: "XLM", label: "XLM — Stellar Lumens" },
 ];
-
-const notificationOptions = [
-  { key: "email", label: "Email notifications", description: "Receive updates via email" },
-  { key: "push", label: "Push notifications", description: "Browser push notifications" },
-  { key: "sms", label: "SMS alerts", description: "Transaction alerts via SMS" },
-  { key: "marketing", label: "Marketing emails", description: "Product updates and offers" },
-] as const;
-
-type NotificationKey = (typeof notificationOptions)[number]["key"];
-
-const securityItems = [
-  { key: "passkey", label: "Passkey", icon: Key, description: "Use biometric or hardware key" },
-  { key: "google", label: "Google Authenticator", icon: Shield, description: "Two-factor authentication" },
-  { key: "email", label: "Email", icon: Mail, description: "jane.doe@gmail.com" },
-  { key: "phone", label: "Phone number", icon: Phone, description: "+1 (555) 000-0000" },
-  { key: "password", label: "Password", icon: Lock, description: "Last changed 30 days ago" },
-] as const;
-
-type SecurityKey = (typeof securityItems)[number]["key"];
-
-function Toggle({
-  checked,
-  onCheckedChange,
-  disabled,
-}: {
-  checked: boolean;
-  onCheckedChange: (value: boolean) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onCheckedChange(!checked)}
-      className={`settings-toggle ${checked ? "settings-toggle-on" : "settings-toggle-off"}`}
-    >
-      <span className="settings-toggle-thumb" />
-    </button>
-  );
-}
 
 function SettingsSelect({
   value,
@@ -156,20 +100,6 @@ function SettingsPage() {
   const [checking, setChecking] = useState(true);
   const [language, setLanguage] = useState("en");
   const [currency, setCurrency] = useState("USD");
-  const [notifications, setNotifications] = useState<Record<NotificationKey, boolean>>({
-    email: true,
-    push: true,
-    sms: false,
-    marketing: false,
-  });
-  const [security, setSecurity] = useState<Record<SecurityKey, boolean>>({
-    passkey: true,
-    google: true,
-    email: true,
-    phone: false,
-    password: true,
-  });
-  const [referralCode] = useState("STARLIT-JANE-2024");
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [settingsReady, setSettingsReady] = useState(false);
   const [settingsError, setSettingsError] = useState("");
@@ -190,19 +120,6 @@ function SettingsPage() {
           if (cancelled) return;
           setLanguage(settings.language);
           setCurrency(settings.currency);
-          setNotifications({
-            email: settings.notif_email,
-            push: settings.notif_push,
-            sms: settings.notif_sms,
-            marketing: settings.notif_marketing,
-          });
-          setSecurity({
-            passkey: settings.sec_passkey,
-            google: settings.sec_google,
-            email: settings.sec_email,
-            phone: settings.sec_phone,
-            password: settings.sec_password,
-          });
           setSettingsReady(true);
         })
         .catch(() => {
@@ -222,22 +139,6 @@ function SettingsPage() {
       else next.add(key);
       return next;
     });
-  }
-
-  function toggleNotification(key: NotificationKey) {
-    const next = !notifications[key];
-    setNotifications((prev) => ({ ...prev, [key]: next }));
-    void persistSetting({ [`notif_${key}`]: next } as SettingsUpdate, () =>
-      setNotifications((prev) => ({ ...prev, [key]: !next })),
-    );
-  }
-
-  function toggleSecurity(key: SecurityKey) {
-    const next = !security[key];
-    setSecurity((prev) => ({ ...prev, [key]: next }));
-    void persistSetting({ [`sec_${key}`]: next } as SettingsUpdate, () =>
-      setSecurity((prev) => ({ ...prev, [key]: !next })),
-    );
   }
 
   function changeLanguage(value: string) {
@@ -329,138 +230,6 @@ function SettingsPage() {
               <button
                 type="button"
                 className="settings-section-header"
-                onClick={() => toggleSection("notifications")}
-                aria-expanded={!collapsedSections.has("notifications")}
-              >
-                <ChevronDown
-                  className={`settings-section-chevron ${collapsedSections.has("notifications") ? "settings-section-chevron-collapsed" : ""}`}
-                />
-                <span className="settings-section-title">
-                  <Bell /> Notifications
-                </span>
-              </button>
-              <div className={`settings-section-body ${collapsedSections.has("notifications") ? "settings-section-body-collapsed" : ""}`}>
-                <div className="settings-list">
-                  {notificationOptions.map((option) => (
-                    <div key={option.key} className="settings-list-row">
-                      <div className="settings-list-copy">
-                        <b>{option.label}</b>
-                        <small>{option.description}</small>
-                      </div>
-                      <Toggle
-                        checked={notifications[option.key]}
-                        onCheckedChange={() => toggleNotification(option.key)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-section">
-              <button
-                type="button"
-                className="settings-section-header"
-                onClick={() => toggleSection("referral")}
-                aria-expanded={!collapsedSections.has("referral")}
-              >
-                <ChevronDown
-                  className={`settings-section-chevron ${collapsedSections.has("referral") ? "settings-section-chevron-collapsed" : ""}`}
-                />
-                <span className="settings-section-title">
-                  <Link2 /> Referral Program
-                </span>
-              </button>
-              <div className={`settings-section-body ${collapsedSections.has("referral") ? "settings-section-body-collapsed" : ""}`}>
-                <p className="settings-section-desc">
-                  Share your referral link and earn rewards for every new user.
-                </p>
-                <div className="settings-referral">
-                  <Input readOnly value={referralCode} />
-                  <Button
-                    variant="secondary"
-                    className="settings-referral-btn"
-                    style={{ height: 44 }}
-                    onClick={() => navigator.clipboard.writeText(referralCode)}
-                  >
-                    <Copy /> Copy Code
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    className="settings-referral-btn"
-                    style={{ height: 44 }}
-                    onClick={() => navigator.clipboard.writeText(`https://starlitpay.xyz/ref/${referralCode}`)}
-                  >
-                    <Link2 /> Copy Link
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-section">
-              <button
-                type="button"
-                className="settings-section-header"
-                onClick={() => toggleSection("rating")}
-                aria-expanded={!collapsedSections.has("rating")}
-              >
-                <ChevronDown
-                  className={`settings-section-chevron ${collapsedSections.has("rating") ? "settings-section-chevron-collapsed" : ""}`}
-                />
-                <span className="settings-section-title">
-                  <Star /> Rate Starlit
-                </span>
-              </button>
-              <div className={`settings-section-body ${collapsedSections.has("rating") ? "settings-section-body-collapsed" : ""}`}>
-                <p className="settings-section-desc">
-                  Help us improve by sharing your experience.
-                </p>
-                <div className="settings-stores-row">
-                  <span className="settings-store-wrap">
-                    <AppStoreButton size="md" />
-                    <span className="soon-badge">Soon</span>
-                  </span>
-                  <span className="settings-store-wrap">
-                    <GooglePlayButton size="md" />
-                    <span className="soon-badge">Soon</span>
-                  </span>
-                  <Button variant="secondary" className="settings-action-btn settings-trustpilot-btn">
-                    <ExternalLink /> Trustpilot
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-section">
-              <button
-                type="button"
-                className="settings-section-header"
-                onClick={() => toggleSection("feedback")}
-                aria-expanded={!collapsedSections.has("feedback")}
-              >
-                <ChevronDown
-                  className={`settings-section-chevron ${collapsedSections.has("feedback") ? "settings-section-chevron-collapsed" : ""}`}
-                />
-                <span className="settings-section-title">
-                  <MessageSquare /> Feedback & Community
-                </span>
-              </button>
-              <div className={`settings-section-body ${collapsedSections.has("feedback") ? "settings-section-body-collapsed" : ""}`}>
-                <div className="settings-grid">
-                  <Button variant="secondary" className="settings-action-btn">
-                    <Share2 /> Share Feedback
-                  </Button>
-                  <Button variant="secondary" className="settings-action-btn">
-                    <Users /> Join Community
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            <div className="settings-section">
-              <button
-                type="button"
-                className="settings-section-header"
                 onClick={() => toggleSection("security")}
                 aria-expanded={!collapsedSections.has("security")}
               >
@@ -472,25 +241,7 @@ function SettingsPage() {
                 </span>
               </button>
               <div className={`settings-section-body ${collapsedSections.has("security") ? "settings-section-body-collapsed" : ""}`}>
-                <div className="settings-list">
-                  {securityItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <div key={item.key} className="settings-list-row">
-                        <div className="settings-list-copy">
-                          <b>
-                            <Icon /> {item.label}
-                          </b>
-                          <small>{item.description}</small>
-                        </div>
-                        <Toggle
-                          checked={security[item.key]}
-                          onCheckedChange={() => toggleSecurity(item.key)}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
+                <PasskeySettings />
               </div>
             </div>
           </section>

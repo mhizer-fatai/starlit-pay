@@ -10,6 +10,7 @@ import {
   AtSign,
   Check,
   ChevronDown,
+  Fingerprint,
   Hash,
   Loader2,
   QrCode,
@@ -25,8 +26,13 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { Input } from "@/components/ui/input";
-import { getUser, getViewingSecret, signAuthRequest, type SessionUser } from "@/lib/auth";
+import { getSpendingKey, getUser, getViewingSecret, isVaultMode, signAuthRequest, type SessionUser } from "@/lib/auth";
+import { isValidPin } from "@/lib/keys";
+import { confirmPaymentWithPasskey, confirmPaymentWithPin, friendlyAuthError } from "@/lib/passkeyAccount";
+import { selfNoteSecret } from "@/lib/ownedNotes";
+import { withNoteLock } from "@/lib/reshield";
 import {
+  getSmartWallet,
   lookupUser,
   postNote,
   postTransaction,
@@ -36,10 +42,10 @@ import {
   submitRelayerTransfer,
   submitRelayerWithdraw,
 } from "@/lib/backend";
-import { getSpendableNotes } from "@/lib/notes";
+import { getSpendableNotes, spendRootFor } from "@/lib/notes";
 import { bytesToHex, encryptNote } from "@/lib/crypto";
 import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
-import { TOKENS } from "@/lib/stellar";
+import { TOKENS, isStellarAddress } from "@/lib/stellar";
 import {
   formatGrouped,
   loadPrivateBalances,
@@ -184,7 +190,20 @@ function SendPage() {
   const [scanning, setScanning] = useState(false);
   const [scanTarget, setScanTarget] = useState<"username" | "tagId">("username");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Passkey accounts confirm each private payment with one biometric tap
+  // (or the PIN). slide -> passkey -> (pin fallback)
+  const [confirmStage, setConfirmStage] = useState<"slide" | "passkey" | "pin" | "pin-checking">("slide");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [confirmError, setConfirmError] = useState("");
   const [errors, setErrors] = useState<{ username?: string; amount?: string }>({});
+  // The user's public smart wallet (C-address), offered as a withdrawal destination.
+  const [smartWalletAddress, setSmartWalletAddress] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isVaultMode()) return;
+    getSmartWallet()
+      .then((info) => setSmartWalletAddress(info.address))
+      .catch(() => undefined);
+  }, []);
   const scanInputRef = useRef<HTMLInputElement>(null);
 
   async function handleScanQR(event: React.ChangeEvent<HTMLInputElement>) {
@@ -253,8 +272,8 @@ function SendPage() {
           : "Recipient Stellar wallet address is required";
     } else if (mode === "starlit" && !/^[A-Za-z0-9._-]+$/.test(trimmedUsername.replace(/^@/, ""))) {
       nextErrors.username = "Use only letters, numbers, dots, dashes or underscores";
-    } else if (mode === "external" && (!trimmedUsername.startsWith("G") || trimmedUsername.length !== 56)) {
-      nextErrors.username = "Enter a valid 56-character Stellar public address starting with G";
+    } else if (mode === "external" && !isStellarAddress(trimmedUsername)) {
+      nextErrors.username = "Enter a valid Stellar address (G… account or C… smart wallet)";
     }
     if (!amount.trim()) {
       nextErrors.amount = "Amount is required";
@@ -273,21 +292,67 @@ function SendPage() {
     setConfirmOpen(true);
   }
 
-  function confirmAndSend() {
+  function closeConfirm() {
     setConfirmOpen(false);
+    setConfirmStage("slide");
+    setConfirmPin("");
+    setConfirmError("");
+  }
+
+  function sendConfirmed() {
+    closeConfirm();
     void submitPayment();
+  }
+
+  async function confirmAndSend() {
+    if (!isVaultMode()) {
+      sendConfirmed();
+      return;
+    }
+    setConfirmStage("passkey");
+    setConfirmError("");
+    try {
+      await confirmPaymentWithPasskey();
+      sendConfirmed();
+    } catch (err) {
+      setConfirmStage("pin");
+      setConfirmError(`${friendlyAuthError(err)} You can confirm with your PIN instead.`);
+    }
+  }
+
+  async function confirmWithPin(event: FormEvent) {
+    event.preventDefault();
+    if (!isValidPin(confirmPin)) {
+      setConfirmError("PIN must be exactly 6 digits.");
+      return;
+    }
+    setConfirmStage("pin-checking");
+    setConfirmError("");
+    try {
+      await confirmPaymentWithPin(confirmPin);
+      sendConfirmed();
+    } catch (err) {
+      setConfirmPin("");
+      setConfirmStage("pin");
+      setConfirmError(friendlyAuthError(err));
+    }
   }
 
   useEffect(() => {
     if (!confirmOpen) return;
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setConfirmOpen(false);
+      if (event.key === "Escape") closeConfirm();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [confirmOpen]);
 
-  async function submitPayment() {
+  // Shares the note lock with background re-shielding, so both never spend the same note.
+  function submitPayment() {
+    return withNoteLock(submitPaymentUnlocked);
+  }
+
+  async function submitPaymentUnlocked() {
     setBusy(true);
     setMessage("Initializing transaction...");
     try {
@@ -337,7 +402,7 @@ function SendPage() {
       const input2 = inputNotes[1] || null;
       const spendAmount = amt;
       const changeAmount = inputSum - spendAmount;
-      const spendRoot = input1.root || "0000000000000000000000000000000000000000000000000000000000000000";
+      const spendRoot = await spendRootFor(input1);
 
       // Dummy note setup if only 1 input note is used
       let secret2Hex = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
@@ -352,22 +417,27 @@ function SendPage() {
       let changeCommitmentHex = "0000000000000000000000000000000000000000000000000000000000000000";
       let changeEncryptedHex = "00";
       if (changeAmount > 0.0001) {
-        const changeSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+        // Change goes back to the sender, so its secret is derived from their own
+        // spending key: only they can spend it (see lib/ownedNotes).
+        const spendingKey = getSpendingKey(me.email);
+        if (!spendingKey) throw new Error("Wallet is locked. Please unlock your wallet first.");
+        const { secret: changeSecret, n: changeN } = await selfNoteSecret(spendingKey);
         changeCommitmentHex = await calculateCommitment(changeAmount, me.public_encryption_key || "", tokenAddress, changeSecret);
         const changeEncrypted = encryptNote(
           changeAmount,
           asset,
           changeSecret,
           me.username,
-          me.public_encryption_key || ""
+          me.public_encryption_key || "",
+          { n: changeN }
         );
         changeEncryptedHex = changeEncrypted.ephemeralPublicKey + changeEncrypted.nonce + changeEncrypted.ciphertext;
       }
 
       if (mode === "external") {
         // WITHDRAWAL FLOW
-        if (!rawTarget.startsWith("G") || rawTarget.length !== 56) {
-          throw new Error("Enter a valid 56-character Stellar public address starting with G");
+        if (!isStellarAddress(rawTarget)) {
+          throw new Error("Enter a valid Stellar address (G… account or C… smart wallet)");
         }
 
         setMessage("Preparing secure withdrawal...");
@@ -689,11 +759,23 @@ function SendPage() {
                             setUsername(event.target.value);
                             setErrors((prev) => ({ ...prev, username: undefined }));
                           }}
-                          placeholder="Recipient wallet address"
+                          placeholder="Recipient wallet address (G… or C…)"
                           aria-invalid={Boolean(errors.username)}
                           aria-describedby={errors.username ? "send-username-error" : undefined}
                         />
                       </div>
+                      {smartWalletAddress && username.trim() !== smartWalletAddress && (
+                        <button
+                          type="button"
+                          className="send-shortcut"
+                          onClick={() => {
+                            setUsername(smartWalletAddress);
+                            setErrors((prev) => ({ ...prev, username: undefined }));
+                          }}
+                        >
+                          <Wallet /> Send to my smart wallet
+                        </button>
+                      )}
                       {errors.username && (
                         <span className="send-error" id="send-username-error" role="alert">
                           <TriangleAlert />
@@ -835,7 +917,7 @@ function SendPage() {
                 className="send-modal"
                 role="presentation"
                 onMouseDown={(event) => {
-                  if (event.target === event.currentTarget) setConfirmOpen(false);
+                  if (event.target === event.currentTarget && confirmStage !== "passkey") closeConfirm();
                 }}
               >
                 <div
@@ -851,7 +933,7 @@ function SendPage() {
                     <button
                       type="button"
                       className="modal-close"
-                      onClick={() => setConfirmOpen(false)}
+                      onClick={closeConfirm}
                       aria-label="Close"
                     >
                       <X />
@@ -880,10 +962,50 @@ function SendPage() {
                         <span className="modal-value">{tagId}</span>
                       </div>
                     )}
-                    <SlideToConfirm
-                      label="Slide to Confirm Transaction"
-                      onComplete={confirmAndSend}
-                    />
+                    {confirmStage === "slide" && (
+                      <SlideToConfirm
+                        label={isVaultMode() ? "Slide, then confirm with your passkey" : "Slide to Confirm Transaction"}
+                        onComplete={() => void confirmAndSend()}
+                      />
+                    )}
+                    {confirmStage === "passkey" && (
+                      <p className="flex items-center justify-center gap-2 py-3 text-[14px] text-muted-foreground" role="status">
+                        <Fingerprint className="size-5 text-primary" /> Confirm with your fingerprint, face or screen lock…
+                      </p>
+                    )}
+                    {(confirmStage === "pin" || confirmStage === "pin-checking") && (
+                      <form onSubmit={confirmWithPin} className="space-y-3 pt-2">
+                        <Input
+                          type="password"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={6}
+                          placeholder="Enter your 6-digit PIN"
+                          value={confirmPin}
+                          onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                          autoFocus
+                          disabled={confirmStage === "pin-checking"}
+                          style={{ textAlign: "center", letterSpacing: "6px" }}
+                        />
+                        <Button type="submit" className="w-full" disabled={confirmStage === "pin-checking"}>
+                          {confirmStage === "pin-checking" ? "Checking…" : "Confirm with PIN"}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="w-full"
+                          disabled={confirmStage === "pin-checking"}
+                          onClick={() => void confirmAndSend()}
+                        >
+                          <Fingerprint /> Try passkey again
+                        </Button>
+                      </form>
+                    )}
+                    {confirmError && (
+                      <p className="pt-2 text-sm text-red-500" role="alert">
+                        {confirmError}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

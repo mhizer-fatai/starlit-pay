@@ -23,7 +23,7 @@ graph LR
 ### Milestone 1.1: Core Protocol & Contracts (Completed)
 - [x] Soroban Shielded Pool smart contract (`contracts/src/pool.rs`).
 - [x] Fixed depth-20 Merkle tree (up to 1,048,576 commitments).
-- [x] Double-spend prevention via on-chain nullifiers.
+- [x] On-chain nullifier tracking (double-spend prevention requires real proof verification; see Milestone 1.5).
 - [x] Unit test suite for `deposit`, `transfer`, and `withdraw` entry points.
 
 ### Milestone 1.2: Client Cryptography & Key Management (Completed)
@@ -52,6 +52,10 @@ graph LR
 - [ ] Integrate Nethermind's `@stellar-private-payments` JS/TS SDK and Circom WASM artifacts into frontend (`frontend/src/utils/zk.js`).
 - [ ] Bridge Starlit's Web2-style Email & PIN key derivation with SPP's note commitment, nullifier, and proof inputs.
 - [ ] Update backend relayer and gateway to submit and sponsor transactions to the new modular SPP contracts.
+- [ ] Replace the placeholder prover (`frontend/src/lib/zk.ts`) and the stub verifier (`contracts/src/verifier.rs`, currently returns `Ok(true)`) with real Groth16 / BN254 proving and verification (Protocol 25 host functions).
+- [ ] Unify hashing (Poseidon) across circuit, frontend, indexer, and on-chain Merkle tree.
+- [ ] Bind both nullifiers, all output commitments, and external data (recipient, fee, encrypted notes) into the proof.
+- [ ] Negative tests: tampered proof, wrong recipient, reused nullifier, unknown root, inflated amount.
 - [ ] Verify complete end-to-end deposit, transfer, and withdrawal flow with on-chain ZK verification on Stellar Testnet.
 
 ### Milestone 1.6: Private Asset Swaps & Mainnet Launch (Upcoming)

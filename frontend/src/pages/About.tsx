@@ -79,7 +79,7 @@ const STEPS = [
   {
     no: "03",
     title: "Pay",
-    text: "Send to a username. A zero-knowledge proof settles the payment on Stellar without revealing its details.",
+    text: "Send to a username. The payment settles through the shielded pool on Stellar, with note details encrypted to the recipient. On-chain proof verification is in development.",
   },
   {
     no: "04",
@@ -107,7 +107,7 @@ const CHAIN_POINTS = [
   {
     icon: Lock,
     title: "Programmable",
-    text: "Smart contracts enforce the rules — one deposit per note, no double-spending — without a custodian holding your money.",
+    text: "Soroban contracts hold the pool and track spent notes. Full on-chain enforcement through zero-knowledge proofs is in development.",
   },
 ];
 
@@ -226,7 +226,7 @@ function AboutPage() {
             </p>
             <ul className="mt-4 grid gap-2 text-[15px] text-foreground/85">
               <li>→ Private balances, decrypted only on your device</li>
-              <li>→ Recipients and amounts inside zero-knowledge proofs</li>
+              <li>→ Recipients and amounts inside zero-knowledge proofs (in development)</li>
               <li>→ One shared pool on-chain — individual payments invisible</li>
             </ul>
           </div>

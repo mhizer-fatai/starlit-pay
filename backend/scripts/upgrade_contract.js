@@ -18,6 +18,17 @@ const adminKeypair = StellarSdk.Keypair.fromSecret(adminSecret.replace(/['"]/g, 
 const adminAddress = adminKeypair.publicKey();
 const contractId = process.env.SHIELDED_POOL_CONTRACT_ID;
 
+// Relayer that must authorize every spend (claim / withdraw / transfer).
+// RELAYER_PUBLIC_KEY wins; otherwise derive it from RELAYER_SECRET_KEY.
+const relayerSecret = process.env.RELAYER_SECRET_KEY;
+const relayerAddress =
+  process.env.RELAYER_PUBLIC_KEY?.trim() ||
+  (relayerSecret ? StellarSdk.Keypair.fromSecret(relayerSecret.replace(/['"]/g, "").trim()).publicKey() : null);
+if (!relayerAddress) {
+  console.error("RELAYER_PUBLIC_KEY or RELAYER_SECRET_KEY is required in .env (spends are rejected until a relayer is set)");
+  process.exit(1);
+}
+
 const wasmPath = path.resolve("../contracts/target/wasm32v1-none/release/starlit_shield_contracts.wasm");
 
 async function main() {
@@ -129,6 +140,46 @@ async function main() {
   } else {
     throw new Error(`Upgrade transaction finished with status: ${upgradeTxResult.status}`);
   }
+
+  // 3. Configure the spend relayer. The upgraded contract rejects every spend
+  // until this is set, so run it straight after the upgrade.
+  console.log(`Step 3: Invoking set_relayer(${relayerAddress})...`);
+  const relayerAccount = await rpc.getAccount(adminAddress);
+  const relayerVal = StellarSdk.nativeToScVal(relayerAddress, { type: "address" });
+
+  let relayerTx = new StellarSdk.TransactionBuilder(relayerAccount, {
+    fee: "100000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(contract.call("set_relayer", relayerVal))
+    .setTimeout(180)
+    .build();
+
+  const simRelayer = await rpc.simulateTransaction(relayerTx);
+  if (StellarSdk.rpc.Api.isSimulationError(simRelayer)) {
+    throw new Error(`set_relayer simulation failed: ${simRelayer.error}`);
+  }
+
+  relayerTx = StellarSdk.rpc.assembleTransaction(relayerTx, simRelayer).build();
+  relayerTx.sign(adminKeypair);
+
+  const relayerRes = await rpc.sendTransaction(relayerTx);
+  if (relayerRes.status === "ERROR") {
+    throw new Error(`set_relayer submission failed: ${relayerRes.errorResult}`);
+  }
+
+  let relayerTxResult = await rpc.getTransaction(relayerRes.hash);
+  attempts = 0;
+  while ((relayerTxResult.status === "NOT_FOUND" || relayerTxResult.status === "PENDING") && attempts < 30) {
+    await new Promise((r) => setTimeout(r, 1500));
+    relayerTxResult = await rpc.getTransaction(relayerRes.hash);
+    attempts++;
+  }
+
+  if (relayerTxResult.status !== "SUCCESS") {
+    throw new Error(`set_relayer finished with status: ${relayerTxResult.status}. Spends are blocked until it succeeds.`);
+  }
+  console.log(`Relayer configured. Tx Hash: ${relayerRes.hash}`);
 }
 
 main().catch((err) => {

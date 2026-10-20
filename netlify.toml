@@ -9,7 +9,7 @@
   command = "npm run build"
 
 [build.environment]
-  VITE_BACKEND_URL = "https://starlit-pay.onrender.com"
+  VITE_BACKEND_URL = "https://api.starlitpay.xyz"
   VITE_TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
 # Configure redirects so SPA routing loads index.html for all sub-paths

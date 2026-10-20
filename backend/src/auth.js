@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { app, supabase } from "./config.js";
+import { authLayer } from "./auth_layer/mount.js";
 
 const JWT_SECRET =
   process.env.JWT_SECRET || "starlit_jwt_secure_signing_secret_prod_2026";
@@ -19,22 +20,30 @@ export function generateToken(user) {
 }
 
 /**
- * Authentication middleware verifying Bearer JWT headers
+ * Authentication middleware. Accepts a legacy Bearer JWT, or a passkey-layer
+ * session (access cookie or Bearer access token).
  */
 export function requireAuth(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Unauthorized: Missing authentication token header." });
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      req.user = jwt.verify(authHeader.split(" ")[1], JWT_SECRET, { algorithms: ["HS256"] });
+      return next();
+    } catch {
+      // Not a legacy token; fall through to the passkey-layer session.
+    }
   }
 
-  const token = authHeader.split(" ")[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] });
-    req.user = decoded;
-    next();
-  } catch (error) {
-    return res.status(401).json({ error: "Unauthorized: Invalid or expired authentication token." });
+  const result = authLayer.sessions?.authenticate(req);
+  if (result?.session) {
+    req.session = result.session;
+    req.user = { id: result.session.id, email: result.session.email, username: result.session.username };
+    return next();
   }
+  if (result?.error === "csrf") {
+    return res.status(403).json({ error: "Missing CSRF header.", code: "csrf" });
+  }
+  return res.status(401).json({ error: "Unauthorized: Missing or invalid authentication token." });
 }
 
 // 1. Authenticate user by email (Login check / PIN unlock)
@@ -90,6 +99,15 @@ app.post("/api/users/register", async (req, res) => {
 
   if (!email || !username || !identity_commitment || !public_encryption_key) {
     return res.status(400).json({ error: "Missing required registration parameters" });
+  }
+
+  // The caller must prove they own the email (Google sign-in verified by
+  // Supabase), so nobody can register an account under someone else's address.
+  if (authLayer.provenEmail) {
+    const proven = await authLayer.provenEmail(req);
+    if (!proven || proven !== String(email).toLowerCase().trim()) {
+      return res.status(401).json({ error: "Sign in with Google to create your account.", code: "email_proof_required" });
+    }
   }
 
   try {

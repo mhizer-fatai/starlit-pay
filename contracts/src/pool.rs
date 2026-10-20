@@ -5,6 +5,13 @@ use soroban_sdk::{
 // Merkle Tree Configuration (Height 20 supports 1,048,576 leaves)
 const TREE_DEPTH: u32 = 20;
 
+// State TTL management (~5s ledgers, 17,280 ledgers per day)
+const DAY_IN_LEDGERS: u32 = 17_280;
+const INSTANCE_BUMP_AMOUNT: u32 = 30 * DAY_IN_LEDGERS;
+const INSTANCE_LIFETIME_THRESHOLD: u32 = INSTANCE_BUMP_AMOUNT - 7 * DAY_IN_LEDGERS;
+const NULLIFIER_BUMP_AMOUNT: u32 = 120 * DAY_IN_LEDGERS;
+const NULLIFIER_LIFETIME_THRESHOLD: u32 = NULLIFIER_BUMP_AMOUNT - 30 * DAY_IN_LEDGERS;
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -24,6 +31,7 @@ pub enum ContractError {
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
+    Relayer,
     Verifier,
     Asp,
     NextLeafIndex,
@@ -91,8 +99,7 @@ impl ShieldedPool {
             (commitment, encrypted_note)
         );
 
-        // Extend contract storage TTL
-        env.storage().instance().extend_ttl(100, 1000);
+        bump_instance(&env);
 
         Ok(new_root)
     }
@@ -107,6 +114,7 @@ impl ShieldedPool {
         amount: i128,
         root: BytesN<32>
     ) -> Result<(), ContractError> {
+        require_relayer(&env)?;
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
         }
@@ -140,7 +148,7 @@ impl ShieldedPool {
         // 4. Mark nullifier as spent (persistent storage)
         env.storage().persistent().set(&nullifier_key, &true);
         // Extend nullifier TTL to prevent double-spending after archival
-        env.storage().persistent().extend_ttl(&nullifier_key, 100, 1000);
+        env.storage().persistent().extend_ttl(&nullifier_key, NULLIFIER_LIFETIME_THRESHOLD, NULLIFIER_BUMP_AMOUNT);
 
         // 5. Transfer tokens to recipient
         let token_client = token::Client::new(&env, &token);
@@ -168,6 +176,7 @@ impl ShieldedPool {
         change_commitment: BytesN<32>,
         encrypted_change_note: Bytes
     ) -> Result<BytesN<32>, ContractError> {
+        require_relayer(&env)?;
         if amount <= 0 {
             return Err(ContractError::InvalidAmount);
         }
@@ -206,10 +215,10 @@ impl ShieldedPool {
 
         // Mark both nullifiers as spent
         env.storage().persistent().set(&nullifier_key_1, &true);
-        env.storage().persistent().extend_ttl(&nullifier_key_1, 100, 1000);
+        env.storage().persistent().extend_ttl(&nullifier_key_1, NULLIFIER_LIFETIME_THRESHOLD, NULLIFIER_BUMP_AMOUNT);
 
         env.storage().persistent().set(&nullifier_key_2, &true);
-        env.storage().persistent().extend_ttl(&nullifier_key_2, 100, 1000);
+        env.storage().persistent().extend_ttl(&nullifier_key_2, NULLIFIER_LIFETIME_THRESHOLD, NULLIFIER_BUMP_AMOUNT);
 
         // Transfer public tokens to recipient
         let token_client = token::Client::new(&env, &token);
@@ -240,6 +249,8 @@ impl ShieldedPool {
         encrypted_note_2: Bytes,
         root: BytesN<32>
     ) -> Result<BytesN<32>, ContractError> {
+        require_relayer(&env)?;
+
         // Verify nullifier 1 hasn't been spent
         let nullifier_key_1 = DataKey::Nullifier(nullifier_1.clone());
         if env.storage().persistent().has(&nullifier_key_1) {
@@ -266,10 +277,10 @@ impl ShieldedPool {
 
         // Mark both nullifiers as spent in persistent storage
         env.storage().persistent().set(&nullifier_key_1, &true);
-        env.storage().persistent().extend_ttl(&nullifier_key_1, 100, 1000);
+        env.storage().persistent().extend_ttl(&nullifier_key_1, NULLIFIER_LIFETIME_THRESHOLD, NULLIFIER_BUMP_AMOUNT);
 
         env.storage().persistent().set(&nullifier_key_2, &true);
-        env.storage().persistent().extend_ttl(&nullifier_key_2, 100, 1000);
+        env.storage().persistent().extend_ttl(&nullifier_key_2, NULLIFIER_LIFETIME_THRESHOLD, NULLIFIER_BUMP_AMOUNT);
 
         // Insert both commitments into incremental Merkle tree
         insert_leaf(&env, output_commitment_1.clone())?;
@@ -303,6 +314,29 @@ impl ShieldedPool {
         Ok(())
     }
 
+    /// Sets or updates the relayer address that must authorize every spend
+    /// (claim, withdraw, transfer). Restricted to Admin.
+    ///
+    /// Interim guard while on-chain proof verification is stubbed: without it,
+    /// anyone could submit a fabricated nullifier and drain the pool.
+    pub fn set_relayer(env: Env, relayer: Address) -> Result<(), ContractError> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ContractError::NotInitialized)?;
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Relayer, &relayer);
+        bump_instance(&env);
+        Ok(())
+    }
+
+    /// Returns the configured relayer address, if any
+    pub fn get_relayer(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Relayer)
+    }
+
+    /// Extends the contract instance TTL. Callable by anyone (pays only fees).
+    pub fn bump(env: Env) {
+        bump_instance(&env);
+    }
+
     /// Sets or updates the Association Set Provider (ASP) contract address. Restricted to Admin.
     pub fn set_asp(env: Env, asp: Address) -> Result<(), ContractError> {
         let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(ContractError::NotInitialized)?;
@@ -318,6 +352,24 @@ impl ShieldedPool {
         env.deployer().update_current_contract_wasm(new_wasm_hash);
         Ok(())
     }
+}
+
+/// Fails closed: spends are rejected until the admin has configured a relayer.
+fn require_relayer(env: &Env) -> Result<(), ContractError> {
+    let relayer: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Relayer)
+        .ok_or(ContractError::Unauthorized)?;
+    relayer.require_auth();
+    bump_instance(env);
+    Ok(())
+}
+
+fn bump_instance(env: &Env) {
+    env.storage()
+        .instance()
+        .extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
 }
 
 // Internal Merkle Tree helpers

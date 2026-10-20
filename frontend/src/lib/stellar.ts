@@ -4,6 +4,11 @@ export const HORIZON_URL = "https://horizon-testnet.stellar.org";
 export const RPC_URL = "https://soroban-testnet.stellar.org";
 export const NETWORK_PASSPHRASE = StellarSdk.Networks.TESTNET;
 
+/** A Stellar account (G…) or contract such as a smart wallet (C…). */
+export function isStellarAddress(value: string): boolean {
+  return StellarSdk.StrKey.isValidEd25519PublicKey(value) || StellarSdk.StrKey.isValidContract(value);
+}
+
 export const horizon = new StellarSdk.Horizon.Server(HORIZON_URL);
 export const rpc = new StellarSdk.rpc.Server(RPC_URL);
 
