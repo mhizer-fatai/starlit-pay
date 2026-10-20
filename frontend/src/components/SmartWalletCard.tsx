@@ -232,11 +232,11 @@ export function SmartWalletCard({
           {hasRecovery === false && (
             <div className="wallet-warning" role="status">
               <p>
-                <b>Not protected yet.</b> Only your wallet passkey can move these funds. Protect the wallet so your
+                <b>Setup not finished.</b> The last step of creating this wallet was interrupted, so only your wallet passkey can move these funds. Finish it so your
                 recovery code can also recover this wallet.
               </p>
               <Button type="button" variant="secondary" onClick={addRecovery} disabled={busy}>
-                {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Protect with recovery code
+                {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Finish setup: protect with recovery code
               </Button>
             </div>
           )}

@@ -260,12 +260,12 @@ export async function createSmartWallet(options: { credentialId: string; onStatu
   const passkey = info.passkeys.find((p) => p.credentialId === credentialId);
   if (!passkey) throw new NeedsWalletPasskeyError();
 
-  status("Creating your wallet on Stellar…");
+  status("Step 1 of 2: creating your wallet on Stellar — approve with your passkey…");
   await kit.credentials.save({ credentialId, publicKey: fromB64u(passkey.publicKey), nickname: "Starlit Pay" });
   const deployed = await kit.credentials.deploy(credentialId, { autoSubmit: true });
   if (!deployed.submitResult?.success) throw failure(deployed.submitResult ?? { success: false }, "The wallet could not be created.");
 
-  status("Protecting the wallet with your recovery code (confirm with your passkey)…");
+  status("Step 2 of 2: protecting it with your recovery code — approve with your passkey once more…");
   try {
     await submitRecoveryRule(kit, info, vaultKeys.stellar.publicKey);
   } catch (err) {
