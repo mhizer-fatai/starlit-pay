@@ -178,7 +178,7 @@ export function ReceiptModal({
                   color: incoming ? "var(--color-dashboard-green)" : "var(--color-dashboard-blue)",
                 }}
               >
-                {incoming ? "Received" : "Sent"}
+                {item.transfer ? "Transfer" : incoming ? "Received" : "Sent"}
               </span>
             </div>
           </div>

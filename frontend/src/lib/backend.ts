@@ -300,6 +300,17 @@ export interface SmartWalletInfo {
   };
 }
 export const getSmartWallet = () => req<SmartWalletInfo>("/api/smart-wallet", undefined, true);
+let ownWallet: Promise<string | null> | null = null;
+/** The user's public wallet address (cached per page load); null if none or unavailable. */
+export function ownWalletAddress(): Promise<string | null> {
+  ownWallet ??= getSmartWallet()
+    .then((info) => info.address)
+    .catch(() => {
+      ownWallet = null;
+      return null;
+    });
+  return ownWallet;
+}
 /** Short-lived token for the sponsored relayer (smart-account-kit cannot send cookies). */
 export const getSmartWalletRelayToken = () =>
   req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" }, true);
