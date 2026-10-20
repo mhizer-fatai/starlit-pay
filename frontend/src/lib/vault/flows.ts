@@ -15,10 +15,16 @@ import { addUnlockMethod, createVault, openVault, type NewVault, type OpenedVaul
 import { generateRecoveryCode, parseRecoveryCode, recoveryMaterial } from "./recovery";
 import type { Ceremonies } from "./webauthn";
 
+const onWindows = () => typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
+
 /** Signed in, but this passkey cannot open the vault on this device (no PRF, or no wrap yet). */
 export class PasskeyNeedsPinError extends Error {
   constructor(readonly user: AuthUser) {
-    super("This device can't unlock your wallet with its passkey. Enter your PIN instead.");
+    super(
+      onWindows()
+        ? "Windows Hello can sign you in but can't unlock your wallet on this computer. Enter your PIN, or use your phone's passkey."
+        : "This passkey can sign you in but can't unlock your wallet on this device. Enter your PIN, or use your phone's passkey."
+    );
     this.name = "PasskeyNeedsPinError";
   }
 }
