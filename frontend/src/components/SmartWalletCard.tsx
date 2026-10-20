@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeftRight, Check, Copy, ExternalLink, Fingerprint, Loader2, RefreshCw, Send, Smartphone } from "lucide-react";
+import { Check, Copy, ExternalLink, Fingerprint, Loader2, RefreshCw, Send, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,14 +29,12 @@ export function SmartWalletCard({
   hidden = false,
   prices,
   refreshKey = 0,
-  onTransfer,
   onBalances,
 }: {
   hidden?: boolean;
   prices: Prices;
   /** Change to reload the wallet (e.g. after a transfer). */
   refreshKey?: number;
-  onTransfer: () => void;
   onBalances?: (balances: Record<WalletToken, number> | null) => void;
 }) {
   const [info, setInfo] = useState<SmartWalletInfo | null>(null);
@@ -212,9 +210,6 @@ export function SmartWalletCard({
           </div>
           <p className="wallet-caption">Visible on Stellar. Fees covered by Starlit.</p>
           <div className="wallet-actions">
-            <Button type="button" variant="secondary" onClick={onTransfer} disabled={busy}>
-              <ArrowLeftRight /> Transfer
-            </Button>
             <Button type="button" onClick={() => setSendOpen((v) => !v)} disabled={busy}>
               <Send /> Send with passkey
             </Button>

@@ -212,6 +212,16 @@ function DashboardPage() {
             <Button
               variant="secondary"
               className={actionButtonClass}
+              onClick={() => openTransfer("to-public")}
+              disabled={!publicBalances}
+              title={publicBalances ? "Move funds between your private and public balances" : "Create your public wallet first"}
+            >
+              <ArrowLeftRight />
+              Transfer
+            </Button>
+            <Button
+              variant="secondary"
+              className={actionButtonClass}
               onClick={() => navigate("/send?mode=external")}
             >
               <ArrowUp />
@@ -263,21 +273,12 @@ function DashboardPage() {
                 <AssetRow asset="XLM" amount={xlmBalance} price={prices.XLM} hidden={balanceHidden} loading={balancesLoading} />
               </div>
               <p className="wallet-caption">Only you can see this balance. Payments from it stay private.</p>
-              <div className="wallet-actions">
-                <Button type="button" onClick={() => openTransfer("to-public")} disabled={!publicBalances}>
-                  <ArrowLeftRight /> Transfer
-                </Button>
-              </div>
-              {!publicBalances && !balancesLoading && (
-                <small className="wallet-caption">Create your public wallet to transfer between balances.</small>
-              )}
             </section>
 
             <SmartWalletCard
               hidden={balanceHidden}
               prices={prices}
               refreshKey={walletRefreshKey}
-              onTransfer={() => openTransfer("to-private")}
               onBalances={setPublicBalances}
             />
           </div>
