@@ -84,7 +84,11 @@ export interface DecodedTx {
   asset?: string;
   hash?: string;
   at?: string;
+  /** Set on moves between the user's own private and public balances. */
+  transfer?: Transfer;
 }
+
+export type Transfer = "to-public" | "to-private";
 
 /** Decodes the base64-JSON payloads written by the Send flow. */
 export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | null {
@@ -97,6 +101,7 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
       asset?: unknown;
       hash?: unknown;
       at?: unknown;
+      transfer?: unknown;
     };
     if (obj && typeof obj === "object") {
       return {
@@ -107,6 +112,7 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
         asset: typeof obj.asset === "string" ? obj.asset : undefined,
         hash: typeof obj.hash === "string" ? obj.hash : undefined,
         at: typeof obj.at === "string" ? obj.at : undefined,
+        transfer: obj.transfer === "to-public" || obj.transfer === "to-private" ? obj.transfer : undefined,
       };
     }
   } catch {
@@ -223,6 +229,8 @@ export interface ActivityItem {
   referenceLabel: string;
   hash?: string;
   ledger?: number;
+  /** A move between the user's own private balance and public wallet. */
+  transfer?: Transfer;
 }
 
 /**
@@ -235,15 +243,20 @@ export function buildActivityFeed(
   notes: BalanceNote[],
   txs: BackendTransaction[],
   viewerUsername?: string,
+  /** The user's public smart wallet: withdrawals to it are transfers, not payments. */
+  ownWalletAddress?: string | null,
 ): ActivityItem[] {
   const items: ActivityItem[] = [];
   const self = (viewerUsername ?? "").toLowerCase().trim();
   for (const tx of txs) {
     const decoded = tx.encrypted_payload ? decodeTransactionPayload(tx.encrypted_payload) : null;
     if (decoded?.amount === undefined || !decoded.asset) continue;
+    const transfer: Transfer | undefined =
+      decoded.transfer ?? (ownWalletAddress && decoded.to === ownWalletAddress ? "to-public" : undefined);
     items.push({
       key: `tx-${tx.id ?? `${tx.created_at ?? ""}-${decoded.amount}`}`,
-      direction: "out",
+      direction: transfer === "to-private" ? "in" : "out",
+      transfer,
       amount: decoded.amount,
       asset: decoded.asset,
       party: decoded.toUsername ?? decoded.to ?? "",
@@ -282,6 +295,8 @@ export function partyLabel(party: string): string {
 
 /** Row title, mirroring the previous frontend's activity labels. */
 export function activityTitle(item: ActivityItem): string {
+  if (item.transfer === "to-public") return "Transfer to public wallet";
+  if (item.transfer === "to-private") return "Transfer from public wallet";
   const label = partyLabel(item.party);
   if (item.direction === "in") {
     if (item.party.toLowerCase() === "deposit") return "Deposit";

@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
 import { useSidebar } from "@/lib/sidebar";
 import { getUser } from "@/lib/auth";
+import { ownWalletAddress } from "@/lib/backend";
 import {
   activityTitle,
   buildActivityFeed,
@@ -58,10 +59,10 @@ function TransactionsPage() {
       setUserName(name);
       // Merge outgoing records with incoming shielded notes (same feed as
       // the dashboard's Recent Activity).
-      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user)])
-        .then(([txs, balances]) => {
+      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user), ownWalletAddress()])
+        .then(([txs, balances, wallet]) => {
           if (cancelled) return;
-          setFeed(buildActivityFeed(balances?.notes ?? [], txs, user.username));
+          setFeed(buildActivityFeed(balances?.notes ?? [], txs, user.username, wallet));
         })
         .catch(() => {})
         .finally(() => {

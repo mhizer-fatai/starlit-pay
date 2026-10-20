@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { getUser, signOut } from "@/lib/auth";
-import { fetchStats, type BackendTransaction } from "@/lib/backend";
+import { fetchStats, ownWalletAddress, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
@@ -58,6 +58,10 @@ function DashboardPage() {
   const [transferDirection, setTransferDirection] = useState<TransferDirection | null>(null);
   const [publicBalances, setPublicBalances] = useState<Record<"XLM" | "USDC", number> | null>(null);
   const [walletRefreshKey, setWalletRefreshKey] = useState(0);
+  const [ownWallet, setOwnWallet] = useState<string | null>(null);
+  useEffect(() => {
+    void ownWalletAddress().then(setOwnWallet);
+  }, []);
   const openTransfer = (direction: TransferDirection) => setTransferDirection(direction);
   // Live prices via the backend (Stellar DEX first). XLM is null when no real
   // price is available; the total is then unknown rather than guessed.
@@ -148,8 +152,8 @@ function DashboardPage() {
   // Viewer identity filters out own change notes (see buildActivityFeed).
   const [viewerUsername, setViewerUsername] = useState("");
   const activityFeed = useMemo(
-    () => buildActivityFeed(balanceNotes, allTxs, viewerUsername),
-    [balanceNotes, allTxs, viewerUsername],
+    () => buildActivityFeed(balanceNotes, allTxs, viewerUsername, ownWallet),
+    [balanceNotes, allTxs, viewerUsername, ownWallet],
   );
   const recentActivity = activityFeed.slice(0, 4);
 
