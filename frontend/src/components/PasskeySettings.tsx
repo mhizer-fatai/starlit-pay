@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Fingerprint, KeyRound, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Fingerprint, KeyRound, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 
 import { RecoveryCodePanel } from "@/components/RecoveryCodePanel";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,18 @@ import { isValidPin } from "@/lib/keys";
 import { friendlyAuthError, guessDeviceName, passkeysSupported } from "@/lib/passkeyAccount";
 import type { PublicPasskey } from "@/lib/vault/api";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
+import { loadSmartWallet, readWalletSigners } from "@/lib/smartWallet";
+
+/** Credential ids of the passkeys that control the user's public wallet (read on-chain). */
+async function walletPasskeyIds(): Promise<Set<string>> {
+  try {
+    const info = await loadSmartWallet();
+    if (!info.address) return new Set();
+    return new Set((await readWalletSigners(info)).passkeyCredentialIds);
+  } catch {
+    return new Set();
+  }
+}
 
 const PIN_INPUT_STYLE = { textAlign: "center", letterSpacing: "6px" } as const;
 
@@ -31,7 +43,12 @@ export function PasskeySettings() {
   const [newPinConfirm, setNewPinConfirm] = useState("");
   const [recoveryCode, setRecoveryCode] = useState("");
 
+  const [walletIds, setWalletIds] = useState<Set<string>>(new Set());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
   const load = useCallback(async () => {
+    void walletPasskeyIds().then(setWalletIds);
     try {
       const [list, status] = await Promise.all([authApi.listPasskeys(), authApi.getVaultStatus()]);
       setPasskeys(list.passkeys);
@@ -85,6 +102,23 @@ export function PasskeySettings() {
       );
       await load();
     });
+
+  const startRename = (passkey: PublicPasskey) => {
+    setEditingId(passkey.id);
+    setEditName(passkey.deviceName ?? "");
+  };
+
+  const saveRename = (event: React.FormEvent) => {
+    event.preventDefault();
+    const id = editingId;
+    const name = editName.trim();
+    if (!id || !name) return;
+    void run(async () => {
+      await authApi.renamePasskey(id, name);
+      setEditingId(null);
+      await load();
+    });
+  };
 
   const removePasskey = (passkey: PublicPasskey) =>
     run(async () => {
@@ -155,9 +189,29 @@ export function PasskeySettings() {
         {passkeys.map((p) => (
           <div key={p.id} className="settings-list-row">
             <div className="settings-list-copy">
-              <b>
-                <Fingerprint /> {p.deviceName ?? "Passkey"}
-              </b>
+              {editingId === p.id ? (
+                <form className="passkey-rename" onSubmit={saveRename}>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    maxLength={64}
+                    autoFocus
+                    aria-label="Passkey name"
+                    placeholder="e.g. My phone"
+                  />
+                  <Button type="submit" variant="ghost" size="icon" disabled={busy || !editName.trim()} aria-label="Save name">
+                    <Check />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => setEditingId(null)} aria-label="Cancel">
+                    <X />
+                  </Button>
+                </form>
+              ) : (
+                <b>
+                  <Fingerprint /> {p.deviceName ?? "Passkey"}
+                  {walletIds.has(p.credentialId) && <span className="passkey-badge">Controls your public wallet</span>}
+                </b>
+              )}
               <small>
                 {p.pending
                   ? "Waiting period — active soon"
@@ -167,6 +221,18 @@ export function PasskeySettings() {
                 {" · "}Added {formatDate(p.createdAt)} · Last used {formatDate(p.lastUsedAt)}
               </small>
             </div>
+            {editingId !== p.id && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => startRename(p)}
+                disabled={busy}
+                aria-label={`Rename passkey ${p.deviceName ?? ""}`}
+              >
+                <Pencil />
+              </Button>
+            )}
             <Button
               type="button"
               variant="ghost"

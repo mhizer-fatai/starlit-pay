@@ -381,6 +381,18 @@ describe("vault and PIN", () => {
 });
 
 describe("passkey management", () => {
+  test("renames your own passkey, and only yours", async () => {
+    const { client, passkey } = await enrolFirstPasskey();
+    const res = await client.req("PATCH", `/api/auth/passkeys/${passkey.id}`, { body: { deviceName: "  My phone\u0007 " } });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.equal(res.body.passkey.deviceName, "My phone");
+    assert.equal((await client.get("/api/auth/passkeys")).body.passkeys[0].deviceName, "My phone");
+    assert.equal((await client.req("PATCH", `/api/auth/passkeys/${passkey.id}`, { body: { deviceName: "   " } })).status, 400);
+
+    const stranger = h.client();
+    assert.equal((await stranger.req("PATCH", `/api/auth/passkeys/${passkey.id}`, { body: { deviceName: "x" } })).status, 401);
+  });
+
   test("cannot remove the last passkey when no PIN is set", async () => {
     const { client, passkey } = await enrolFirstPasskey();
     const res = await client.req("DELETE", `/api/auth/passkeys/${passkey.id}`);

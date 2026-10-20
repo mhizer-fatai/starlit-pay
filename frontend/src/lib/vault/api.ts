@@ -42,6 +42,7 @@ export interface AuthUser {
 
 export interface PublicPasskey {
   id: string;
+  credentialId: string;
   deviceName: string | null;
   createdAt: string;
   lastUsedAt: string | null;
@@ -206,6 +207,8 @@ export function createAuthApi({ baseUrl, fetchImpl }: AuthApiOptions) {
       call<T>("POST", "/api/auth/passkey/login/verify", { body }),
     listPasskeys: () => call<{ passkeys: PublicPasskey[] }>("GET", "/api/auth/passkeys"),
     removePasskey: (id: string) => call<{ ok: true }>("DELETE", `/api/auth/passkeys/${encodeURIComponent(id)}`),
+    renamePasskey: (id: string, deviceName: string) =>
+      call<{ passkey: PublicPasskey }>("PATCH", `/api/auth/passkeys/${encodeURIComponent(id)}`, { body: { deviceName } }),
 
     // vault
     getVaultStatus: () => call<VaultStatus>("GET", "/api/vault"),

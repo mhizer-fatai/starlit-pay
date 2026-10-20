@@ -16,6 +16,8 @@ const CEREMONY_TIMEOUT_MS = 60_000;
 export function publicPasskey(passkey, nowMs) {
   return {
     id: passkey.id,
+    // Public WebAuthn identifier; lets the app match the passkey that controls the smart wallet.
+    credentialId: passkey.credential_id,
     deviceName: passkey.device_name,
     createdAt: passkey.created_at,
     lastUsedAt: passkey.last_used_at,
@@ -259,6 +261,15 @@ export function registerPasskeyRoutes(router, { store, sessions, identity, setti
   router.get("/api/auth/passkeys", sessions.requireSession, async (req, res) => {
     const passkeys = await store.listPasskeys(req.session.id);
     res.json({ passkeys: passkeys.filter((p) => !p.revoked_at).map((p) => publicPasskey(p, nowMs())) });
+  });
+
+  router.patch("/api/auth/passkeys/:id", sessions.requireSession, async (req, res) => {
+    const deviceName = cleanDeviceName(req.body?.deviceName);
+    if (!deviceName) return res.status(400).json({ error: "Enter a name for this passkey." });
+    const target = (await activePasskeys(req.session.id)).find((p) => p.id === req.params.id);
+    if (!target) return res.status(404).json({ error: "Passkey not found." });
+    await store.renamePasskey(target.id, deviceName);
+    res.json({ passkey: publicPasskey({ ...target, device_name: deviceName }, nowMs()) });
   });
 
   router.delete("/api/auth/passkeys/:id", sessions.requireSession, sessions.requireFreshAuth, async (req, res) => {
