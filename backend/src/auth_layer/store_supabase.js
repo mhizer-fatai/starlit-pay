@@ -64,6 +64,9 @@ export function createSupabaseStore(supabase) {
     async revokePasskey(id, at) {
       check(await supabase.from("passkeys").update({ revoked_at: at }).eq("id", id).is("revoked_at", null));
     },
+    async renamePasskey(id, deviceName) {
+      check(await supabase.from("passkeys").update({ device_name: deviceName }).eq("id", id).is("revoked_at", null));
+    },
 
     async getVault(userId) {
       return check(await supabase.from("key_vault").select("*").eq("user_id", userId).maybeSingle());

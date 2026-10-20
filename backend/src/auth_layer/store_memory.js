@@ -72,6 +72,10 @@ export function createMemoryStore({ now = () => Date.now(), users = [] } = {}) {
       const row = db.passkeys.get(id);
       if (row) row.revoked_at = at;
     },
+    async renamePasskey(id, deviceName) {
+      const row = db.passkeys.get(id);
+      if (row) row.device_name = deviceName;
+    },
 
     async getVault(userId) {
       return copy(db.vaults.get(userId));
