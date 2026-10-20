@@ -3265,3 +3265,21 @@
   font-size: 14px;
   text-decoration: underline;
 }
+.wallet-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid oklch(0.8 0.12 75);
+  border-radius: 10px;
+  background: oklch(0.97 0.04 85);
+  color: oklch(0.38 0.08 60);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.dark .wallet-warning {
+  border-color: oklch(0.55 0.1 75);
+  background: oklch(0.3 0.05 75 / 0.4);
+  color: oklch(0.88 0.08 85);
+}
