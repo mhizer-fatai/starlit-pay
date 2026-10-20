@@ -6,6 +6,7 @@ import { walletAddressFor, walletPasskey, type SmartWalletInfo } from "@/lib/sma
 
 const info = (address: string | null, ids: string[]): SmartWalletInfo => ({
   address,
+  birth: null,
   passkeys: ids.map((credentialId) => ({ credentialId, publicKey: "", deviceName: null })),
   config: {
     accountWasmHash: "",

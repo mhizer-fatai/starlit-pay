@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { app, rpc, NETWORK_PASSPHRASE, relayerKeypair, supabase } from "./config.js";
 import { requireAuth } from "./auth.js";
-import { checkRelayRequest, rawP256FromCose, RelayRuleError } from "./smart_wallet_rules.js";
+import { checkRelayRequest, createdContractIds, rawP256FromCose, RelayRuleError } from "./smart_wallet_rules.js";
 
 // Public smart wallet: an OpenZeppelin smart account per user, controlled by a
 // passkey that Stellar verifies on-chain (secp256r1). The frontend uses
@@ -60,7 +60,8 @@ function withinRateLimit(userId) {
 }
 
 async function walletContext(userId) {
-  const { data: user, error } = await supabase.from("users").select("id, smart_wallet_address").eq("id", userId).maybeSingle();
+  // select("*"): the birth columns may not exist until schema_smart_wallet.sql is re-run.
+  const { data: user, error } = await supabase.from("users").select("*").eq("id", userId).maybeSingle();
   if (error) throw error;
   if (!user) return null;
   const { data: rows, error: pkError } = await supabase
@@ -75,6 +76,10 @@ async function walletContext(userId) {
     .map((p) => ({ id: p.id, credentialId: p.credential_id, deviceName: p.device_name, rawPublicKey: rawP256FromCose(p.public_key) }));
   return {
     walletAddress: user.smart_wallet_address ?? null,
+    birth:
+      user.smart_wallet_tx_hash && user.smart_wallet_ledger
+        ? { txHash: user.smart_wallet_tx_hash, ledger: user.smart_wallet_ledger }
+        : null,
     passkeys,
     deployer: CONFIG.deployer,
     accountWasmHash: CONFIG.accountWasmHash,
@@ -102,6 +107,7 @@ app.get("/api/smart-wallet", requireAuth, async (req, res) => {
     if (!ctx) return res.status(404).json({ error: "User not found." });
     res.json({
       address: ctx.walletAddress,
+      birth: ctx.birth,
       // Passkeys that can control an on-chain wallet (ES256 / secp256r1 only).
       passkeys: ctx.passkeys
         .filter((p) => p.rawPublicKey)
@@ -111,6 +117,34 @@ app.get("/api/smart-wallet", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Smart wallet lookup failed:", err.message);
     res.status(500).json({ error: "Could not load your smart wallet." });
+  }
+});
+
+// Records the transaction that created the user's wallet, after checking on
+// chain that it really created that address (for wallets made before the
+// relayer stored it).
+app.post("/api/smart-wallet/birth", requireAuth, async (req, res) => {
+  try {
+    const ctx = await walletContext(req.user.id);
+    if (!ctx?.walletAddress) return res.status(404).json({ error: "No smart wallet." });
+    if (ctx.birth) return res.json({ birth: ctx.birth });
+    const txHash = String(req.body?.txHash ?? "").toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(txHash)) return res.status(400).json({ error: "Invalid transaction hash." });
+    const tx = await rpc.getTransaction(txHash);
+    if (tx.status !== "SUCCESS") return res.status(400).json({ error: "That transaction was not found or failed." });
+    if (!createdContractIds(tx.envelopeXdr, NETWORK_PASSPHRASE).includes(ctx.walletAddress)) {
+      return res.status(400).json({ error: "That transaction did not create your wallet." });
+    }
+    const birth = { txHash, ledger: tx.ledger };
+    const { error } = await supabase
+      .from("users")
+      .update({ smart_wallet_tx_hash: birth.txHash, smart_wallet_ledger: birth.ledger })
+      .eq("id", req.user.id);
+    if (error) console.warn("Could not store wallet birth (run schema_smart_wallet.sql):", error.message);
+    res.json({ birth });
+  } catch (err) {
+    console.error("Smart wallet birth check failed:", err.message);
+    res.status(500).json({ error: "Could not check the wallet's creation." });
   }
 });
 
@@ -161,6 +195,13 @@ app.post("/api/smart-wallet/relay/:token", async (req, res) => {
         .update({ smart_wallet_address: checked.contractId, smart_wallet_created_at: new Date().toISOString() })
         .eq("id", userId)
         .is("smart_wallet_address", null);
+      // Separate update: works even before the birth columns exist.
+      const { error: birthError } = await supabase
+        .from("users")
+        .update({ smart_wallet_tx_hash: sent.hash, smart_wallet_ledger: done.ledger })
+        .eq("id", userId)
+        .eq("smart_wallet_address", checked.contractId);
+      if (birthError) console.warn("Could not store wallet birth (run schema_smart_wallet.sql):", birthError.message);
     }
     console.log(`[SMART-WALLET] sponsored ${checked.kind} for user ${userId}: ${sent.hash}`);
     res.json({ success: true, data: { hash: sent.hash, status: "SUCCESS", ledger: done.ledger } });

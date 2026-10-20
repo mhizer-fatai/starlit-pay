@@ -50,6 +50,21 @@ export function deployedContractId(networkPassphrase, contractIdPreimage) {
   return StrKey.encodeContract(StellarSdk.hash(preimage.toXDR()));
 }
 
+/**
+ * The contract a transaction created, if it is a createContractV2 deployment
+ * (used to check a wallet's claimed creation transaction).
+ */
+export function createdContractIds(envelopeXdr, networkPassphrase) {
+  const parsed = StellarSdk.TransactionBuilder.fromXDR(envelopeXdr, networkPassphrase);
+  const tx = parsed instanceof StellarSdk.FeeBumpTransaction ? parsed.innerTransaction : parsed;
+  const ids = [];
+  for (const op of tx.operations) {
+    if (op.type !== "invokeHostFunction" || op.func.switch().name !== "hostFunctionTypeCreateContractV2") continue;
+    ids.push(deployedContractId(networkPassphrase, op.func.createContractV2().contractIdPreimage()));
+  }
+  return ids;
+}
+
 function decode(payload) {
   if (!payload || typeof payload.func !== "string" || !Array.isArray(payload.auth)) {
     throw new RelayRuleError("Expected { func, auth }.");

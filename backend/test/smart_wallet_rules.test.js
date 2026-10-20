@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import * as S from "@stellar/stellar-sdk";
-import { checkRelayRequest, deployedContractId, rawP256FromCose } from "../src/smart_wallet_rules.js";
+import { checkRelayRequest, createdContractIds, deployedContractId, rawP256FromCose } from "../src/smart_wallet_rules.js";
 import { createSoftAuthenticator } from "./helpers/soft_authenticator.js";
 
 const { xdr, Address } = S;
@@ -175,6 +175,25 @@ describe("spending from the wallet", () => {
   test("needs a wallet first", () => {
     const payload = invokePayload({ contract: wallet, fn: "add_signer", args: [], authBy: [wallet] });
     assert.throws(() => checkRelayRequest(payload, context()), /Create your smart wallet first/);
+  });
+});
+
+describe("wallet creation transaction", () => {
+  test("reports the contract a deployment created, and nothing for other transactions", () => {
+    const ctx = context();
+    const { credentialId, rawPublicKey } = ctx.passkeys[0];
+    const payload = deployPayload({ signers: [passkeySigner(rawPublicKey, credentialId)] });
+    const source = new S.Account(S.Keypair.random().publicKey(), "1");
+    const deployTx = new S.TransactionBuilder(source, { fee: "100", networkPassphrase: NP })
+      .addOperation(S.Operation.invokeHostFunction({ func: xdr.HostFunction.fromXDR(payload.func, "base64"), auth: [] }))
+      .setTimeout(30)
+      .build();
+    assert.deepEqual(createdContractIds(deployTx.toXDR(), NP), [deployedContractId(NP, payload.preimage)]);
+    const payment = new S.TransactionBuilder(source, { fee: "100", networkPassphrase: NP })
+      .addOperation(S.Operation.payment({ destination: S.Keypair.random().publicKey(), asset: S.Asset.native(), amount: "1" }))
+      .setTimeout(30)
+      .build();
+    assert.deepEqual(createdContractIds(payment.toXDR(), NP), []);
   });
 });
 
