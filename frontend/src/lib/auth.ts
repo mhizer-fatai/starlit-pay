@@ -57,7 +57,11 @@ export function unlockFromVault(opened: OpenedVault, user: SessionUser) {
   unlockedThisLoad = true;
   setStoredUser(user);
   // Move notes created by others (gateway, faucet, senders) into ones only this user can spend.
-  startAutoReshield({ keys: opened.keys, username: user.username });
+  startAutoReshield({
+    keys: opened.keys,
+    username: user.username,
+    canSpend: async () => (await authApi.getSession()).fresh,
+  });
   try {
     localStorage.setItem(AUTH_MODE_KEY, "vault");
   } catch {
