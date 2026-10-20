@@ -2,7 +2,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
 import {
   ArrowDownLeft,
-  ArrowLeftRight,
   ChevronRight,
   Download,
   Droplets,
@@ -28,7 +27,6 @@ const navItems = [
   { label: "Home", icon: Home, to: "/dashboard" },
   { label: "Send", icon: Send, to: "/send" },
   { label: "Receive", icon: ArrowDownLeft, to: "/receive" },
-  { label: "Swap", icon: ArrowLeftRight, soon: true },
   { label: "Transactions", icon: Receipt, to: "/transactions" },
   { label: "Payments Links", icon: Link2, to: "/payment-links" },
   { label: "Faucet", icon: Droplets, to: "/faucet" },
@@ -110,7 +108,6 @@ export function DashboardSidebar({
   const otherActions = [
     { label: "Settings", icon: Settings, to: "/settings" as string | undefined },
     { label: themeLabel, icon: ThemeIcon, action: toggleTheme },
-    { label: "Install App", icon: Download, soon: true },
     { label: "Log Out", icon: LogOut, action: async () => { await signOut(); navigate("/", { replace: true }); } },
   ];
 
@@ -133,11 +130,9 @@ export function DashboardSidebar({
               key={item.label}
               className={`nav-item ${isActive ? "active" : ""}`}
               onClick={item.action ? item.action : item.to ? () => navigate(item.to as string) : undefined}
-              disabled={item.soon}
             >
               <Icon />
               <span>{item.label}</span>
-              {item.soon && <span className="soon-badge">Soon</span>}
             </button>
           );
           if (collapsed) {

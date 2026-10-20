@@ -4,7 +4,6 @@ import {
   ArrowDownLeft,
   ChevronLeft,
   ChevronRight,
-  Download,
   Send,
 } from "lucide-react";
 
@@ -17,6 +16,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
 import { useSidebar } from "@/lib/sidebar";
 import { getUser } from "@/lib/auth";
+import { ownWalletAddress } from "@/lib/backend";
 import {
   activityTitle,
   buildActivityFeed,
@@ -59,10 +59,10 @@ function TransactionsPage() {
       setUserName(name);
       // Merge outgoing records with incoming shielded notes (same feed as
       // the dashboard's Recent Activity).
-      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user)])
-        .then(([txs, balances]) => {
+      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user), ownWalletAddress()])
+        .then(([txs, balances, wallet]) => {
           if (cancelled) return;
-          setFeed(buildActivityFeed(balances?.notes ?? [], txs, user.username));
+          setFeed(buildActivityFeed(balances?.notes ?? [], txs, user.username, wallet));
         })
         .catch(() => {})
         .finally(() => {
@@ -98,11 +98,6 @@ function TransactionsPage() {
             <section className="dash-card activity-card transactions-card">
               <div className="card-title-row transactions-title-row">
                 <span>Transactions</span>
-                <Button variant="ghost" className="export-btn" disabled aria-label="Export — coming soon">
-                  <Download />
-                  Export
-                  <span className="soon-pill">Soon</span>
-                </Button>
               </div>
               <div className="table-scroll">
               <table className="transactions-table">

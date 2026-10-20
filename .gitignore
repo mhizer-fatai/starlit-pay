@@ -47,4 +47,16 @@ netlify/
 # Personal agent rules
 agent_rule.md
 
+# Video and Media Output (HyperFrames)
+video/
+*.mp4
+*.webm
+*.mov
+*.mp3
+*.wav
+video-output/
 
+
+
+# Personal security notes (not for the repo)
+securityplan.md

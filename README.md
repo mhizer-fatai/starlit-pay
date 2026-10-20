@@ -1,8 +1,10 @@
 # Starlit Pay
 
-Starlit Pay is a consumer-grade, privacy-by-default multi-asset wallet protocol on Stellar (Soroban) supporting **XLM, USDC, and EURC**. It features client-side ZK-SNARK proof generation, a Web2-like email & PIN onboarding UX, and built-in Viewing Key compliance disclosures.
+Starlit Pay is a consumer-grade, privacy-by-default multi-asset wallet on Stellar (Soroban) supporting **XLM, USDC, and EURC**. It is designed around client-side zero-knowledge proofs, a Web2-like email & PIN onboarding UX, and built-in Viewing Key compliance disclosures.
 
-On-chain, it looks like a single large pool of assets. No one can see your balance or whom you are paying. Off-chain, your browser holds your key material, compiles circuits in WebAssembly, generates proofs, and decrypts your transaction logs.
+> **⚠️ Status: Testnet preview, not audited.** Zero-knowledge proof generation and on-chain verification are **not implemented yet**: the frontend produces placeholder proofs and the on-chain verifier accepts any well-formed proof. Do not use with real funds. See [Implementation Status](#-implementation-status).
+
+The goal: on-chain, the system looks like a single large pool of assets, so no one can see your balance or whom you are paying. Off-chain, your browser holds your key material, generates proofs, and decrypts your transaction logs.
 
 ---
 
@@ -10,7 +12,7 @@ On-chain, it looks like a single large pool of assets. No one can see your balan
 
 1.  **Shielded multi-asset pool (Soroban + Rust)**: Deposits lock public XLM, USDC, or EURC into a contract, creating private note commitments. Spent nullifiers check for double-spends without linking claims to deposits.
 2.  **Web2 UX (Email Auth & 6-digit PIN)**: Users onboard using an email address. A 6-digit payment PIN encrypts their derived seed locally using AES-GCM and authenticates them on the database.
-3.  **In-Browser ZK Prover**: ZK-SNARK proofs are compiled client-side in WebAssembly. The proofs are front-running resistant, binding claims directly to the recipient's address.
+3.  **In-Browser ZK Prover (in development)**: Planned Circom + Groth16 (BN254) proofs generated client-side in WebAssembly, binding each spend to its recipient and outputs. Currently a placeholder.
 4.  **Auditor Viewing Keys**: Dual-key cryptography splits the wallet into a *Spending Key* and a *Viewing Key*. Users can share their Viewing Key with tax authorities or auditors to decrypt their history read-only without giving up control of their funds.
 5.  **Decentralized User Registry**: Matches usernames (aliases) with public encryption keys and identity commitments using a Supabase PostgreSQL routing layer.
 
@@ -18,11 +20,11 @@ On-chain, it looks like a single large pool of assets. No one can see your balan
 
 ## 🛠️ Tech Stack & Architecture
 
-*   **Smart Contracts**: Rust (`soroban-sdk` v25+) implementing the **Nethermind Stellar Private Payments (SPP)** modular architecture:
+*   **Smart Contracts**: Rust (`soroban-sdk` v25+), modelled on the **Nethermind Stellar Private Payments (SPP)** modular architecture:
     *   `pool`: Shielded UTXO note pool with TTL state management.
-    *   `verifier`: Dedicated on-chain Circom Groth16 Verifier.
+    *   `verifier`: Groth16 verifier contract (**currently a stub**; real BN254 pairing verification is planned).
     *   `asp`: Association Set Providers (Merkle membership & SMT exclusion trees).
-*   **ZK Prover**: Circom + Groth16 (compiled to WASM via snarkjs / `@stellar-private-payments` SDK) running in-browser.
+*   **ZK Prover (planned)**: Circom + Groth16 over BN254 (snarkjs, WASM) running in-browser, aligned with Nethermind SPP. The Noir circuit in `circuits/` is an early prototype and not wired into the app.
 *   **Frontend**: React + Vite + Vanilla CSS (Glassmorphism design system).
 *   **Backend Database Router**: Node.js + Express + Supabase Client (managing user registries, gasless transaction relaying, and note indexing).
 
@@ -89,8 +91,24 @@ On-chain, it looks like a single large pool of assets. No one can see your balan
 
 ---
 
-## 🔒 Security Audits & Assumptions
+## 📋 Implementation Status
 
-*   **Anti-Replay Guard**: Spent nullifiers are permanently stored on-chain. If the same nullifier is submitted twice, the contract reverts immediately.
-*   **Front-Running Prevention**: The public input `recipient_address_hash` binds the ZK proof to the specific withdrawal recipient. If a miner or front-running bot intercepts the transaction and changes the destination address, the proof verification fails.
+| Component | Status |
+|---|---|
+| Testnet deposits, relayer gas sponsorship, SEP-0007 gateway | ✅ Working |
+| Note encryption (NaCl box, x25519-xsalsa20-poly1305) | ✅ Working |
+| On-chain Merkle tree & nullifier tracking | ✅ Working (but not enforced by proofs, see below) |
+| Client-side ZK proof generation | ❌ Placeholder (`frontend/src/lib/zk.ts` hashes inputs; no prover) |
+| On-chain Groth16 verification | ❌ Stub (`contracts/src/verifier.rs` returns `Ok(true)`) |
+| ASP compliance proofs | ❌ Not implemented (pool uses a plain admin address blocklist) |
+| Independent security audit | ❌ Not audited |
+
+Because proofs are not yet verified, the pool's spend functions do not protect funds cryptographically. As an interim guard, `claim`, `withdraw` and `transfer` must be authorized by the configured Starlit relayer (`set_relayer`), so the relayer is a trusted party until real proof verification ships. This is a testnet-only preview.
+
+## 🔒 Security Model (Target Design)
+
+The properties below describe the intended design once real proof verification ships. They are **not enforced today**.
+
+*   **Anti-Replay Guard**: Spent nullifiers are stored on-chain and a reused nullifier is rejected. Without proof verification, though, nothing ties a nullifier to a real note, so this does not yet prevent double-spends.
+*   **Front-Running Prevention (planned)**: The recipient is bound into the proof's public inputs, so a changed destination address would fail verification once the verifier is real.
 *   **Dual-Key Separation**: The Spending Key is never transmitted over the network and is decrypted in-memory only when verifying transfers. The Viewing Key is used strictly for read-only history decryption.

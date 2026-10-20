@@ -2,7 +2,8 @@
 // Preserves every read/write the old JSX frontend used.
 
 const DEFAULT_LOCAL = "http://localhost:3001";
-const DEFAULT_REMOTE = "https://starlit-pay.onrender.com";
+// Same site as starlitpay.xyz, so session cookies are first-party (Safari/iOS block cross-site cookies).
+const DEFAULT_REMOTE = "https://api.starlitpay.xyz";
 
 export const BACKEND_URL =
   (import.meta.env.VITE_BACKEND_URL as string | undefined) ||
@@ -45,6 +46,14 @@ export function clearSession() {
     /* ignore */
   }
 }
+/** Remembers the (non-secret) profile for passkey sessions, which use cookies instead of a stored token. */
+export function setStoredUser(user: unknown) {
+  try {
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } catch {
+    /* ignore */
+  }
+}
 export function getStoredUser<T>(): T | null {
   try {
     const raw = localStorage.getItem(USER_KEY);
@@ -63,12 +72,18 @@ export class BackendError extends Error {
 }
 
 async function req<T>(path: string, init?: RequestInit, auth = false): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // X-Requested-With is the CSRF header the backend requires when a request is
+  // authenticated by the passkey session cookie (credentials: "include").
+  const headers: Record<string, string> = { "Content-Type": "application/json", "X-Requested-With": "starlit" };
   if (auth) {
     const token = getToken();
     if (token) headers.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`${BACKEND_URL}${path}`, { ...init, headers: { ...headers, ...init?.headers } });
+  const res = await fetch(`${BACKEND_URL}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: { ...headers, ...init?.headers },
+  });
   if (!res.ok) {
     let msg = `Backend ${res.status}: ${path}`;
     try {
@@ -121,7 +136,13 @@ export const register = (body: {
   display_name?: string;
   avatar_url?: string;
   stellar_address?: string;
-}) => req<AuthResponse>("/api/users/register", { method: "POST", body: JSON.stringify(body) });
+}, emailProof?: string) =>
+  // The backend requires Google proof that the caller owns this email.
+  req<AuthResponse>("/api/users/register", {
+    method: "POST",
+    body: JSON.stringify(body),
+    headers: emailProof ? { "X-Supabase-Auth": emailProof } : undefined,
+  });
 
 export const lookupUser = (username: string) =>
   req<{ user: BackendUser }>(`/api/users/lookup/${encodeURIComponent(username.replace(/^@/, ""))}`);
@@ -262,6 +283,51 @@ export const fetchStats = () =>
     network: string;
     status: string;
   }>("/api/stats");
+// --- Public smart wallet (OpenZeppelin smart account, passkey-controlled) ---
+export interface WalletBirth {
+  txHash: string;
+  ledger: number;
+}
+
+export interface SmartWalletInfo {
+  address: string | null;
+  /** The transaction that created the wallet (null until recorded). */
+  birth: WalletBirth | null;
+  /** The user's passkeys that can control an on-chain wallet (ES256), raw P-256 keys. */
+  passkeys: { credentialId: string; publicKey: string; deviceName: string | null }[];
+  config: {
+    accountWasmHash: string;
+    webauthnVerifier: string;
+    ed25519Verifier: string;
+    deployer: string;
+    usdcSac: string;
+    xlmSac: string;
+    poolContract: string;
+    networkPassphrase: string;
+  };
+}
+export const getSmartWallet = () => req<SmartWalletInfo>("/api/smart-wallet", undefined, true);
+let ownWallet: Promise<string | null> | null = null;
+/** The user's public wallet address (cached per page load); null if none or unavailable. */
+export function ownWalletAddress(): Promise<string | null> {
+  ownWallet ??= getSmartWallet()
+    .then((info) => info.address)
+    .catch(() => {
+      ownWallet = null;
+      return null;
+    });
+  return ownWallet;
+}
+/** Records the wallet's creation transaction; the server checks it on-chain. */
+export const postSmartWalletBirth = (txHash: string) =>
+  req<{ birth: WalletBirth }>("/api/smart-wallet/birth", { method: "POST", body: JSON.stringify({ txHash }) }, true);
+/** Short-lived token for the sponsored relayer (smart-account-kit cannot send cookies). */
+export const getSmartWalletRelayToken = () =>
+  req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" }, true);
+
+/** A Merkle root the shielded pool currently accepts (checked on-chain by the backend). */
+export const getPoolRoot = () => req<{ root: string }>("/api/pool/root");
+
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
 export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
 export const notifyGatewayDeposit = (txHash: string) =>
@@ -310,10 +376,11 @@ export interface RelayerTransferPayload {
 }
 
 export const submitRelayerTransfer = (body: RelayerTransferPayload) =>
-  req<{ success: boolean; hash: string; ledger?: number }>("/api/relayer/transfer", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  req<{ success: boolean; hash: string; ledger?: number }>(
+    "/api/relayer/transfer",
+    { method: "POST", body: JSON.stringify(body) },
+    true // legacy accounts authorise with their token; passkey sessions via cookie
+  );
 
 export interface RelayerWithdrawPayload {
   proof: string;
@@ -328,8 +395,9 @@ export interface RelayerWithdrawPayload {
 }
 
 export const submitRelayerWithdraw = (body: RelayerWithdrawPayload) =>
-  req<{ success: boolean; hash: string; ledger?: number }>("/api/relayer/withdraw", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
+  req<{ success: boolean; hash: string; ledger?: number }>(
+    "/api/relayer/withdraw",
+    { method: "POST", body: JSON.stringify(body) },
+    true
+  );
 

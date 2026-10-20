@@ -1,49 +1,42 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
   ArrowDownLeft,
   ArrowLeftRight,
   ArrowUp,
-  Download,
   Droplets,
   Eye,
   EyeOff,
   Receipt,
   RefreshCw,
   Send,
+  ShieldCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { getUser, signOut } from "@/lib/auth";
-import { fetchStats, type BackendTransaction } from "@/lib/backend";
+import { fetchStats, ownWalletAddress, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
-import { usePrices, formatTokenPrice, PRICE_UNAVAILABLE } from "@/lib/prices";
+import { SmartWalletCard } from "@/components/SmartWalletCard";
+import { TransferModal, type TransferDirection } from "@/components/TransferModal";
+import { AssetRow, WalletCardHeader, WalletTotal } from "@/components/WalletCard";
+import { usePrices } from "@/lib/prices";
 import { useSidebar } from "@/lib/sidebar";
 import {
   activityTitle,
-  assetToUsd,
   buildActivityFeed,
-  decodeTransactionPayload,
-  formatGrouped,
   loadPrivateBalances,
   loadUserTransactions,
-  splitDollarsCents,
   type ActivityItem,
   type BalanceNote,
 } from "@/lib/wallet";
 
 const actionButtonClass = "hover:bg-dashboard-blue hover:text-primary-foreground";
-
-interface ChartPoint {
-  x: number;
-  y: number;
-  balance: string;
-}
 
 function DashboardPage() {
   const navigate = useNavigate();
@@ -62,6 +55,14 @@ function DashboardPage() {
   const [balancesLoading, setBalancesLoading] = useState(true);
   const [activityLoading, setActivityLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [transferDirection, setTransferDirection] = useState<TransferDirection | null>(null);
+  const [publicBalances, setPublicBalances] = useState<Record<"XLM" | "USDC", number> | null>(null);
+  const [walletRefreshKey, setWalletRefreshKey] = useState(0);
+  const [ownWallet, setOwnWallet] = useState<string | null>(null);
+  useEffect(() => {
+    void ownWalletAddress().then(setOwnWallet);
+  }, []);
+  const openTransfer = (direction: TransferDirection) => setTransferDirection(direction);
   // Live prices via the backend (Stellar DEX first). XLM is null when no real
   // price is available; the total is then unknown rather than guessed.
   const prices = usePrices();
@@ -147,99 +148,16 @@ function DashboardPage() {
     }
   }
 
-  const chartRef = useRef<HTMLDivElement>(null);
-  const [hoverX, setHoverX] = useState<number | null>(null);
-  const [hoverY, setHoverY] = useState<number | null>(null);
-  const [hoverBalance, setHoverBalance] = useState<string | null>(null);
-
-  // Balance trend derived from real on-database events: shielded-note receipts
-  // (+) and recorded sends (−), ordered by time as a cumulative USD series
-  // converted at live prices. Anchored so the line ends at today's balance —
-  // spent input notes are invisible to history, so raw accumulation undershoots.
-  const chartPoints: ChartPoint[] = useMemo(() => {
-    if (totalUsd === null) return [];
-    const events: { t: number; usd: number }[] = [];
-    for (const note of balanceNotes) {
-      events.push({ t: note.createdAt, usd: assetToUsd(note.asset, note.amount, prices) ?? 0 });
-    }
-    for (const tx of allTxs) {
-      const decoded = tx.encrypted_payload ? decodeTransactionPayload(tx.encrypted_payload) : null;
-      if (decoded?.amount) {
-        events.push({
-          t: tx.created_at ? new Date(tx.created_at).getTime() : Date.now(),
-          usd: -(assetToUsd(decoded.asset ?? "USDC", decoded.amount, prices) ?? 0),
-        });
-      }
-    }
-    events.sort((a, b) => a.t - b.t);
-    let running = 0;
-    const cumulative = [0];
-    for (const event of events) {
-      running += event.usd;
-      cumulative.push(running);
-    }
-    // Downsample long histories so the path stays light.
-    let values = cumulative;
-    if (values.length > 40) {
-      const sampled: number[] = [];
-      for (let i = 0; i < 40; i++) {
-        sampled.push(values[Math.round((i * (values.length - 1)) / 39)]!);
-      }
-      values = sampled;
-    }
-    if (values.length < 2) values = [0, 0];
-    const shift = totalUsd - values[values.length - 1]!;
-    values = values.map((value) => value + shift);
-    const lo = Math.min(0, ...values);
-    const hi = Math.max(0.01, ...values);
-    return values.map((value, i) => ({
-      x: values.length === 1 ? 620 : (i / (values.length - 1)) * 620,
-      y: 200 - ((value - lo) / (hi - lo)) * 190,
-      balance: `$${formatGrouped(value)}`,
-    }));
-  }, [balanceNotes, allTxs, prices, totalUsd]);
-
-  const chartLinePath = useMemo(
-    () => chartPoints.map((p, i) => `${i === 0 ? "M" : "L"}${p.x} ${p.y}`).join(" "),
-    [chartPoints],
-  );
-  const chartAreaPath = useMemo(
-    () => `${chartLinePath} L620 210 L0 210 Z`,
-    [chartLinePath],
-  );
-
   // Unified date-ordered feed: incoming shielded notes + outgoing records.
   // Viewer identity filters out own change notes (see buildActivityFeed).
   const [viewerUsername, setViewerUsername] = useState("");
   const activityFeed = useMemo(
-    () => buildActivityFeed(balanceNotes, allTxs, viewerUsername),
-    [balanceNotes, allTxs, viewerUsername],
+    () => buildActivityFeed(balanceNotes, allTxs, viewerUsername, ownWallet),
+    [balanceNotes, allTxs, viewerUsername, ownWallet],
   );
   const recentActivity = activityFeed.slice(0, 4);
 
-  function onChartMove(event: React.MouseEvent<HTMLDivElement>) {
-    const rect = chartRef.current?.getBoundingClientRect();
-    if (!rect || chartPoints.length === 0) return;
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    const svgX = (x / rect.width) * 620;
-    const nearest = chartPoints.reduce((prev, curr) =>
-      Math.abs(curr.x - svgX) < Math.abs(prev.x - svgX) ? curr : prev,
-    );
-    setHoverX(nearest.x);
-    setHoverY(nearest.y);
-    setHoverBalance(nearest.balance);
-  }
-
-  function onChartLeave() {
-    setHoverX(null);
-    setHoverY(null);
-    setHoverBalance(null);
-  }
-
-  const { dollars, cents } = splitDollarsCents(totalUsd ?? 0);
   const pricesLoading = prices.status === "loading";
-  const chartLoading = balancesLoading || activityLoading || pricesLoading;
 
   return (
     <div className="dashboard-frame">
@@ -295,10 +213,15 @@ function DashboardPage() {
               <ArrowDownLeft />
               Receive
             </Button>
-            <Button variant="secondary" className={actionButtonClass} disabled>
+            <Button
+              variant="secondary"
+              className={actionButtonClass}
+              onClick={() => openTransfer("to-public")}
+              disabled={!publicBalances}
+              title={publicBalances ? "Move funds between your private and public balances" : "Create your public wallet first"}
+            >
               <ArrowLeftRight />
-              Swap
-              <span className="soon-pill">Soon</span>
+              Transfer
             </Button>
             <Button
               variant="secondary"
@@ -316,194 +239,53 @@ function DashboardPage() {
               <Droplets />
               Faucet
             </Button>
-            <Button
-              variant="secondary"
-              className={actionButtonClass}
-              disabled
-              aria-label="Download Statement — coming soon"
-            >
-              <Download />
-              Download Statement
-              <span className="soon-pill">Soon</span>
-            </Button>
           </div>
           </motion.div>
 
-          <div className="balance-grid">
-            <section className="dash-card balance-card">
-              <div className="card-title-row">
-                <span>Private balance</span>
-                <button
-                  type="button"
-                  className="balance-eye"
-                  onClick={() => setBalanceHidden((value) => !value)}
-                  aria-label={balanceHidden ? "Show balance" : "Hide balance"}
-                >
-                  {balanceHidden ? <EyeOff /> : <Eye />}
-                </button>
+          <div className="wallet-grid">
+            <section className="dash-card wallet-card" aria-label="Private balance">
+              <WalletCardHeader
+                icon={<ShieldCheck />}
+                tone="private"
+                title="Private balance"
+                badge="Shielded"
+                actions={
+                  <>
+                    <button
+                      type="button"
+                      className="balance-eye"
+                      onClick={handleSync}
+                      disabled={syncing || balancesLoading}
+                      aria-label={syncing ? "Refreshing balance" : "Refresh balance"}
+                    >
+                      <RefreshCw className={syncing ? "animate-spin" : ""} />
+                    </button>
+                    <button
+                      type="button"
+                      className="balance-eye"
+                      onClick={() => setBalanceHidden((value) => !value)}
+                      aria-label={balanceHidden ? "Show balances" : "Hide balances"}
+                    >
+                      {balanceHidden ? <EyeOff /> : <Eye />}
+                    </button>
+                  </>
+                }
+              />
+              <WalletTotal usd={totalUsd} hidden={balanceHidden} loading={balancesLoading || pricesLoading} />
+              <div className="wallet-assets">
+                <AssetRow asset="USDC" amount={usdcBalance} price={prices.USDC} hidden={balanceHidden} loading={balancesLoading} />
+                <AssetRow asset="XLM" amount={xlmBalance} price={prices.XLM} hidden={balanceHidden} loading={balancesLoading} />
               </div>
-              <div className="balance">
-                {balanceHidden ? (
-                  "$ ••••••"
-                ) : balancesLoading || pricesLoading ? (
-                  <Skeleton className="h-9 w-52" label="Loading balance" />
-                ) : totalUsd === null ? (
-                  <span className="text-lg font-medium text-muted-foreground">{PRICE_UNAVAILABLE}</span>
-                ) : (
-                  <span>
-                    ${dollars}<sup>{cents}</sup>
-                  </span>
-                )}
-                {!balancesLoading && (
-                  <button
-                    type="button"
-                    className="balance-sync"
-                    onClick={handleSync}
-                    disabled={syncing}
-                    aria-label={syncing ? "Refreshing balance" : "Refresh balance"}
-                    title="Refresh balance"
-                  >
-                    <RefreshCw className={syncing ? "animate-spin" : ""} />
-                  </button>
-                )}
-              </div>
-              {chartLoading ? (
-                <Skeleton
-                  className="h-[210px] w-full"
-                  label="Loading chart"
-                  style={{ marginTop: 8 }}
-                />
-              ) : totalUsd === null ? (
-                <div className="flex h-[210px] w-full items-center justify-center text-center text-sm text-muted-foreground">
-                  Balance chart needs a live XLM price. Your holdings are shown on the right.
-                </div>
-              ) : (
-              <div
-                className="chart-wrap"
-                ref={chartRef}
-                onMouseMove={onChartMove}
-                onMouseLeave={onChartLeave}
-              >
-                <svg
-                  viewBox="0 0 620 210"
-                  preserveAspectRatio="none"
-                  role="img"
-                  aria-label="Balance trend over the last 30 days"
-                >
-                  <defs>
-                    <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0" stopColor="var(--chart-line)" stopOpacity=".2" />
-                      <stop offset="1" stopColor="var(--chart-line)" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                  <path
-                    className="chart-area"
-                    d={chartAreaPath}
-                  />
-                  <path
-                    className="chart-line"
-                    d={chartLinePath}
-                  />
-                  {hoverX !== null && hoverY !== null && (
-                    <line
-                      x1={hoverX}
-                      y1={hoverY}
-                      x2={hoverX}
-                      y2={210}
-                      stroke="var(--color-muted-foreground)"
-                      strokeDasharray="3 3"
-                      opacity="0.4"
-                    />
-                  )}
-                  {hoverX !== null && hoverY !== null && (
-                    <circle
-                      cx={hoverX}
-                      cy={hoverY}
-                      r="4"
-                      fill="var(--color-primary)"
-                      stroke="var(--color-primary-foreground)"
-                      strokeWidth="2"
-                    />
-                  )}
-                </svg>
-                {hoverBalance && (
-                  <div className="chart-tooltip" style={{ left: `${hoverX}px`, top: `${hoverY}px` }}>
-                    {hoverBalance}
-                  </div>
-                )}
-              </div>
-              )}
-              <div className="balance-filters">
-                {[
-                  "1M",
-                  "5M",
-                  "10M",
-                  "30M",
-                  "1H",
-                  "2H",
-                  "4H",
-                  "1D",
-                  "7D",
-                  "30D",
-                  "1M",
-                  "3M",
-                  "1Y",
-                ].map((range, i) => (
-                  <button key={`${range}-${i}`} type="button" className="range-btn">
-                    {range}
-                  </button>
-                ))}
-              </div>
+              <p className="wallet-caption">Only you can see this balance. Payments from it stay private.</p>
             </section>
 
-            <section className="dash-card balance-card holdings-card">
-              <div className="card-title-row">
-                <span>Holdings</span>
-              </div>
-              <div className="holdings-list">
-                <div className="holding-row">
-                  <div className="holding-asset-col">
-                    <span className="holding-label">USDC</span>
-                    <span className="holding-price">{formatTokenPrice(prices.USDC)}</span>
-                  </div>
-                  <div className="holding-values-col">
-                    {balancesLoading ? (
-                      <Skeleton className="h-5 w-24" label="Loading USDC balance" />
-                    ) : (
-                      <>
-                        <strong className={balanceHidden ? "holding-masked" : "holding-amount"}>
-                          {balanceHidden ? "••••••" : formatGrouped(usdcBalance)}
-                        </strong>
-                        <span className="holding-fiat">
-                          {balanceHidden ? "••••••" : `≈ ${formatGrouped(usdcUsd)}`}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="holding-divider" />
-                <div className="holding-row">
-                  <div className="holding-asset-col">
-                    <span className="holding-label">XLM</span>
-                    <span className="holding-price">{pricesLoading ? "…" : formatTokenPrice(prices.XLM)}</span>
-                  </div>
-                  <div className="holding-values-col">
-                    {balancesLoading ? (
-                      <Skeleton className="h-5 w-24" label="Loading XLM balance" />
-                    ) : (
-                      <>
-                        <strong className={balanceHidden ? "holding-masked" : "holding-amount"}>
-                          {balanceHidden ? "••••••" : formatGrouped(xlmBalance)}
-                        </strong>
-                        <span className="holding-fiat">
-                          {balanceHidden ? "••••••" : xlmUsd === null ? PRICE_UNAVAILABLE : `≈ ${formatGrouped(xlmUsd)}`}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section>
+            <SmartWalletCard
+              hidden={balanceHidden}
+              prices={prices}
+              refreshKey={walletRefreshKey}
+              onBalances={setPublicBalances}
+              onRecovered={() => void handleSync()}
+            />
           </div>
 
           <section className="dash-card activity-card">
@@ -576,6 +358,18 @@ function DashboardPage() {
             </ul>
           </section>
         </motion.main>
+        {transferDirection && publicBalances && (
+          <TransferModal
+            initialDirection={transferDirection}
+            privateBalances={{ XLM: xlmBalance, USDC: usdcBalance }}
+            publicBalances={publicBalances}
+            onClose={() => setTransferDirection(null)}
+            onDone={() => {
+              void handleSync();
+              setWalletRefreshKey((k) => k + 1);
+            }}
+          />
+        )}
         {selected && (
           <ReceiptModal item={selected} userName={displayName} onClose={() => setSelected(null)} />
         )}

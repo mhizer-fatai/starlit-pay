@@ -3,6 +3,7 @@ import { Bell, Check, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { getUser } from "@/lib/auth";
+import { ownWalletAddress } from "@/lib/backend";
 import {
   buildActivityFeed,
   loadPrivateBalances,
@@ -45,6 +46,16 @@ function getReadIds(userId: string): string[] {
 function toNotification(item: ActivityItem, read: boolean): Notification {
   const label = partyLabel(item.party);
   const incoming = item.direction === "in";
+  if (item.transfer) {
+    return {
+      id: item.key,
+      title: "Transfer",
+      message: `You moved ${item.amount} ${item.asset} ${item.transfer === "to-public" ? "to your public wallet" : "to your private balance"}`,
+      time: timeAgo(item.date),
+      read,
+      type: "info",
+    };
+  }
   return {
     id: item.key,
     title: incoming ? "Payment received" : "Payment sent",
@@ -174,11 +185,11 @@ export function NotificationBell() {
     void getUser().then((user) => {
       if (cancelled || !user) return;
       setUserId(user.id);
-      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user)])
-        .then(([txs, balances]) => {
+      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user), ownWalletAddress()])
+        .then(([txs, balances, wallet]) => {
           if (cancelled) return;
           const readIds = new Set(getReadIds(user.id));
-          const feed = buildActivityFeed(balances?.notes ?? [], txs, user.username).slice(0, 10);
+          const feed = buildActivityFeed(balances?.notes ?? [], txs, user.username, wallet).slice(0, 10);
           setNotifications(feed.map((item) => toNotification(item, readIds.has(item.key))));
         })
         .catch(() => {});

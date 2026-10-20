@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
@@ -9,6 +10,14 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Behind Render (and the Netlify /api proxy) the client IP arrives in
+// X-Forwarded-For. Set TRUST_PROXY to the number of proxy hops (e.g. 1 on
+// Render, 2 via Netlify) so rate limits apply per client instead of per proxy.
+if (process.env.TRUST_PROXY) {
+  const hops = Number(process.env.TRUST_PROXY);
+  app.set("trust proxy", Number.isInteger(hops) ? hops : process.env.TRUST_PROXY);
+}
 
 // CORS Security Options: Allow Netlify, Localhost, Render, and Custom Domains
 const allowedOrigins = [
@@ -24,24 +33,18 @@ app.use(
       // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
       if (!origin) return callback(null, true);
 
-      const isAllowed =
-        origin.includes("localhost") ||
-        origin.includes("127.0.0.1") ||
-        origin.endsWith(".netlify.app") ||
-        origin.includes("starlit") ||
-        allowedOrigins.includes(origin) ||
-        process.env.NODE_ENV !== "production";
+      // Exact allow-list only: credentialed requests from any other site must be
+      // refused, or cookie sessions could be used by a malicious page.
+      const isLocalDev =
+        process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+      const isNetlifyPreview = /^https:\/\/([a-z0-9-]+--)?starlit-pay\.netlify\.app$/.test(origin);
 
-      if (isAllowed) {
-        callback(null, true);
-      } else {
-        // Fallback gracefully to allow origin instead of throwing a 500 error
-        callback(null, true);
-      }
+      callback(null, allowedOrigins.includes(origin) || isNetlifyPreview || isLocalDev);
     },
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    // X-Client-*: sent by smart-account-kit's relayer client
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Supabase-Auth", "X-Client-Name", "X-Client-Version"]
   })
 );
 
@@ -91,7 +94,19 @@ const relayerLimiter = rateLimit({
 });
 app.use("/api/relayer/", relayerLimiter);
 
+// Passkey ceremonies, session refresh and vault unlocks (per-account PIN limits apply on top)
+const sessionAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many sign-in requests from this IP, please try again later." }
+});
+app.use("/api/auth/", sessionAuthLimiter);
+app.use("/api/vault/", sessionAuthLimiter);
+
 app.use(express.json());
+app.use(cookieParser());
 
 // Configures Horizon and Soroban RPC clients
 const HORIZON_URL = process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org";
@@ -126,10 +141,15 @@ if (process.env.GATEWAY_SECRET_KEY) {
 }
 
 // Initialize Database Client with Connection Pooling Configuration
+// The backend must use the secret service-role key: tables are locked to that
+// role by RLS. The anon key is public (it ships in the frontend bundle).
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Critical security configuration error: SUPABASE_URL and SUPABASE_ANON_KEY must be configured in environment.");
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error("Critical security configuration error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured in environment.");
+}
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.warn("Security notice: SUPABASE_SERVICE_ROLE_KEY is not set; falling back to SUPABASE_ANON_KEY. Tables must not be readable by the public anon key.");
 }
 
 const DB_POOL_MAX_SOCKETS = parseInt(process.env.DB_POOL_MAX_SOCKETS || "50", 10);
@@ -145,7 +165,7 @@ const dbPoolConfig = {
 };
 
 // Configures Supabase client with connection pooling, keepalive, and schema settings
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
     persistSession: false,
     autoRefreshToken: false

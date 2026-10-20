@@ -1,0 +1,311 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Copy, ExternalLink, Fingerprint, KeyRound, LifeBuoy, Loader2, RefreshCw, ShieldCheck, Smartphone } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { isVaultMode } from "@/lib/auth";
+import { isValidPin } from "@/lib/keys";
+import { confirmPaymentWithPasskey, confirmPaymentWithPin, friendlyAuthError } from "@/lib/passkeyAccount";
+import { recoverPublicFunds } from "@/lib/transfer";
+import { authApi } from "@/lib/vault/client";
+import {
+  NeedsWalletPasskeyError,
+  addRecoveryKey,
+  addWalletPasskey,
+  createSmartWallet,
+  loadSmartWallet,
+  readWalletSigners,
+  smartWalletBalance,
+  type SmartWalletInfo,
+  type WalletToken,
+} from "@/lib/smartWallet";
+import type { Prices } from "@/lib/prices";
+import { AssetRow, WalletCardHeader, WalletTotal } from "@/components/WalletCard";
+
+const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-6)}`;
+
+/**
+ * Public smart wallet (C-address) controlled by the user's passkey. For spending
+ * public XLM/USDC; it is funded by withdrawing from the private balance.
+ */
+export function SmartWalletCard({
+  hidden = false,
+  prices,
+  refreshKey = 0,
+  onBalances,
+  onRecovered,
+}: {
+  hidden?: boolean;
+  prices: Prices;
+  /** Change to reload the wallet (e.g. after a transfer). */
+  refreshKey?: number;
+  onBalances?: (balances: Record<WalletToken, number> | null) => void;
+  /** Called after funds were recovered into the private balance. */
+  onRecovered?: () => void;
+}) {
+  const [info, setInfo] = useState<SmartWalletInfo | null>(null);
+  const [balances, setBalances] = useState<Record<WalletToken, number> | null>(null);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [needsPasskey, setNeedsPasskey] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const onBalancesRef = useRef(onBalances);
+  onBalancesRef.current = onBalances;
+  const onRecoveredRef = useRef(onRecovered);
+  onRecoveredRef.current = onRecovered;
+
+  // null = unknown (not read yet or the read failed)
+  const [hasRecovery, setHasRecovery] = useState<boolean | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await loadSmartWallet();
+      setInfo(next);
+      if (next.address) {
+        const [XLM, USDC] = await Promise.all([smartWalletBalance(next, "XLM"), smartWalletBalance(next, "USDC")]);
+        setBalances({ XLM, USDC });
+        onBalancesRef.current?.({ XLM, USDC });
+        readWalletSigners(next)
+          .then((signers) => setHasRecovery(signers.hasRecoveryKey))
+          .catch(() => setHasRecovery(null));
+      }
+    } catch (err) {
+      setError(friendlyAuthError(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isVaultMode()) void refresh();
+  }, [refresh, refreshKey]);
+
+  if (!isVaultMode()) return null;
+
+  async function run(action: () => Promise<void>) {
+    setError("");
+    setBusy(true);
+    try {
+      await action();
+    } catch (err) {
+      if (err instanceof NeedsWalletPasskeyError) setNeedsPasskey(true);
+      setError(err instanceof NeedsWalletPasskeyError ? err.message : friendlyAuthError(err));
+    } finally {
+      setBusy(false);
+      setStatus("");
+    }
+  }
+
+  const create = (credentialId: string) =>
+    run(async () => {
+      await createSmartWallet({ credentialId, onStatus: setStatus });
+      setNeedsPasskey(false);
+      await refresh();
+    });
+
+  const createWithNewPasskey = () =>
+    run(async () => {
+      setStatus("Create the wallet passkey (scan the QR code with your phone if asked)…");
+      const credentialId = await addWalletPasskey("Wallet passkey");
+      await createSmartWallet({ credentialId, onStatus: setStatus });
+      setNeedsPasskey(false);
+      await refresh();
+    });
+
+  // Lost wallet passkey: move everything to the private balance with the recovery key.
+  const [recoverOpen, setRecoverOpen] = useState(false);
+  const [recoverPin, setRecoverPin] = useState("");
+  const [recovered, setRecovered] = useState<string[]>([]);
+
+  const recover = (confirm: () => Promise<void>) =>
+    run(async () => {
+      if (!balances) return;
+      // Just unlocked (e.g. with the recovery code): that already proved it's you.
+      const { fresh } = await authApi.getSession();
+      if (!fresh) {
+        setStatus("Confirming it's you…");
+        await confirm();
+      }
+      const hashes = await recoverPublicFunds(balances, setStatus);
+      setRecovered(hashes);
+      setRecoverOpen(false);
+      setRecoverPin("");
+      await refresh();
+      onRecoveredRef.current?.();
+    });
+
+  const addRecovery = () =>
+    run(async () => {
+      setStatus("Confirm with your wallet passkey…");
+      await addRecoveryKey();
+      setHasRecovery(true);
+    });
+
+  const copy = async () => {
+    if (!info?.address) return;
+    try {
+      await navigator.clipboard.writeText(info.address);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable */
+    }
+  };
+
+  const hasWalletPasskey = info?.passkeys.length ? info.passkeys.length > 0 : false;
+  const loading = !info || (Boolean(info.address) && !balances);
+  const xlm = balances?.XLM ?? 0;
+  const usdc = balances?.USDC ?? 0;
+  const totalUsd = prices.XLM === null && xlm > 0 ? null : usdc * prices.USDC + xlm * (prices.XLM ?? 0);
+
+  return (
+    <section className="dash-card wallet-card" aria-label="Public wallet">
+      <WalletCardHeader
+        icon={<Fingerprint />}
+        tone="public"
+        title="Public wallet"
+        badge="Passkey"
+        actions={
+          info?.address ? (
+            <button type="button" className="balance-eye" onClick={() => void refresh()} aria-label="Refresh public wallet">
+              <RefreshCw />
+            </button>
+          ) : undefined
+        }
+      />
+
+      {!info ? (
+        <WalletTotal usd={null} hidden={false} loading />
+      ) : !info.address ? (
+        <div className="wallet-empty">
+          <p>
+            A public Stellar wallet you control with your passkey (Face ID, fingerprint or phone). Hold public
+            XLM and USDC, and move them to and from your private balance; fees are covered by Starlit.
+          </p>
+          {hasWalletPasskey && !needsPasskey ? (
+            <div className="wallet-actions wallet-actions-stack">
+              {info.passkeys.map((p) => (
+                <Button key={p.credentialId} type="button" onClick={() => create(p.credentialId)} disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Create with {p.deviceName ?? "passkey"}
+                </Button>
+              ))}
+              <Button type="button" variant="secondary" onClick={createWithNewPasskey} disabled={busy}>
+                <Smartphone /> Use a new phone passkey
+              </Button>
+            </div>
+          ) : (
+            <>
+              <p className="wallet-caption">
+                Your passkeys on this account can't control an on-chain wallet (Windows Hello uses RSA keys; Stellar needs
+                ES256). Create a wallet passkey with your phone (scan the QR code) or a security key.
+              </p>
+              <div className="wallet-actions">
+                <Button type="button" onClick={createWithNewPasskey} disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Smartphone />} Create wallet passkey
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <WalletTotal usd={totalUsd} hidden={hidden} loading={loading || prices.status === "loading"} />
+          <div className="wallet-address">
+            <code title={info.address}>{short(info.address)}</code>
+            <button type="button" onClick={copy} aria-label="Copy public wallet address">
+              {copied ? <Check /> : <Copy />}
+            </button>
+            <a
+              href={`https://stellar.expert/explorer/testnet/contract/${info.address}`}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View on Stellar Expert"
+            >
+              <ExternalLink />
+            </a>
+          </div>
+          <div className="wallet-assets">
+            <AssetRow asset="USDC" amount={usdc} price={prices.USDC} hidden={hidden} loading={loading} />
+            <AssetRow asset="XLM" amount={xlm} price={prices.XLM} hidden={hidden} loading={loading} />
+          </div>
+          <p className="wallet-caption">Public funds, visible on Stellar. Use Transfer to move them into your private balance.</p>
+          {hasRecovery === false && (
+            <div className="wallet-warning" role="status">
+              <p>
+                <b>Setup not finished.</b> The last step of creating this wallet was interrupted, so only your wallet passkey can move these funds. Finish it so your
+                recovery code can also recover this wallet.
+              </p>
+              <Button type="button" variant="secondary" onClick={addRecovery} disabled={busy}>
+                {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Finish setup: protect with recovery code
+              </Button>
+            </div>
+          )}
+          {hasRecovery && (balances?.XLM ?? 0) + (balances?.USDC ?? 0) > 0 && !recoverOpen && (
+            <button type="button" className="wallet-link" onClick={() => setRecoverOpen(true)} disabled={busy}>
+              <LifeBuoy /> Lost your wallet passkey?
+            </button>
+          )}
+          {recoverOpen && balances && (
+            <form
+              className="wallet-recover"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!isValidPin(recoverPin)) return setError("PIN must be exactly 6 digits.");
+                void recover(() => confirmPaymentWithPin(recoverPin));
+              }}
+            >
+              <p>
+                <b>Recover with your recovery code.</b> Your recovery code protects this wallet, so it can move everything
+                here ({balances.USDC > 0 ? `${balances.USDC} USDC` : ""}
+                {balances.USDC > 0 && balances.XLM > 0 ? ", " : ""}
+                {balances.XLM > 0 ? `${balances.XLM} XLM` : ""}) into your private balance without the wallet passkey.
+              </p>
+              <p className="wallet-caption">
+                If you just unlocked with your recovery code, press Recover. Otherwise confirm with your PIN (or another
+                passkey).
+              </p>
+              <Input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                value={recoverPin}
+                onChange={(e) => setRecoverPin(e.target.value.replace(/\D/g, ""))}
+                placeholder="6-digit PIN"
+                aria-label="PIN"
+                disabled={busy}
+              />
+              <div className="wallet-actions">
+                <Button type="submit" disabled={busy}>
+                  {busy ? <Loader2 className="animate-spin" /> : <KeyRound />} Recover with PIN
+                </Button>
+                <Button type="button" variant="secondary" disabled={busy} onClick={() => void recover(confirmPaymentWithPasskey)}>
+                  <Fingerprint /> Use another passkey
+                </Button>
+                <Button type="button" variant="ghost" disabled={busy} onClick={() => setRecoverOpen(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+          {recovered.length > 0 && (
+            <p className="wallet-caption">
+              Recovered into your private balance.{" "}
+              {recovered.map((hash, i) => (
+                <a key={hash} href={`https://stellar.expert/explorer/testnet/tx/${hash}`} target="_blank" rel="noreferrer">
+                  {i > 0 ? " · " : ""}View transaction{recovered.length > 1 ? ` ${i + 1}` : ""}
+                </a>
+              ))}
+            </p>
+          )}
+        </>
+      )}
+
+      {status && <p className="wallet-caption">{status}</p>}
+      {error && (
+        <p className="wallet-error" role="alert">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}

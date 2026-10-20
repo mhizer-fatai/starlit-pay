@@ -4,8 +4,8 @@ use super::pool::{ShieldedPool, ShieldedPoolClient, ContractError};
 use super::asp::{AssociationSetProvider, AssociationSetProviderClient};
 use super::verifier::Groth16Verifier;
 use soroban_sdk::{
-    testutils::{Address as _, Events},
-    Address, Bytes, BytesN, Env
+    testutils::{Address as _, AuthorizedFunction, Events},
+    Address, Bytes, BytesN, Env, IntoVal, Symbol
 };
 
 // Simple contract to deploy a mock token for testing
@@ -37,8 +37,10 @@ fn test_pool_flow() {
     let pool_id = env.register(ShieldedPool, ());
     let pool_client = ShieldedPoolClient::new(&env, &pool_id);
 
-    // Initialize Pool with verifier contract
+    // Initialize Pool with verifier contract and configure the spend relayer
     pool_client.initialize(&admin, &verifier_id);
+    let relayer = Address::generate(&env);
+    pool_client.set_relayer(&relayer);
 
     // Assert re-initialization fails
     let reinit_result = pool_client.try_initialize(&admin, &verifier_id);
@@ -117,6 +119,7 @@ fn test_asp_compliance_flow() {
     let pool_id = env.register(ShieldedPool, ());
     let pool_client = ShieldedPoolClient::new(&env, &pool_id);
     pool_client.initialize(&admin, &verifier_id);
+    pool_client.set_relayer(&Address::generate(&env));
 
     // 2. Deploy AssociationSetProvider (ASP)
     let asp_id = env.register(AssociationSetProvider, ());
@@ -173,4 +176,116 @@ fn test_asp_compliance_flow() {
     assert_eq!(asp_client.get_exclusion_root(), new_exclusion_root);
     assert!(asp_client.is_asp_root_valid(&initial_exclusion_root));
     assert!(asp_client.is_asp_root_valid(&new_exclusion_root));
+}
+
+/// Deploys a funded pool with one deposit and returns (env, pool, token, relayer, root).
+fn setup_funded_pool<'a>(env: &'a Env) -> (ShieldedPoolClient<'a>, Address, Address, Address, BytesN<32>) {
+    env.mock_all_auths();
+
+    let admin = Address::generate(env);
+    let depositor = Address::generate(env);
+    let relayer = Address::generate(env);
+
+    let token_address = create_token_contract(env, &admin);
+    soroban_sdk::token::StellarAssetClient::new(env, &token_address).mint(&depositor, &5000);
+
+    let verifier_id = env.register(Groth16Verifier, ());
+    let pool_id = env.register(ShieldedPool, ());
+    let pool_client = ShieldedPoolClient::new(env, &pool_id);
+    pool_client.initialize(&admin, &verifier_id);
+
+    let commitment = BytesN::from_array(env, &[1u8; 32]);
+    let note = Bytes::from_array(env, &[9u8; 64]);
+    let root = pool_client.deposit(&depositor, &token_address, &1000i128, &commitment, &note);
+
+    (pool_client, admin, token_address, relayer, root)
+}
+
+#[test]
+fn test_spends_rejected_until_relayer_configured() {
+    let env = Env::default();
+    let (pool_client, _admin, token, _relayer, root) = setup_funded_pool(&env);
+    let attacker = Address::generate(&env);
+    let proof = Bytes::from_array(&env, &[123u8; 100]);
+    let n1 = BytesN::from_array(&env, &[2u8; 32]);
+    let n2 = BytesN::from_array(&env, &[3u8; 32]);
+    let c = BytesN::from_array(&env, &[4u8; 32]);
+    let note = Bytes::from_array(&env, &[5u8; 16]);
+
+    assert_eq!(pool_client.get_relayer(), None);
+    assert_eq!(
+        pool_client.try_claim(&proof, &n1, &attacker, &token, &1000i128, &root).err(),
+        Some(Ok(ContractError::Unauthorized))
+    );
+    assert_eq!(
+        pool_client.try_withdraw(&proof, &n1, &n2, &attacker, &token, &1000i128, &root, &c, &note).err(),
+        Some(Ok(ContractError::Unauthorized))
+    );
+    assert_eq!(
+        pool_client.try_transfer(&proof, &n1, &n2, &c, &note, &c, &note, &root).err(),
+        Some(Ok(ContractError::Unauthorized))
+    );
+}
+
+#[test]
+fn test_fabricated_claim_without_relayer_auth_fails() {
+    let env = Env::default();
+    let (pool_client, _admin, token, relayer, root) = setup_funded_pool(&env);
+    pool_client.set_relayer(&relayer);
+
+    // Drop all mocked auths: an outside caller cannot produce the relayer's signature
+    env.set_auths(&[]);
+
+    let attacker = Address::generate(&env);
+    let proof = Bytes::from_array(&env, &[123u8; 100]);
+    let fake_nullifier = BytesN::from_array(&env, &[77u8; 32]);
+    let result = pool_client.try_claim(&proof, &fake_nullifier, &attacker, &token, &1000i128, &root);
+    assert!(result.is_err());
+
+    let token_client = soroban_sdk::token::Client::new(&env, &token);
+    assert_eq!(token_client.balance(&attacker), 0);
+    assert_eq!(token_client.balance(&pool_client.address), 1000);
+    assert!(!pool_client.is_nullifier_spent(&fake_nullifier));
+}
+
+#[test]
+fn test_claim_requires_relayer_authorization() {
+    let env = Env::default();
+    let (pool_client, _admin, token, relayer, root) = setup_funded_pool(&env);
+    pool_client.set_relayer(&relayer);
+
+    let recipient = Address::generate(&env);
+    let proof = Bytes::from_array(&env, &[123u8; 100]);
+    let nullifier = BytesN::from_array(&env, &[2u8; 32]);
+    pool_client.claim(&proof, &nullifier, &recipient, &token, &1000i128, &root);
+
+    // The relayer is the address whose authorization the claim consumed
+    let auths = env.auths();
+    assert_eq!(auths.len(), 1);
+    let (addr, invocation) = &auths[0];
+    assert_eq!(addr, &relayer);
+    assert_eq!(
+        invocation.function,
+        AuthorizedFunction::Contract((
+            pool_client.address.clone(),
+            Symbol::new(&env, "claim"),
+            (proof, nullifier, recipient, token, 1000i128, root).into_val(&env),
+        ))
+    );
+}
+
+#[test]
+fn test_set_relayer_requires_admin() {
+    let env = Env::default();
+    let (pool_client, admin, _token, relayer, _root) = setup_funded_pool(&env);
+    pool_client.set_relayer(&relayer);
+
+    let auths = env.auths();
+    assert_eq!(auths.len(), 1);
+    assert_eq!(auths[0].0, admin);
+
+    env.set_auths(&[]);
+    let other = Address::generate(&env);
+    assert!(pool_client.try_set_relayer(&other).is_err());
+    assert_eq!(pool_client.get_relayer(), Some(relayer));
 }

@@ -109,7 +109,7 @@ const CATEGORIES: DocCategory[] = [
       {
         title: "Making a payment",
         body: [
-          "Open Send, enter the recipient's Starlit username, pick USDC or XLM, enter the amount, and slide to confirm. A zero-knowledge proof settles the payment without revealing its details on-chain.",
+          "Open Send, enter the recipient's Starlit username, pick USDC or XLM, enter the amount, and slide to confirm. The payment settles through the shielded pool. On-chain zero-knowledge proof verification is still in development during the testnet preview.",
         ],
         steps: [
           "Enter the recipient's username (usernames can be scanned from a QR code).",

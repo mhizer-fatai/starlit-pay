@@ -3,6 +3,14 @@ import rateLimit from "express-rate-limit";
 import { app, rpc, horizon, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
 import { isAddressBlocked } from "./asp_service.js";
 import { performRelayerGasCheck, getRelayerMonitorStatus } from "./relayer_monitor.js";
+import { authLayer } from "./auth_layer/mount.js";
+import { createPaymentApproval } from "./payment_approval.js";
+
+// Spends need a signed-in user who just confirmed with passkey or PIN (see payment_approval.js).
+const requirePaymentApproval = createPaymentApproval({
+  sessions: authLayer.sessions,
+  jwtSecret: process.env.JWT_SECRET || "starlit_jwt_secure_signing_secret_prod_2026",
+});
 
 // Checks relayer XLM balance and alerts if low using the relayer monitoring service
 export async function checkRelayerBalance() {
@@ -26,7 +34,7 @@ function isValidContractId(id) {
 }
 
 // Submits client claims/withdrawals to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/submit", relayerLimiter, async (req, res) => {
+app.post("/api/relayer/submit", relayerLimiter, requirePaymentApproval, async (req, res) => {
   const { proof, nullifier, recipient, token, amount, root } = req.body;
   const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
 
@@ -100,7 +108,7 @@ app.post("/api/relayer/submit", relayerLimiter, async (req, res) => {
 });
 
 // Submits client private pool-to-pool transfer to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/transfer", relayerLimiter, async (req, res) => {
+app.post("/api/relayer/transfer", relayerLimiter, requirePaymentApproval, async (req, res) => {
   const {
     proof,
     nullifier_1,
@@ -202,7 +210,7 @@ app.post("/api/relayer/transfer", relayerLimiter, async (req, res) => {
 });
 
 // Submits client private pool-to-public withdrawal with change to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/withdraw", relayerLimiter, async (req, res) => {
+app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, async (req, res) => {
   const {
     proof,
     nullifier_1,
