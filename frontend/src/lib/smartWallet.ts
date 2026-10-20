@@ -151,7 +151,7 @@ async function submitRecoveryRule(kit: SmartAccountKit, info: SmartWalletInfo, s
     new Map()
   );
   const added = await kit.signAndSubmitAdmin(addRule);
-  if (!added.success) throw failure(added, "The recovery key could not be added.");
+  if (!added.success) throw failure(added, "The wallet could not be protected with your recovery code.");
 }
 
 /**
@@ -194,12 +194,12 @@ export async function createSmartWallet(options: { credentialId: string; onStatu
   const deployed = await kit.credentials.deploy(credentialId, { autoSubmit: true });
   if (!deployed.submitResult?.success) throw failure(deployed.submitResult ?? { success: false }, "The wallet could not be created.");
 
-  status("Adding your recovery key (confirm with your passkey)…");
+  status("Protecting the wallet with your recovery code (confirm with your passkey)…");
   try {
     await submitRecoveryRule(kit, info, vaultKeys.stellar.publicKey);
   } catch (err) {
-    // The wallet exists; the card offers "Add recovery key" to finish this step.
-    throw new Error(`Your wallet was created, but the recovery key wasn't added yet: ${err instanceof Error ? err.message : err}`);
+    // The wallet exists; the card offers "Protect with recovery code" to finish this step.
+    throw new Error(`Your wallet was created, but it isn't protected with your recovery code yet: ${err instanceof Error ? err.message : err}`);
   }
   return deployed.contractId;
 }
