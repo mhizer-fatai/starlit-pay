@@ -3300,3 +3300,136 @@
   font-weight: 600;
   vertical-align: middle;
 }
+
+/* ---------------------------------------------------------------------------
+ * Fluid layout for phones and small tablets.
+ * Sizes scale with the screen (clamp / vw) and grids wrap by available space
+ * (auto-fit, flex-basis) instead of switching at one fixed phone width.
+ * ------------------------------------------------------------------------- */
+
+/* Receive: the details card wraps under the QR code when there is no room
+ * beside it, at whatever width that happens. */
+.receive-grid > .receive-card {
+  flex: 1 1 340px;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .app-topbar-inner,
+  .dashboard-content {
+    width: calc(100% - clamp(24px, 6vw, 48px));
+  }
+  .app-topbar-inner {
+    gap: clamp(8px, 2.5vw, 20px);
+  }
+}
+
+@media (max-width: 720px) {
+  .receive-grid {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .receive-grid > .receive-card,
+  .receive-grid > .qr-stack,
+  .qr-stack > .qr-card {
+    flex: 1 1 auto;
+    width: 100%;
+    min-height: 0;
+  }
+  .receive-card {
+    min-height: 0;
+    padding-bottom: clamp(16px, 5vw, 24px);
+  }
+
+  /* Quick actions: as many per row as fit, every button the same width. */
+  .action-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 104px), 1fr));
+    gap: 8px;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+  .action-row > button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: 10px;
+  }
+
+  /* Cards: padding and headline numbers follow the screen width. */
+  .dash-card,
+  .dash-card.wallet-card {
+    padding-inline: clamp(14px, 4.5vw, 24px);
+  }
+  .dash-card.wallet-card {
+    padding-block: clamp(16px, 4.5vw, 24px);
+  }
+  .balance,
+  .dash-card.wallet-card .wallet-total {
+    font-size: clamp(24px, 8vw, 32px);
+  }
+  .receive-title {
+    font-size: clamp(19px, 5.5vw, 24px);
+  }
+  .dashboard-content > h1 {
+    font-size: clamp(17px, 5vw, 21px);
+  }
+
+  /* Rows with text plus buttons: let the text take the space and wrap. */
+  .settings-list-row {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .settings-list-copy {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .settings-list-copy small {
+    overflow-wrap: anywhere;
+  }
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
+  .send-tabs {
+    max-width: none;
+  }
+  .wallet-actions > button {
+    flex: 1 1 100%;
+  }
+  .wallet-address code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .passkey-badge {
+    display: inline-block;
+    margin: 4px 0 0;
+  }
+
+  /* Pop-ups use the full width and scroll inside the screen. */
+  .transfer-modal {
+    padding: clamp(16px, 5vw, 22px);
+  }
+}
+
+/* Very narrow phones (e.g. a folded Fold, older iPhone SE). */
+@media (max-width: 360px) {
+  .action-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .wallet-asset {
+    gap: 8px;
+  }
+  .wallet-token {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+/* Long addresses, memo IDs and hashes never push the page sideways. */
+.dashboard-content code,
+.dashboard-content .break-all {
+  overflow-wrap: anywhere;
+}
+.dashboard-main {
+  min-width: 0;
+  overflow-x: clip;
+}
