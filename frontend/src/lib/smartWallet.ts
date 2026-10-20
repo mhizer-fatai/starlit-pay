@@ -19,7 +19,7 @@ import {
 import { getUnlockedKeys, getVaultSecrets } from "@/lib/auth";
 import { BACKEND_URL, getSmartWallet, getSmartWalletRelayToken, type SmartWalletInfo } from "@/lib/backend";
 import { RPC_URL, rpc } from "@/lib/stellar";
-import { fromB64u } from "@/lib/vault/crypto";
+import { fromB64u, toB64u } from "@/lib/vault/crypto";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 
 export type { SmartWalletInfo };
@@ -84,6 +84,90 @@ export function walletPasskey(info: SmartWalletInfo) {
   return info.address ? info.passkeys.find((p) => walletAddressFor(info, p.credentialId) === info.address) ?? null : null;
 }
 
+export interface WalletSigners {
+  /** Credential ids of the passkeys the wallet accepts (read from its on-chain rules). */
+  passkeyCredentialIds: string[];
+  /** Whether the vault's backup key (recovery) is a signer. */
+  hasRecoveryKey: boolean;
+}
+
+const MAX_RULES = 10;
+
+/** Reads the wallet's signers from its context rules on Stellar (read-only simulation). */
+export async function readWalletSigners(info: SmartWalletInfo): Promise<WalletSigners> {
+  const result: WalletSigners = { passkeyCredentialIds: [], hasRecoveryKey: false };
+  if (!info.address) return result;
+  const source = new StellarSdk.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+  for (let id = 0; id < MAX_RULES; id++) {
+    const tx = new StellarSdk.TransactionBuilder(source, { fee: StellarSdk.BASE_FEE, networkPassphrase: info.config.networkPassphrase })
+      .addOperation(new StellarSdk.Contract(info.address).call("get_context_rule", StellarSdk.nativeToScVal(id, { type: "u32" })))
+      .setTimeout(30)
+      .build();
+    const sim = await rpc.simulateTransaction(tx);
+    if (StellarSdk.rpc.Api.isSimulationError(sim) || !sim.result) {
+      if (id === 0) throw new Error("Could not read your public wallet from Stellar. Try again.");
+      continue; // removed or not created; ids are not reused
+    }
+    const rule = StellarSdk.scValToNative(sim.result.retval) as { signers?: unknown[] };
+    for (const signer of rule.signers ?? []) {
+      if (!Array.isArray(signer) || signer[0] !== "External") continue;
+      const [, verifier, keyData] = signer as [string, string, Uint8Array];
+      if (verifier === info.config.webauthnVerifier && keyData.length > 65) {
+        result.passkeyCredentialIds.push(toB64u(keyData.subarray(65)));
+      } else if (verifier === info.config.ed25519Verifier) {
+        result.hasRecoveryKey = true;
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * The passkey to ask for when the wallet signs. Read from the wallet itself, so
+ * it still works if that passkey was removed from the Starlit account (the key
+ * still lives in the user's phone or password manager).
+ */
+async function signingCredential(info: SmartWalletInfo): Promise<string> {
+  const registered = walletPasskey(info);
+  if (registered) return registered.credentialId;
+  const { passkeyCredentialIds } = await readWalletSigners(info);
+  if (passkeyCredentialIds.length === 0) throw new Error("This wallet has no passkey signer.");
+  return passkeyCredentialIds[0]!;
+}
+
+async function connectedKit(info: SmartWalletInfo): Promise<{ kit: SmartAccountKit; credentialId: string }> {
+  const kit = await createKit(info);
+  const credentialId = await signingCredential(info);
+  await kit.connectWallet({ contractId: info.address!, credentialId });
+  return { kit, credentialId };
+}
+
+async function submitRecoveryRule(kit: SmartAccountKit, info: SmartWalletInfo, stellarPublicKey: string) {
+  const backupKey = StellarSdk.Keypair.fromPublicKey(stellarPublicKey).rawPublicKey();
+  const addRule = await kit.rules.add(
+    createDefaultContext(),
+    "Recovery",
+    [createEd25519Signer(info.config.ed25519Verifier, backupKey)],
+    new Map()
+  );
+  const added = await kit.signAndSubmitAdmin(addRule);
+  if (!added.success) throw failure(added, "The recovery key could not be added.");
+}
+
+/**
+ * Adds the vault's backup key to an existing wallet (its own rule), so the
+ * recovery code can recover the wallet. Signed with the wallet passkey.
+ */
+export async function addRecoveryKey(): Promise<void> {
+  const info = await loadSmartWallet();
+  if (!info.address) throw new Error("Create your public wallet first.");
+  const vaultKeys = getUnlockedKeys();
+  if (!vaultKeys) throw new Error("Unlock your wallet first.");
+  if ((await readWalletSigners(info)).hasRecoveryKey) return;
+  const { kit } = await connectedKit(info);
+  await submitRecoveryRule(kit, info, vaultKeys.stellar.publicKey);
+}
+
 function failure(result: { success: boolean; error?: { message?: string } | string }, fallback: string): Error {
   const message = typeof result.error === "string" ? result.error : result.error?.message;
   return new Error(message || fallback);
@@ -111,15 +195,12 @@ export async function createSmartWallet(options: { credentialId: string; onStatu
   if (!deployed.submitResult?.success) throw failure(deployed.submitResult ?? { success: false }, "The wallet could not be created.");
 
   status("Adding your recovery key (confirm with your passkey)…");
-  const backupKey = StellarSdk.Keypair.fromPublicKey(vaultKeys.stellar.publicKey).rawPublicKey();
-  const addRule = await kit.rules.add(
-    createDefaultContext(),
-    "Recovery",
-    [createEd25519Signer(info.config.ed25519Verifier, backupKey)],
-    new Map()
-  );
-  const added = await kit.signAndSubmitAdmin(addRule);
-  if (!added.success) throw failure(added, "The wallet was created, but the recovery key could not be added.");
+  try {
+    await submitRecoveryRule(kit, info, vaultKeys.stellar.publicKey);
+  } catch (err) {
+    // The wallet exists; the card offers "Add recovery key" to finish this step.
+    throw new Error(`Your wallet was created, but the recovery key wasn't added yet: ${err instanceof Error ? err.message : err}`);
+  }
   return deployed.contractId;
 }
 
@@ -162,11 +243,7 @@ export async function sendFromSmartWallet(token: WalletToken, recipient: string,
   }
   if (!(amount > 0)) throw new Error("Enter an amount greater than 0.");
 
-  const kit = await createKit(info);
-  const passkey = walletPasskey(info);
-  if (!passkey) throw new Error("The passkey that controls this wallet is no longer registered. Use your recovery key.");
-  await kit.connectWallet({ contractId: info.address, credentialId: passkey.credentialId });
-
+  const { kit } = await connectedKit(info);
   const result = await kit.transfer(tokenContract(info, token), recipient, amount);
   if (!result.success) throw failure(result, "The payment could not be sent.");
   return result.hash ?? "";
@@ -186,11 +263,7 @@ export async function depositFromSmartWallet(
   const info = await loadSmartWallet();
   if (!info.address) throw new Error("Create your public wallet first.");
   if (!(amount > 0)) throw new Error("Enter an amount greater than 0.");
-  const passkey = walletPasskey(info);
-  if (!passkey) throw new Error("The passkey that controls this wallet is no longer registered. Use your recovery key.");
-
-  const kit = await createKit(info);
-  await kit.connectWallet({ contractId: info.address, credentialId: passkey.credentialId });
+  const { kit, credentialId } = await connectedKit(info);
 
   const func = StellarSdk.xdr.HostFunction.hostFunctionTypeInvokeContract(
     new StellarSdk.xdr.InvokeContractArgs({
@@ -218,7 +291,7 @@ export async function depositFromSmartWallet(
   if (tx.simulation && StellarSdk.rpc.Api.isSimulationError(tx.simulation)) {
     throw new Error("The deposit could not be prepared. Check your public wallet balance.");
   }
-  const result = await kit.signAndSubmit(tx, { credentialId: passkey.credentialId });
+  const result = await kit.signAndSubmit(tx, { credentialId });
   if (!result.success) throw failure(result, "The transfer could not be completed.");
   return result.hash ?? "";
 }

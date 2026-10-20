@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Check, Copy, ExternalLink, Fingerprint, Loader2, RefreshCw, Send, Smartphone } from "lucide-react";
+import { Check, Copy, ExternalLink, Fingerprint, Loader2, RefreshCw, Send, ShieldCheck, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,9 +7,11 @@ import { isVaultMode } from "@/lib/auth";
 import { friendlyAuthError } from "@/lib/passkeyAccount";
 import {
   NeedsWalletPasskeyError,
+  addRecoveryKey,
   addWalletPasskey,
   createSmartWallet,
   loadSmartWallet,
+  readWalletSigners,
   sendFromSmartWallet,
   smartWalletBalance,
   type SmartWalletInfo,
@@ -53,6 +55,9 @@ export function SmartWalletCard({
   const onBalancesRef = useRef(onBalances);
   onBalancesRef.current = onBalances;
 
+  // null = unknown (not read yet or the read failed)
+  const [hasRecovery, setHasRecovery] = useState<boolean | null>(null);
+
   const refresh = useCallback(async () => {
     try {
       const next = await loadSmartWallet();
@@ -61,6 +66,9 @@ export function SmartWalletCard({
         const [XLM, USDC] = await Promise.all([smartWalletBalance(next, "XLM"), smartWalletBalance(next, "USDC")]);
         setBalances({ XLM, USDC });
         onBalancesRef.current?.({ XLM, USDC });
+        readWalletSigners(next)
+          .then((signers) => setHasRecovery(signers.hasRecoveryKey))
+          .catch(() => setHasRecovery(null));
       }
     } catch (err) {
       setError(friendlyAuthError(err));
@@ -101,6 +109,13 @@ export function SmartWalletCard({
       await createSmartWallet({ credentialId, onStatus: setStatus });
       setNeedsPasskey(false);
       await refresh();
+    });
+
+  const addRecovery = () =>
+    run(async () => {
+      setStatus("Confirm with your wallet passkey…");
+      await addRecoveryKey();
+      setHasRecovery(true);
     });
 
   const copy = async () => {
@@ -209,6 +224,17 @@ export function SmartWalletCard({
             <AssetRow asset="XLM" amount={xlm} price={prices.XLM} hidden={hidden} loading={loading} />
           </div>
           <p className="wallet-caption">Visible on Stellar. Fees covered by Starlit.</p>
+          {hasRecovery === false && (
+            <div className="wallet-warning" role="status">
+              <p>
+                <b>No recovery key yet.</b> Only your wallet passkey can move these funds. Add your recovery key so your
+                recovery code can also recover this wallet.
+              </p>
+              <Button type="button" variant="secondary" onClick={addRecovery} disabled={busy}>
+                {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Add recovery key
+              </Button>
+            </div>
+          )}
           <div className="wallet-actions">
             <Button type="button" onClick={() => setSendOpen((v) => !v)} disabled={busy}>
               <Send /> Send with passkey
