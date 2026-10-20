@@ -284,8 +284,15 @@ export const fetchStats = () =>
     status: string;
   }>("/api/stats");
 // --- Public smart wallet (OpenZeppelin smart account, passkey-controlled) ---
+export interface WalletBirth {
+  txHash: string;
+  ledger: number;
+}
+
 export interface SmartWalletInfo {
   address: string | null;
+  /** The transaction that created the wallet (null until recorded). */
+  birth: WalletBirth | null;
   /** The user's passkeys that can control an on-chain wallet (ES256), raw P-256 keys. */
   passkeys: { credentialId: string; publicKey: string; deviceName: string | null }[];
   config: {
@@ -311,6 +318,9 @@ export function ownWalletAddress(): Promise<string | null> {
     });
   return ownWallet;
 }
+/** Records the wallet's creation transaction; the server checks it on-chain. */
+export const postSmartWalletBirth = (txHash: string) =>
+  req<{ birth: WalletBirth }>("/api/smart-wallet/birth", { method: "POST", body: JSON.stringify({ txHash }) }, true);
 /** Short-lived token for the sponsored relayer (smart-account-kit cannot send cookies). */
 export const getSmartWalletRelayToken = () =>
   req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" }, true);

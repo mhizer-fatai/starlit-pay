@@ -17,7 +17,14 @@ import {
 } from "smart-account-kit";
 
 import { getUnlockedKeys, getVaultSecrets } from "@/lib/auth";
-import { BACKEND_URL, getSmartWallet, getSmartWalletRelayToken, type SmartWalletInfo } from "@/lib/backend";
+import {
+  BACKEND_URL,
+  getSmartWallet,
+  getSmartWalletRelayToken,
+  postSmartWalletBirth,
+  type SmartWalletInfo,
+  type WalletBirth,
+} from "@/lib/backend";
 import { RPC_URL, rpc } from "@/lib/stellar";
 import { fromB64u, toB64u } from "@/lib/vault/crypto";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
@@ -35,6 +42,9 @@ export class NeedsWalletPasskeyError extends Error {
   }
 }
 
+// One store per page: the kit keeps each wallet's verified creation record here.
+const kitStorage = new IndexedDBStorage();
+
 async function createKit(info: SmartWalletInfo): Promise<SmartAccountKit> {
   const { token } = await getSmartWalletRelayToken();
   return new SmartAccountKit({
@@ -45,9 +55,13 @@ async function createKit(info: SmartWalletInfo): Promise<SmartAccountKit> {
     ed25519VerifierAddress: info.config.ed25519Verifier,
     rpId: window.location.hostname,
     rpName: "Starlit Pay",
+    // Origin the kit accepts for the one-time "you own this passkey" check per browser.
+    allowedOrigins: [window.location.origin],
     relayerUrl: `${BACKEND_URL}/api/smart-wallet/relay/${encodeURIComponent(token)}`,
+    // No indexer: the wallet's creation record comes from Starlit (see ensureWalletRecord)
+    // and the kit re-checks it on-chain / in Horizon history before connecting.
     indexerUrl: false,
-    storage: new IndexedDBStorage(),
+    storage: kitStorage,
   });
 }
 
@@ -87,6 +101,8 @@ export function walletPasskey(info: SmartWalletInfo) {
 export interface WalletSigners {
   /** Credential ids of the passkeys the wallet accepts (read from its on-chain rules). */
   passkeyCredentialIds: string[];
+  /** The same passkeys with their 65-byte P-256 public keys. */
+  passkeys: { credentialId: string; publicKey: Uint8Array }[];
   /** Whether the vault's backup key (recovery) is a signer. */
   hasRecoveryKey: boolean;
 }
@@ -95,7 +111,7 @@ const MAX_RULES = 10;
 
 /** Reads the wallet's signers from its context rules on Stellar (read-only simulation). */
 export async function readWalletSigners(info: SmartWalletInfo): Promise<WalletSigners> {
-  const result: WalletSigners = { passkeyCredentialIds: [], hasRecoveryKey: false };
+  const result: WalletSigners = { passkeyCredentialIds: [], passkeys: [], hasRecoveryKey: false };
   if (!info.address) return result;
   const source = new StellarSdk.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
   for (let id = 0; id < MAX_RULES; id++) {
@@ -113,7 +129,9 @@ export async function readWalletSigners(info: SmartWalletInfo): Promise<WalletSi
       if (!Array.isArray(signer) || signer[0] !== "External") continue;
       const [, verifier, keyData] = signer as [string, string, Uint8Array];
       if (verifier === info.config.webauthnVerifier && keyData.length > 65) {
-        result.passkeyCredentialIds.push(toB64u(keyData.subarray(65)));
+        const credentialId = toB64u(keyData.subarray(65));
+        result.passkeyCredentialIds.push(credentialId);
+        result.passkeys.push({ credentialId, publicKey: new Uint8Array(keyData.subarray(0, 65)) });
       } else if (verifier === info.config.ed25519Verifier) {
         result.hasRecoveryKey = true;
       }
@@ -135,9 +153,56 @@ async function signingCredential(info: SmartWalletInfo): Promise<string> {
   return passkeyCredentialIds[0]!;
 }
 
+const INDEXER = "https://testnet.mercurydata.app/rest/smart-account-indexer";
+
+/**
+ * Finds the transaction that created a wallet made before Starlit stored it:
+ * the ledger where an indexer first saw the wallet, then the wallet's own
+ * setup events in that ledger. The server checks the result on-chain.
+ */
+async function discoverBirth(info: SmartWalletInfo, credentialId: string): Promise<WalletBirth> {
+  const hexId = Array.from(fromB64u(credentialId), (b) => b.toString(16).padStart(2, "0")).join("");
+  const res = await fetch(`${INDEXER}/api/lookup/${hexId}`);
+  const lookup = res.ok ? ((await res.json()) as { contracts?: { contract_id: string; first_seen_ledger?: number }[] }) : null;
+  const firstSeen = lookup?.contracts?.find((c) => c.contract_id === info.address)?.first_seen_ledger;
+  if (!firstSeen) throw new Error("Could not find when your public wallet was created. Try again later.");
+  const { events } = await rpc.getEvents({
+    startLedger: firstSeen,
+    filters: [{ type: "contract", contractIds: [info.address!] }],
+    limit: 5,
+  });
+  const first = events[0];
+  if (!first) throw new Error("Could not find when your public wallet was created. Try again later.");
+  return (await postSmartWalletBirth(first.txHash)).birth;
+}
+
+/**
+ * The kit only connects to a wallet whose creation it can verify. Give it the
+ * creation record (stored by Starlit) for this browser, so it works on any
+ * device, not just the one that created the wallet.
+ */
+async function ensureWalletRecord(info: SmartWalletInfo, credentialId: string) {
+  const stored = await kitStorage.get(credentialId);
+  if (stored?.contractId === info.address && stored.creationTransactionHash && stored.creationLedger) return;
+  const birth = info.birth ?? (await discoverBirth(info, credentialId));
+  const onChain = (await readWalletSigners(info)).passkeys.find((p) => p.credentialId === credentialId);
+  if (!onChain) throw new Error("This passkey does not control your public wallet.");
+  const record = {
+    contractId: info.address!,
+    birthWasmHash: info.config.accountWasmHash,
+    creationTransactionHash: birth.txHash,
+    creationLedger: birth.ledger,
+    deploymentStatus: "deployed" as const,
+    isPrimary: true,
+  };
+  if (stored) await kitStorage.update(credentialId, record);
+  else await kitStorage.save({ credentialId, publicKey: onChain.publicKey, nickname: "Starlit Pay", createdAt: Date.now(), ...record });
+}
+
 async function connectedKit(info: SmartWalletInfo): Promise<{ kit: SmartAccountKit; credentialId: string }> {
   const kit = await createKit(info);
   const credentialId = await signingCredential(info);
+  await ensureWalletRecord(info, credentialId);
   await kit.connectWallet({ contractId: info.address!, credentialId });
   return { kit, credentialId };
 }
