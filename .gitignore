@@ -60,3 +60,6 @@ video-output/
 
 # Personal security notes (not for the repo)
 securityplan.md
+
+# Personal Claude Code settings
+.claude/settings.local.json
