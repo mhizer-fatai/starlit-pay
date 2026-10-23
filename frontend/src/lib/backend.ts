@@ -233,11 +233,16 @@ export interface ShieldedNote {
   ledger?: number;
   created_at?: string;
 }
-export const fetchNotes = (viewingKey: string, timestamp?: string, signature?: string) => {
-  const query =
-    timestamp && signature
-      ? `?timestamp=${encodeURIComponent(timestamp)}&signature=${encodeURIComponent(signature)}`
-      : "";
+export const fetchNotes = (viewingKey: string, timestamp?: string, signature?: string, opts: { includeSpent?: boolean } = {}) => {
+  const params = new URLSearchParams();
+  if (timestamp && signature) {
+    params.set("timestamp", timestamp);
+    params.set("signature", signature);
+  }
+  // History only: spent notes are never spendable or counted in balances.
+  if (opts.includeSpent) params.set("include", "spent");
+  const qs = params.toString();
+  const query = qs ? `?${qs}` : "";
   return req<{ notes: ShieldedNote[] }>(`/api/notes/${encodeURIComponent(viewingKey)}${query}`, undefined, true);
 };
 
