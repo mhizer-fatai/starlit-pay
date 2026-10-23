@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { activityTitle, buildActivityFeed } from "@/lib/wallet";
+import { activityTitle, buildActivityFeed, recentStarlitRecipients } from "@/lib/wallet";
 import type { BackendTransaction } from "@/lib/backend";
 
 const WALLET = "CAVA5JIZM3V4T23OJMGJREM34MFVVSFJKA55RK3UBPTSZWZ2SS77I54E";
@@ -42,5 +42,19 @@ describe("received payments in history", () => {
     // c2 is the user's own re-shielded note (sender = self): not a new receipt.
     expect(feed.map((item) => item.key)).toEqual(["note-c1"]);
     expect(feed[0]!.direction).toBe("in");
+  });
+});
+
+describe("recentStarlitRecipients", () => {
+  test("lists Starlit usernames paid, newest first, once each, skipping addresses", () => {
+    const at = (iso: string, payload: Record<string, unknown>) =>
+      ({ id: iso, created_at: iso, encrypted_payload: btoa(JSON.stringify(payload)) }) as BackendTransaction;
+    const txs = [
+      at("2026-10-20T10:00:00Z", { to: "@bob", amount: 1, asset: "USDC" }),
+      at("2026-10-23T10:00:00Z", { to: "@stunnermatins", amount: 3, asset: "USDC" }),
+      at("2026-10-22T10:00:00Z", { to: "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY", amount: 1, asset: "XLM" }),
+      at("2026-10-21T10:00:00Z", { to: "@Bob", amount: 2, asset: "XLM" }),
+    ];
+    expect(recentStarlitRecipients(txs)).toEqual(["stunnermatins", "Bob"]);
   });
 });

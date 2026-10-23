@@ -368,3 +368,26 @@ export function statementPeriodLabel(range: StatementRange, from?: string, to?: 
   const end = parse(to);
   return `${start === null ? "…" : formatDayMonthYear(start)} - ${end === null ? "…" : formatDayMonthYear(end)}`;
 }
+
+/**
+ * Starlit usernames the user has paid, most recent first, without duplicates
+ * (from their own transaction records; withdrawals to addresses are skipped).
+ */
+export function recentStarlitRecipients(txs: BackendTransaction[], limit = 6): string[] {
+  const sorted = [...txs].sort(
+    (a, b) => (b.created_at ? Date.parse(b.created_at) : 0) - (a.created_at ? Date.parse(a.created_at) : 0)
+  );
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tx of sorted) {
+    const to = tx.encrypted_payload ? decodeTransactionPayload(tx.encrypted_payload)?.to : undefined;
+    if (!to?.startsWith("@")) continue;
+    const username = to.slice(1);
+    const key = username.toLowerCase();
+    if (!username || seen.has(key)) continue;
+    seen.add(key);
+    out.push(username);
+    if (out.length >= limit) break;
+  }
+  return out;
+}

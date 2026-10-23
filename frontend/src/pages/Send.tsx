@@ -49,6 +49,8 @@ import { TOKENS, isStellarAddress } from "@/lib/stellar";
 import {
   formatGrouped,
   loadPrivateBalances,
+  loadUserTransactions,
+  recentStarlitRecipients,
   type ActivityItem,
 } from "@/lib/wallet";
 import { useSidebar } from "@/lib/sidebar";
@@ -203,6 +205,22 @@ function SendPage() {
     getSmartWallet()
       .then((info) => setSmartWalletAddress(info.address))
       .catch(() => undefined);
+  }, []);
+  // Starlit users this account paid recently, offered as one-tap recipients.
+  const [recentRecipients, setRecentRecipients] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void getUser().then((user) => {
+      if (!user || cancelled) return;
+      loadUserTransactions(user.id)
+        .then((txs) => {
+          if (!cancelled) setRecentRecipients(recentStarlitRecipients(txs));
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   const scanInputRef = useRef<HTMLInputElement>(null);
 
@@ -740,6 +758,29 @@ function SendPage() {
                           aria-describedby={errors.username ? "send-username-error" : undefined}
                         />
                       </div>
+                      {recentRecipients.length > 0 && (
+                        <div className="send-recents" role="group" aria-label="Recent recipients">
+                          <span>Recent</span>
+                          {recentRecipients.map((name) => {
+                            const active = username.trim().replace(/^@/, "").toLowerCase() === name.toLowerCase();
+                            return (
+                              <button
+                                key={name}
+                                type="button"
+                                className={active ? "active" : ""}
+                                aria-pressed={active}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  setUsername(name);
+                                  setErrors((prev) => ({ ...prev, username: undefined }));
+                                }}
+                              >
+                                @{name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                       {errors.username && (
                         <span className="send-error" id="send-username-error" role="alert">
                           <TriangleAlert />
