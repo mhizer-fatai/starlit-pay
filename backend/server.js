@@ -29,6 +29,23 @@ if (process.env.BACKGROUND_JOBS === "off") {
   startTtlKeeper();
 }
 
+// Root: a short service description instead of Express's "Cannot GET /".
+const startedAt = new Date().toISOString();
+app.get("/", (req, res) => {
+  res.json({
+    service: "Starlit Pay API",
+    status: "online",
+    network: "Stellar Testnet",
+    app: "https://starlitpay.xyz",
+    startedAt,
+    uptimeSeconds: Math.round(process.uptime()),
+    checks: {
+      database: "/api/health/db",
+      relayerMonitor: "/api/relayer/daemon/status",
+    },
+  });
+});
+
 // Start HTTP Server
 app.listen(PORT, () => {
   console.log(`Starlit Pay backend database router listening on http://localhost:${PORT}`);
