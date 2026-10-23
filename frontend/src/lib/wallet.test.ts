@@ -28,3 +28,19 @@ describe("transfers between the user's own balances", () => {
     expect(activityTitle(byKey["tx-4"]!)).toBe("Sent to GCDQ…BWWY");
   });
 });
+
+describe("received payments in history", () => {
+  test("a deposit stays listed after it was spent or re-shielded", () => {
+    const feed = buildActivityFeed(
+      [
+        { commitment: "c1", amount: 5, asset: "USDC", createdAt: 2, sender: "GANULJEXAMPLE", spent: true },
+        { commitment: "c2", amount: 5, asset: "USDC", createdAt: 3, sender: "alice", spent: false },
+      ],
+      [],
+      "alice"
+    );
+    // c2 is the user's own re-shielded note (sender = self): not a new receipt.
+    expect(feed.map((item) => item.key)).toEqual(["note-c1"]);
+    expect(feed[0]!.direction).toBe("in");
+  });
+});

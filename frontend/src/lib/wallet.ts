@@ -34,6 +34,8 @@ export interface BalanceNote {
   createdAt: number;
   sender?: string;
   ledger?: number;
+  /** Already spent (kept for history only; never counted or spendable). */
+  spent?: boolean;
 }
 
 export interface PrivateBalances {
@@ -53,7 +55,8 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
   const timestamp = Date.now().toString();
   const keypair = StellarSdk.Keypair.fromSecret(keys.stellar.secretKey);
   const signature = bytesToHex(keypair.sign(Buffer.from(new TextEncoder().encode(timestamp))));
-  const { notes } = await fetchNotes(user.public_encryption_key, timestamp, signature);
+  // All notes, for history; only unspent ones count towards the balance.
+  const { notes } = await fetchNotes(user.public_encryption_key, timestamp, signature, { includeSpent: true });
 
   const out: PrivateBalances = { usdc: 0, xlm: 0, notes: [] };
   for (const note of notes) {
@@ -62,8 +65,9 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
     if (!decrypted || !Number.isFinite(decrypted.amount)) continue;
     const asset = decrypted.asset.toUpperCase();
     if (asset !== "USDC" && asset !== "XLM") continue;
-    if (asset === "USDC") out.usdc += decrypted.amount;
-    else out.xlm += decrypted.amount;
+    const unspent = !note.status || note.status === "unspent";
+    if (unspent && asset === "USDC") out.usdc += decrypted.amount;
+    else if (unspent) out.xlm += decrypted.amount;
     out.notes.push({
       commitment: note.commitment,
       amount: decrypted.amount,
@@ -71,6 +75,7 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
       createdAt: note.created_at ? new Date(note.created_at).getTime() : Date.now(),
       sender: decrypted.sender,
       ledger: note.ledger,
+      spent: !unspent,
     });
   }
   return out;
@@ -134,7 +139,7 @@ export async function spendableBalance(user: SessionUser, asset: string): Promis
   if (!balances) throw new Error("Unlock your wallet first.");
   const code = asset.toUpperCase();
   return balances.notes
-    .filter((note) => note.asset === code)
+    .filter((note) => note.asset === code && !note.spent)
     .reduce((sum, note) => sum + note.amount, 0);
 }
 
@@ -158,7 +163,7 @@ export async function spendForPayment(
   const balances = await loadPrivateBalances(user);
   if (!balances) throw new Error("Unlock your wallet first.");
   const code = asset.toUpperCase();
-  const notes = balances.notes.filter((note) => note.asset === code);
+  const notes = balances.notes.filter((note) => note.asset === code && !note.spent);
   const total = notes.reduce((sum, note) => sum + note.amount, 0);
   if (total + EPSILON < amount) {
     throw new Error(`Insufficient ${code} balance.`);

@@ -81,12 +81,11 @@ app.get("/api/notes/:viewingKey", async (req, res) => {
       }
     }
 
-    // 3. Fetch notes
-    const { data: notes, error } = await supabase
-      .from("shielded_notes")
-      .select("*")
-      .eq("recipient_viewing_key", viewingKey)
-      .eq("status", "unspent");
+    // 3. Fetch notes. ?include=spent also returns spent notes, for history:
+    // a received payment stays in the activity list after it is spent or re-shielded.
+    let query = supabase.from("shielded_notes").select("*").eq("recipient_viewing_key", viewingKey);
+    if (req.query.include !== "spent") query = query.eq("status", "unspent");
+    const { data: notes, error } = await query;
 
     if (error) throw error;
     res.status(200).json({ notes });
