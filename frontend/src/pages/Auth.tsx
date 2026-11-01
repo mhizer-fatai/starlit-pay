@@ -367,8 +367,8 @@ function AuthPage() {
     try {
       await unlockWithPin(email, pin);
       if (!canUsePasskeys) {
-        // Without passkey support the upgrade cannot run here; keep the old sign-in.
-        navigate("/dashboard", { replace: true });
+        setError("Your account needs a quick upgrade, which requires a browser with passkey support. Please use a recent Chrome, Safari or Edge.");
+        setPin("");
         return;
       }
       setUpgradePin(pin);

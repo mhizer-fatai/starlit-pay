@@ -1,31 +1,15 @@
 import fs from "fs";
 import path from "path";
-import jwt from "jsonwebtoken";
 import { app, supabase, rpc, GATEWAY_ADDRESS } from "./config.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { authLayer } from "./auth_layer/mount.js";
 
-const JWT_SECRET =
-  process.env.JWT_SECRET || "starlit_jwt_secure_signing_secret_prod_2026";
-if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
-  console.warn("Security notice: Using default JWT_SECRET. Configure JWT_SECRET in environment for maximum security.");
-}
-
 /**
- * Id of the signed-in user (legacy Bearer JWT or passkey session cookie), or
+ * Id of the signed-in user (passkey session), or
  * null. Note routes compare it with the note owner, so a session only ever
  * grants access to its own notes.
  */
 function sessionUserId(req) {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    try {
-      const decoded = jwt.verify(authHeader.split(" ")[1], JWT_SECRET, { algorithms: ["HS256"] });
-      if (decoded && decoded.id) return decoded.id;
-    } catch {
-      // not a legacy token; try the passkey session below
-    }
-  }
   const result = authLayer.sessions?.authenticate(req);
   return result?.session?.id ?? null;
 }

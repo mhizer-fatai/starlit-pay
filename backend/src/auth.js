@@ -1,39 +1,8 @@
-import jwt from "jsonwebtoken";
 import { app, supabase } from "./config.js";
 import { authLayer } from "./auth_layer/mount.js";
 
-const JWT_SECRET =
-  process.env.JWT_SECRET || "starlit_jwt_secure_signing_secret_prod_2026";
-if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
-  console.warn("Security notice: Using default JWT_SECRET. Configure JWT_SECRET in environment for maximum security.");
-}
-
-/**
- * Generates a signed JWT for authenticated user sessions
- */
-export function generateToken(user) {
-  return jwt.sign(
-    { id: user.id, email: user.email, username: user.username },
-    JWT_SECRET,
-    { algorithm: "HS256", expiresIn: "7d" }
-  );
-}
-
-/**
- * Authentication middleware. Accepts a legacy Bearer JWT, or a passkey-layer
- * session (access cookie or Bearer access token).
- */
+/** Authentication middleware: a passkey-layer session (access cookie or Bearer access token). */
 export function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith("Bearer ")) {
-    try {
-      req.user = jwt.verify(authHeader.split(" ")[1], JWT_SECRET, { algorithms: ["HS256"] });
-      return next();
-    } catch {
-      // Not a legacy token; fall through to the passkey-layer session.
-    }
-  }
-
   const result = authLayer.sessions?.authenticate(req);
   if (result?.session) {
     req.session = result.session;
@@ -49,8 +18,9 @@ export function requireAuth(req, res, next) {
 // 1. Authenticate user by email (Login check / PIN unlock)
 // Lookup mode `{ email }` → returns { exists, user? } WITHOUT a token (used to
 // decide between PIN-entry and PIN-setup; no session is created).
-// Unlock mode `{ email, identity_commitment }` → verifies the PIN-derived
-// commitment against the stored one and only then issues a JWT.
+// PIN check mode `{ email, identity_commitment }` → verifies the PIN-derived
+// commitment of an old email+PIN account so it can upgrade to a passkey. It
+// issues no session: only the passkey layer does that.
 app.post("/api/auth/login", async (req, res) => {
   const { email, identity_commitment } = req.body;
   if (!email) {
@@ -84,9 +54,8 @@ app.post("/api/auth/login", async (req, res) => {
       return res.status(401).json({ error: "Incorrect PIN." });
     }
 
-    const token = generateToken(user);
     const { identity_commitment: _secret, ...safeUser } = user;
-    res.status(200).json({ exists: true, user: safeUser, token });
+    res.status(200).json({ exists: true, user: safeUser });
   } catch (error) {
     console.error("Login error:", error.message);
     res.status(500).json({ error: "Failed to authenticate user" });
@@ -157,9 +126,8 @@ app.post("/api/users/register", async (req, res) => {
       throw error;
     }
 
-    const token = generateToken(newUser);
     const { identity_commitment: _secret, ...safeUser } = newUser;
-    res.status(201).json({ user: safeUser, token });
+    res.status(201).json({ user: safeUser });
   } catch (error) {
     console.error("Registration error:", error.message);
     res.status(500).json({ error: "Failed to register user" });

@@ -7,10 +7,7 @@ import { authLayer } from "./auth_layer/mount.js";
 import { createPaymentApproval } from "./payment_approval.js";
 
 // Spends need a signed-in user who just confirmed with passkey or PIN (see payment_approval.js).
-const requirePaymentApproval = createPaymentApproval({
-  sessions: authLayer.sessions,
-  jwtSecret: process.env.JWT_SECRET || "starlit_jwt_secure_signing_secret_prod_2026",
-});
+const requirePaymentApproval = createPaymentApproval({ sessions: authLayer.sessions });
 
 // Checks relayer XLM balance and alerts if low using the relayer monitoring service
 export async function checkRelayerBalance() {

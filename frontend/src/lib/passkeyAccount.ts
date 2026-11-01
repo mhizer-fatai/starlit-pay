@@ -40,7 +40,6 @@ export async function createPasskeyAccount(input: {
     status("Creating your wallet…");
     vault = await createVault();
     status("Creating your account…");
-    // The legacy JWT this returns is ignored: passkey accounts use cookie sessions.
     await register({
       email,
       username: input.username,

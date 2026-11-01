@@ -2,10 +2,8 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import {
   clearSession,
   getStoredUser,
-  getToken,
   login,
   register,
-  setSession,
   setStoredUser,
   updateProfile,
   type BackendUser,
@@ -196,7 +194,7 @@ export async function unlockWalletWithPin(
 }
 
 export async function getUser(): Promise<SessionUser | null> {
-  if (!getToken() && !isVaultMode()) return null;
+  if (!isVaultMode()) return null;
   return getStoredUser<SessionUser>();
 }
 
@@ -210,17 +208,17 @@ export async function lookupByEmail(
 }
 
 /**
- * Existing account: re-derives keys from email + PIN and lets the backend
- * verify the commitment before it issues a JWT (401 on wrong PIN).
+ * Old email+PIN account: re-derives its keys and lets the backend check the
+ * commitment (401 on wrong PIN), so the account can upgrade to a passkey.
  */
 export async function unlockWithPin(email: string, pin: string): Promise<SessionUser> {
   const clean = email.toLowerCase().trim();
   const derived = await deriveKeysFromEmailAndPin(clean, pin);
   const res = await login(clean, await identityCommitment(derived.spendingKey));
-  if (res.exists === false || !res.user || !res.token) {
+  if (res.exists === false || !res.user) {
     throw new Error("Account not found. Please create a PIN first.");
   }
-  setSession(res.token, res.user);
+  setStoredUser(res.user);
   markUnlocked(derived, clean);
   return res.user;
 }
@@ -244,7 +242,6 @@ export async function updateUserProfile(
   if (typeof updates.display_name === "string") body.display_name = updates.display_name;
   if (typeof updates.avatar_url === "string") body.avatar_url = updates.avatar_url;
   const res = await updateProfile(body);
-  const token = getToken();
-  if (token && res.user) setSession(token, res.user);
+  if (res.user) setStoredUser(res.user);
 }
 

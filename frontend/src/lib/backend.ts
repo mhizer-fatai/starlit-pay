@@ -11,27 +11,10 @@ export const BACKEND_URL =
     ? DEFAULT_LOCAL
     : DEFAULT_REMOTE);
 
-const JWT_KEY = "starlit_jwt";
 const USER_KEY = "starlit_user";
 
-export function getToken(): string | null {
-  try {
-    return localStorage.getItem(JWT_KEY);
-  } catch {
-    return null;
-  }
-}
-export function setSession(token: string, user: unknown) {
-  try {
-    localStorage.setItem(JWT_KEY, token);
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-  } catch {
-    /* ignore */
-  }
-}
 export function clearSession() {
   try {
-    localStorage.removeItem(JWT_KEY);
     localStorage.removeItem(USER_KEY);
     const keysToRemove: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -71,14 +54,10 @@ export class BackendError extends Error {
   }
 }
 
-async function req<T>(path: string, init?: RequestInit, auth = false): Promise<T> {
+async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // X-Requested-With is the CSRF header the backend requires when a request is
   // authenticated by the passkey session cookie (credentials: "include").
   const headers: Record<string, string> = { "Content-Type": "application/json", "X-Requested-With": "starlit" };
-  if (auth) {
-    const token = getToken();
-    if (token) headers.Authorization = `Bearer ${token}`;
-  }
   const res = await fetch(`${BACKEND_URL}${path}`, {
     ...init,
     credentials: "include",
@@ -112,7 +91,6 @@ export interface BackendUser {
 export interface AuthResponse {
   exists?: boolean;
   user?: BackendUser;
-  token?: string;
 }
 
 // --- Auth / users (read + write) ---
@@ -149,7 +127,7 @@ export const lookupUser = (username: string) =>
 
 // Authenticated self-profile update (display name + avatar only).
 export const updateProfile = (body: { display_name?: string; avatar_url?: string }) =>
-  req<{ user: BackendUser }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) }, true);
+  req<{ user: BackendUser }>("/api/users/me", { method: "PATCH", body: JSON.stringify(body) });
 
 export interface UserSettings {
   user_id: string;
@@ -186,12 +164,11 @@ export type SettingsUpdate = Partial<
 
 // Per-account settings (requires the user_settings table — see schema_settings.sql).
 export const fetchSettings = () =>
-  req<{ settings: UserSettings }>("/api/users/me/settings", {}, true);
+  req<{ settings: UserSettings }>("/api/users/me/settings");
 export const updateSettings = (body: SettingsUpdate) =>
   req<{ settings: UserSettings }>(
     "/api/users/me/settings",
     { method: "PATCH", body: JSON.stringify(body) },
-    true,
   );
 
 // --- Payment links (read + write) ---
@@ -211,7 +188,7 @@ export const createPaymentLink = (body: {
   commitment: string;
   asset?: string;
   description?: string;
-}) => req<{ link: PaymentLink }>("/api/payment-links", { method: "POST", body: JSON.stringify(body) }, true);
+}) => req<{ link: PaymentLink }>("/api/payment-links", { method: "POST", body: JSON.stringify(body) });
 
 export const fetchPaymentLink = (commitment: string) =>
   req<{ link: PaymentLink & { creator?: BackendUser } }>(
@@ -243,14 +220,14 @@ export const fetchNotes = (viewingKey: string, timestamp?: string, signature?: s
   if (opts.includeSpent) params.set("include", "spent");
   const qs = params.toString();
   const query = qs ? `?${qs}` : "";
-  return req<{ notes: ShieldedNote[] }>(`/api/notes/${encodeURIComponent(viewingKey)}${query}`, undefined, true);
+  return req<{ notes: ShieldedNote[] }>(`/api/notes/${encodeURIComponent(viewingKey)}${query}`);
 };
 
 export const postNote = (body: { commitment: string; encrypted_note: string; recipient_viewing_key: string }) =>
   req<{ note: ShieldedNote }>("/api/notes", { method: "POST", body: JSON.stringify(body) });
 
 export const spendNote = (body: { commitment: string; timestamp?: string; signature?: string }) =>
-  req<{ success: boolean }>("/api/notes/spend", { method: "POST", body: JSON.stringify(body) }, true);
+  req<{ success: boolean }>("/api/notes/spend", { method: "POST", body: JSON.stringify(body) });
 
 
 // --- Faucet (read + write) ---
@@ -311,7 +288,7 @@ export interface SmartWalletInfo {
     networkPassphrase: string;
   };
 }
-export const getSmartWallet = () => req<SmartWalletInfo>("/api/smart-wallet", undefined, true);
+export const getSmartWallet = () => req<SmartWalletInfo>("/api/smart-wallet");
 let ownWallet: Promise<string | null> | null = null;
 /** The user's public wallet address (cached per page load); null if none or unavailable. */
 export function ownWalletAddress(): Promise<string | null> {
@@ -325,10 +302,10 @@ export function ownWalletAddress(): Promise<string | null> {
 }
 /** Records the wallet's creation transaction; the server checks it on-chain. */
 export const postSmartWalletBirth = (txHash: string) =>
-  req<{ birth: WalletBirth }>("/api/smart-wallet/birth", { method: "POST", body: JSON.stringify({ txHash }) }, true);
+  req<{ birth: WalletBirth }>("/api/smart-wallet/birth", { method: "POST", body: JSON.stringify({ txHash }) });
 /** Short-lived token for the sponsored relayer (smart-account-kit cannot send cookies). */
 export const getSmartWalletRelayToken = () =>
-  req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" }, true);
+  req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" });
 
 /** A Merkle root the shielded pool currently accepts (checked on-chain by the backend). */
 export const getPoolRoot = () => req<{ root: string }>("/api/pool/root");
@@ -362,7 +339,6 @@ export const emailStatement = (body: {
   req<{ sent: boolean; to: string }>(
     "/api/statements/email",
     { method: "POST", body: JSON.stringify(body) },
-    true,
   );
 export const complianceCheck = (address: string) =>
   req<{ address: string; blocked: boolean; status: string }>(
@@ -384,7 +360,6 @@ export const submitRelayerTransfer = (body: RelayerTransferPayload) =>
   req<{ success: boolean; hash: string; ledger?: number }>(
     "/api/relayer/transfer",
     { method: "POST", body: JSON.stringify(body) },
-    true // legacy accounts authorise with their token; passkey sessions via cookie
   );
 
 export interface RelayerWithdrawPayload {
@@ -403,6 +378,5 @@ export const submitRelayerWithdraw = (body: RelayerWithdrawPayload) =>
   req<{ success: boolean; hash: string; ledger?: number }>(
     "/api/relayer/withdraw",
     { method: "POST", body: JSON.stringify(body) },
-    true
   );
 
