@@ -28,7 +28,7 @@ import {
   type SmartWalletInfo,
   type WalletBirth,
 } from "@/lib/backend";
-import { RPC_URL, rpc } from "@/lib/stellar";
+import { RPC_URL, horizon, rpc } from "@/lib/stellar";
 import { fromB64u, toB64u } from "@/lib/vault/crypto";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 
@@ -76,36 +76,17 @@ export function loadSmartWallet(): Promise<SmartWalletInfo> {
   return getSmartWallet();
 }
 
-/**
- * The wallet address a passkey's wallet gets (the shared deployer uses
- * salt = sha256(credential id)), so the app knows which passkey controls the
- * wallet and can ask for exactly that one instead of showing a passkey picker.
- */
-export function walletAddressFor(info: SmartWalletInfo, credentialId: string): string {
-  const preimage = StellarSdk.xdr.HashIdPreimage.envelopeTypeContractId(
-    new StellarSdk.xdr.HashIdPreimageContractId({
-      networkId: StellarSdk.hash(Buffer.from(info.config.networkPassphrase)),
-      contractIdPreimage: StellarSdk.xdr.ContractIdPreimage.contractIdPreimageFromAddress(
-        new StellarSdk.xdr.ContractIdPreimageFromAddress({
-          address: StellarSdk.Address.fromString(info.config.deployer).toScAddress(),
-          salt: StellarSdk.hash(Buffer.from(fromB64u(credentialId))),
-        })
-      ),
-    })
-  );
-  return StellarSdk.StrKey.encodeContract(StellarSdk.hash(preimage.toXDR()));
-}
-
-/** The registered passkey that controls the user's wallet, if it is still registered. */
-export function walletPasskey(info: SmartWalletInfo) {
-  return info.address ? info.passkeys.find((p) => walletAddressFor(info, p.credentialId) === info.address) ?? null : null;
+export interface WalletPasskey {
+  credentialId: string;
+  publicKey: Uint8Array;
+  ruleId: number;
 }
 
 export interface WalletSigners {
   /** Credential ids of the passkeys the wallet accepts (read from its on-chain rules). */
   passkeyCredentialIds: string[];
-  /** The same passkeys with their 65-byte P-256 public keys. */
-  passkeys: { credentialId: string; publicKey: Uint8Array }[];
+  /** The same passkeys with their context rule and 65-byte P-256 public keys. */
+  passkeys: WalletPasskey[];
   /** Whether the vault's backup key (recovery) is a signer. */
   hasRecoveryKey: boolean;
   /** Context rules whose signer is an Ed25519 backup key: rule id and 32-byte key (hex). */
@@ -136,7 +117,7 @@ export async function readWalletSigners(info: SmartWalletInfo): Promise<WalletSi
       if (verifier === info.config.webauthnVerifier && keyData.length > 65) {
         const credentialId = toB64u(keyData.subarray(65));
         result.passkeyCredentialIds.push(credentialId);
-        result.passkeys.push({ credentialId, publicKey: new Uint8Array(keyData.subarray(0, 65)) });
+        result.passkeys.push({ credentialId, publicKey: new Uint8Array(keyData.subarray(0, 65)), ruleId: id });
       } else if (verifier === info.config.ed25519Verifier) {
         result.hasRecoveryKey = true;
         result.recoveryRules.push({ ruleId: id, publicKeyHex: Buffer.from(keyData).toString("hex") });
@@ -147,16 +128,23 @@ export async function readWalletSigners(info: SmartWalletInfo): Promise<WalletSi
 }
 
 /**
- * The passkey to ask for when the wallet signs. Read from the wallet itself, so
- * it still works if that passkey was removed from the Starlit account (the key
- * still lives in the user's phone or password manager).
+ * The passkey to ask for when the wallet signs: the newest one on the wallet
+ * that is still registered with Starlit, else any on the wallet (a passkey
+ * removed from the Starlit account still lives on the user's phone).
  */
-async function signingCredential(info: SmartWalletInfo): Promise<string> {
-  const registered = walletPasskey(info);
-  if (registered) return registered.credentialId;
-  const { passkeyCredentialIds } = await readWalletSigners(info);
-  if (passkeyCredentialIds.length === 0) throw new Error("This wallet has no passkey signer.");
-  return passkeyCredentialIds[0]!;
+export function pickSigningPasskey(onChain: WalletPasskey[], registeredIds: string[]): WalletPasskey | null {
+  const registered = onChain.filter((p) => registeredIds.includes(p.credentialId));
+  return registered.at(-1) ?? onChain.at(-1) ?? null;
+}
+
+async function signingPasskey(info: SmartWalletInfo): Promise<{ signer: WalletPasskey; primary: WalletPasskey }> {
+  const { passkeys } = await readWalletSigners(info);
+  const signer = pickSigningPasskey(
+    passkeys,
+    info.passkeys.map((p) => p.credentialId)
+  );
+  if (!signer) throw new Error("This wallet has no passkey signer.");
+  return { signer, primary: passkeys[0]! };
 }
 
 const INDEXER = "https://testnet.mercurydata.app/rest/smart-account-indexer";
@@ -185,35 +173,67 @@ async function discoverBirth(info: SmartWalletInfo, credentialId: string): Promi
 /**
  * The kit only connects to a wallet whose creation it can verify. Give it the
  * creation record (stored by Starlit) for this browser, so it works on any
- * device, not just the one that created the wallet.
+ * device, not just the one that created the wallet. It re-checks that record
+ * on-chain, and that the passkey is a live signer on its rule.
  */
-async function ensureWalletRecord(info: SmartWalletInfo, credentialId: string) {
+async function ensureWalletRecord(info: SmartWalletInfo, signer: WalletPasskey, primary: WalletPasskey) {
+  const { credentialId } = signer;
   const stored = await kitStorage.get(credentialId);
   if (stored?.contractId === info.address && stored.creationTransactionHash && stored.creationLedger) return;
-  const birth = info.birth ?? (await discoverBirth(info, credentialId));
-  const onChain = (await readWalletSigners(info)).passkeys.find((p) => p.credentialId === credentialId);
-  if (!onChain) throw new Error("This passkey does not control your public wallet.");
+  const birth = info.birth ?? (await discoverBirth(info, primary.credentialId));
+  const isPrimary = credentialId === primary.credentialId;
   const record = {
     contractId: info.address!,
     birthWasmHash: info.config.accountWasmHash,
     creationTransactionHash: birth.txHash,
     creationLedger: birth.ledger,
     deploymentStatus: "deployed" as const,
-    isPrimary: true,
+    isPrimary,
+    // A later passkey can't prove the wallet's birth itself, so the kit needs
+    // its rule and the hash of the wallet's constructor arguments.
+    ...(isPrimary
+      ? {}
+      : {
+          contextRuleId: signer.ruleId,
+          associationVerified: true,
+          birthConstructorArgsHash: await constructorArgsHash(info, birth.txHash),
+        }),
   };
   if (stored) await kitStorage.update(credentialId, record);
-  else await kitStorage.save({ credentialId, publicKey: onChain.publicKey, nickname: "Starlit Pay", createdAt: Date.now(), ...record });
+  else await kitStorage.save({ credentialId, publicKey: signer.publicKey, nickname: "Starlit Pay", createdAt: Date.now(), ...record });
 }
 
-async function connectedKit(info: SmartWalletInfo): Promise<{ kit: SmartAccountKit; credentialId: string }> {
+/** Hash of the wallet's constructor arguments, as smart-account-kit computes it. */
+async function constructorArgsHash(info: SmartWalletInfo, creationTxHash: string): Promise<string> {
+  const { envelope_xdr: envelope } = await horizon.transactions().transaction(creationTxHash).call();
+  const tx = StellarSdk.TransactionBuilder.fromXDR(envelope, info.config.networkPassphrase) as StellarSdk.Transaction;
+  const [operation] = tx.operations;
+  if (operation?.type !== "invokeHostFunction") throw new Error("Could not read your public wallet's creation.");
+  const args = operation.func.createContractV2().constructorArgs();
+  return StellarSdk.hash(StellarSdk.xdr.ScVal.scvVec(args).toXDR()).toString("hex");
+}
+
+/** One rule id per authorised call, for a signer whose rule isn't the wallet's first. */
+function signWithRule(ruleId: number) {
+  return (entry: StellarSdk.xdr.SorobanAuthorizationEntry) =>
+    Array.from({ length: countInvocations(entry.rootInvocation()) }, () => ruleId);
+}
+
+async function connectedKit(info: SmartWalletInfo) {
   const kit = await createKit(info);
-  const credentialId = await signingCredential(info);
-  await ensureWalletRecord(info, credentialId);
-  await kit.connectWallet({ contractId: info.address!, credentialId });
-  return { kit, credentialId };
+  const { signer, primary } = await signingPasskey(info);
+  await ensureWalletRecord(info, signer, primary);
+  await kit.connectWallet({ contractId: info.address!, credentialId: signer.credentialId });
+  const signing = { credentialId: signer.credentialId, resolveContextRuleIds: signWithRule(signer.ruleId) };
+  return { kit, signing };
 }
 
-async function submitRecoveryRule(kit: SmartAccountKit, info: SmartWalletInfo, stellarPublicKey: string) {
+async function submitRecoveryRule(
+  kit: SmartAccountKit,
+  info: SmartWalletInfo,
+  stellarPublicKey: string,
+  signing?: Awaited<ReturnType<typeof connectedKit>>["signing"]
+) {
   const backupKey = StellarSdk.Keypair.fromPublicKey(stellarPublicKey).rawPublicKey();
   const addRule = await kit.rules.add(
     createDefaultContext(),
@@ -221,7 +241,7 @@ async function submitRecoveryRule(kit: SmartAccountKit, info: SmartWalletInfo, s
     [createEd25519Signer(info.config.ed25519Verifier, backupKey)],
     new Map()
   );
-  const added = await kit.signAndSubmitAdmin(addRule);
+  const added = await kit.signAndSubmitAdmin(addRule, signing);
   if (!added.success) throw failure(added, "The wallet could not be protected with your recovery code.");
 }
 
@@ -235,8 +255,68 @@ export async function addRecoveryKey(): Promise<void> {
   const vaultKeys = getUnlockedKeys();
   if (!vaultKeys) throw new Error("Unlock your wallet first.");
   if ((await readWalletSigners(info)).hasRecoveryKey) return;
-  const { kit } = await connectedKit(info);
-  await submitRecoveryRule(kit, info, vaultKeys.stellar.publicKey);
+  const { kit, signing } = await connectedKit(info);
+  await submitRecoveryRule(kit, info, vaultKeys.stellar.publicKey, signing);
+}
+
+/**
+ * Connects another of the user's passkeys to the wallet, as its own rule (one
+ * rule with two signers would need both). A current wallet passkey approves it
+ * or, if that is lost, the vault's recovery key. The address stays the same.
+ */
+export async function addPasskeyToWallet(credentialId: string, options: { useRecoveryKey?: boolean } = {}): Promise<void> {
+  const info = await loadSmartWallet();
+  if (!info.address) throw new Error("Create your public wallet first.");
+  const passkey = info.passkeys.find((p) => p.credentialId === credentialId);
+  if (!passkey) throw new NeedsWalletPasskeyError();
+  if ((await readWalletSigners(info)).passkeyCredentialIds.includes(credentialId)) return;
+
+  const func = addPasskeyRuleFunction(info, passkey.publicKey, credentialId);
+  if (options.useRecoveryKey) {
+    await submitWithRecoveryKey(info, func);
+    return;
+  }
+  const { kit, signing } = await connectedKit(info);
+  const tx = await assembleCall(info, info.address, "add_context_rule", func);
+  const result = await kit.signAndSubmitAdmin(tx, signing);
+  if (!result.success) throw failure(result, "The passkey could not be connected to your wallet.");
+}
+
+function addPasskeyRuleFunction(info: SmartWalletInfo, publicKeyB64u: string, credentialId: string) {
+  const { xdr } = StellarSdk;
+  const keyData = Buffer.concat([Buffer.from(fromB64u(publicKeyB64u)), Buffer.from(fromB64u(credentialId))]);
+  const signer = xdr.ScVal.scvVec([
+    xdr.ScVal.scvSymbol("External"),
+    StellarSdk.Address.fromString(info.config.webauthnVerifier).toScVal(),
+    xdr.ScVal.scvBytes(keyData),
+  ]);
+  return xdr.HostFunction.hostFunctionTypeInvokeContract(
+    new xdr.InvokeContractArgs({
+      contractAddress: StellarSdk.Address.fromString(info.address!).toScAddress(),
+      functionName: "add_context_rule",
+      args: [
+        xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Default")]),
+        xdr.ScVal.scvString("Passkey"),
+        xdr.ScVal.scvVoid(),
+        xdr.ScVal.scvVec([signer]),
+        xdr.ScVal.scvMap([]),
+      ],
+    })
+  );
+}
+
+async function assembleCall(info: SmartWalletInfo, contractId: string, method: string, func: StellarSdk.xdr.HostFunction) {
+  const tx = await StellarSdk.contract.AssembledTransaction.buildWithOp(StellarSdk.Operation.invokeHostFunction({ func, auth: [] }), {
+    contractId,
+    networkPassphrase: info.config.networkPassphrase,
+    rpcUrl: RPC_URL,
+    method,
+    parseResultXdr: (value: StellarSdk.xdr.ScVal) => value,
+  });
+  if (tx.simulation && StellarSdk.rpc.Api.isSimulationError(tx.simulation)) {
+    throw new Error("The wallet action could not be prepared. Check your public wallet balance.");
+  }
+  return tx;
 }
 
 function failure(result: { success: boolean; error?: { message?: string } | string }, fallback: string): Error {
@@ -314,8 +394,8 @@ export async function sendFromSmartWallet(token: WalletToken, recipient: string,
   }
   if (!(amount > 0)) throw new Error("Enter an amount greater than 0.");
 
-  const { kit } = await connectedKit(info);
-  const result = await kit.transfer(tokenContract(info, token), recipient, amount);
+  const { kit, signing } = await connectedKit(info);
+  const result = await kit.transfer(tokenContract(info, token), recipient, amount, signing);
   if (!result.success) throw failure(result, "The payment could not be sent.");
   return result.hash ?? "";
 }
@@ -338,21 +418,9 @@ export async function depositFromSmartWallet(
   const func = depositFunction(info, token, amount, commitmentHex, encryptedNoteHex);
   if (options.useRecoveryKey) return submitWithRecoveryKey(info, func);
 
-  const { kit, credentialId } = await connectedKit(info);
-  const tx = await StellarSdk.contract.AssembledTransaction.buildWithOp(
-    StellarSdk.Operation.invokeHostFunction({ func, auth: [] }),
-    {
-      contractId: info.config.poolContract,
-      networkPassphrase: info.config.networkPassphrase,
-      rpcUrl: RPC_URL,
-      method: "deposit",
-      parseResultXdr: (value: StellarSdk.xdr.ScVal) => value,
-    }
-  );
-  if (tx.simulation && StellarSdk.rpc.Api.isSimulationError(tx.simulation)) {
-    throw new Error("The deposit could not be prepared. Check your public wallet balance.");
-  }
-  const result = await kit.signAndSubmit(tx, { credentialId });
+  const { kit, signing } = await connectedKit(info);
+  const tx = await assembleCall(info, info.config.poolContract, "deposit", func);
+  const result = await kit.signAndSubmit(tx, signing);
   if (!result.success) throw failure(result, "The transfer could not be completed.");
   return result.hash ?? "";
 }

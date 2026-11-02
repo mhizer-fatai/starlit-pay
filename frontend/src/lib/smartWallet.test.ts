@@ -1,37 +1,23 @@
 import { describe, expect, test } from "vitest";
-import * as StellarSdk from "@stellar/stellar-sdk";
-// The kit's own derivation (not exported from its entry point).
-import { deriveContractAddress } from "../../node_modules/smart-account-kit/dist/utils.js";
-import { walletAddressFor, walletPasskey, type SmartWalletInfo } from "@/lib/smartWallet";
+import { pickSigningPasskey, type WalletPasskey } from "@/lib/smartWallet";
 
-const info = (address: string | null, ids: string[]): SmartWalletInfo => ({
-  address,
-  birth: null,
-  passkeys: ids.map((credentialId) => ({ credentialId, publicKey: "", deviceName: null })),
-  config: {
-    accountWasmHash: "",
-    webauthnVerifier: "",
-    ed25519Verifier: "",
-    deployer: "GAAH4OT36RRCCAGKARGPN2HLHT2NOBVFHO4GUHA6CF7UKQ4MMV24WQ4N",
-    usdcSac: "",
-    xlmSac: "",
-    poolContract: "",
-    networkPassphrase: StellarSdk.Networks.TESTNET,
-  },
-});
+const passkey = (credentialId: string, ruleId: number): WalletPasskey => ({ credentialId, ruleId, publicKey: new Uint8Array(65) });
 
-describe("smart wallet address", () => {
-  const id = Buffer.from("example-credential-id-bytes").toString("base64url");
+describe("pickSigningPasskey", () => {
+  const original = passkey("original", 0);
+  const added = passkey("added", 2);
 
-  test("matches the address smart-account-kit deploys to", () => {
-    const expected = deriveContractAddress(Buffer.from(id, "base64url"), info(null, []).config.deployer, StellarSdk.Networks.TESTNET);
-    expect(walletAddressFor(info(null, [id]), id)).toBe(expected);
+  test("uses the newest passkey on the wallet that is registered with Starlit", () => {
+    expect(pickSigningPasskey([original, added], ["original", "added"])).toBe(added);
+    expect(pickSigningPasskey([original, added], ["original"])).toBe(original);
   });
 
-  test("finds the passkey that controls the wallet", () => {
-    const other = Buffer.from("another-credential").toString("base64url");
-    const address = walletAddressFor(info(null, [id]), id);
-    expect(walletPasskey(info(address, [other, id]))?.credentialId).toBe(id);
-    expect(walletPasskey(info(address, [other]))).toBeNull();
+  test("still uses a passkey removed from Starlit, since the wallet accepts it", () => {
+    expect(pickSigningPasskey([original], [])).toBe(original);
+  });
+
+  test("ignores registered passkeys the wallet doesn't accept", () => {
+    expect(pickSigningPasskey([original], ["other"])).toBe(original);
+    expect(pickSigningPasskey([], ["other"])).toBeNull();
   });
 });

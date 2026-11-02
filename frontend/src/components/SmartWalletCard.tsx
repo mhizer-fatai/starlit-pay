@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Copy, ExternalLink, Fingerprint, KeyRound, LifeBuoy, Loader2, RefreshCw, ShieldCheck, Smartphone } from "lucide-react";
+import { Check, Copy, ExternalLink, Fingerprint, KeyRound, LifeBuoy, Link2, Loader2, RefreshCw, ShieldCheck, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { recoverPublicFunds } from "@/lib/transfer";
 import { authApi } from "@/lib/vault/client";
 import {
   NeedsWalletPasskeyError,
+  addPasskeyToWallet,
   addRecoveryKey,
   addWalletPasskey,
   createSmartWallet,
@@ -60,6 +61,9 @@ export function SmartWalletCard({
   const [recoverOpen, setRecoverOpen] = useState(false);
   const [recoverPin, setRecoverPin] = useState("");
   const [recovered, setRecovered] = useState<string[]>([]);
+  // Connecting another passkey to the wallet.
+  const [walletPasskeyIds, setWalletPasskeyIds] = useState<string[] | null>(null);
+  const [connectId, setConnectId] = useState<string | null>(null);
   // null = unknown (not read yet or the read failed)
   const [hasRecovery, setHasRecovery] = useState<boolean | null>(null);
 
@@ -72,7 +76,10 @@ export function SmartWalletCard({
         setBalances({ XLM, USDC });
         onBalancesRef.current?.({ XLM, USDC });
         readWalletSigners(next)
-          .then((signers) => setHasRecovery(signers.hasRecoveryKey))
+          .then((signers) => {
+            setHasRecovery(signers.hasRecoveryKey);
+            setWalletPasskeyIds(signers.passkeyCredentialIds);
+          })
           .catch(() => setHasRecovery(null));
       }
     } catch (err) {
@@ -133,6 +140,23 @@ export function SmartWalletCard({
       onRecoveredRef.current?.();
     });
 
+  const connectPasskey = (credentialId: string, useRecoveryKey: boolean) =>
+    run(async () => {
+      if (useRecoveryKey) {
+        const { fresh } = await authApi.getSession();
+        if (!fresh) {
+          if (!isValidPin(recoverPin)) throw new Error("Enter your 6-digit PIN to approve with your recovery key.");
+          setStatus("Confirming it's you…");
+          await confirmPaymentWithPin(recoverPin);
+        }
+      }
+      setStatus(useRecoveryKey ? "Connecting the passkey with your recovery key…" : "Approve with your current wallet passkey…");
+      await addPasskeyToWallet(credentialId, { useRecoveryKey });
+      setConnectId(null);
+      setRecoverPin("");
+      await refresh();
+    });
+
   const addRecovery = () =>
     run(async () => {
       setStatus("Confirm with your wallet passkey…");
@@ -152,6 +176,8 @@ export function SmartWalletCard({
   };
 
   const hasWalletPasskey = info?.passkeys.length ? info.passkeys.length > 0 : false;
+  // Passkeys on this account that could control the wallet but aren't connected yet.
+  const connectable = walletPasskeyIds ? (info?.passkeys ?? []).filter((p) => !walletPasskeyIds.includes(p.credentialId)) : [];
   const loading = !info || (Boolean(info.address) && !balances);
   const xlm = balances?.XLM ?? 0;
   const usdc = balances?.USDC ?? 0;
@@ -237,6 +263,44 @@ export function SmartWalletCard({
               <Button type="button" variant="secondary" onClick={addRecovery} disabled={busy}>
                 {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />} Finish setup: protect with recovery code
               </Button>
+            </div>
+          )}
+          {connectable.length > 0 && !connectId && (
+            <button type="button" className="wallet-link" onClick={() => setConnectId(connectable[0]!.credentialId)} disabled={busy}>
+              <Link2 /> Use {connectable[0]!.deviceName ?? "your new passkey"} for this wallet
+            </button>
+          )}
+          {connectId && (
+            <div className="wallet-recover">
+              <p>
+                <b>Connect this passkey.</b> It will be able to move funds from this wallet too. The address stays the same.
+                Approve with your current wallet passkey or, if you lost it, with your PIN.
+              </p>
+              {hasRecovery && (
+                <Input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={recoverPin}
+                  onChange={(e) => setRecoverPin(e.target.value.replace(/\D/g, ""))}
+                  placeholder="6-digit PIN"
+                  aria-label="PIN"
+                  disabled={busy}
+                />
+              )}
+              <div className="wallet-actions">
+                <Button type="button" disabled={busy} onClick={() => void connectPasskey(connectId, false)}>
+                  {busy ? <Loader2 className="animate-spin" /> : <Fingerprint />} Approve with wallet passkey
+                </Button>
+                {hasRecovery && (
+                  <Button type="button" variant="secondary" disabled={busy} onClick={() => void connectPasskey(connectId, true)}>
+                    <KeyRound /> Approve with PIN
+                  </Button>
+                )}
+                <Button type="button" variant="ghost" disabled={busy} onClick={() => setConnectId(null)}>
+                  Cancel
+                </Button>
+              </div>
             </div>
           )}
           {hasRecovery && (balances?.XLM ?? 0) + (balances?.USDC ?? 0) > 0 && !recoverOpen && (
