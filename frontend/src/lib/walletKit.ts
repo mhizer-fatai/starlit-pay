@@ -30,8 +30,9 @@ export async function connectWithWalletKit(): Promise<WalletConnectResult> {
     throw new Error("Could not retrieve address from wallet");
   }
 
-  const selectedWalletId = (StellarWalletsKit as any).selectedModule?.productId || "Connected Wallet";
-  const selectedWalletName = (StellarWalletsKit as any).selectedModule?.productName || "Connected Wallet";
+  const { selectedModule } = StellarWalletsKit as unknown as { selectedModule?: { productId?: string; productName?: string } };
+  const selectedWalletId = selectedModule?.productId || "Connected Wallet";
+  const selectedWalletName = selectedModule?.productName || "Connected Wallet";
 
   return {
     address,

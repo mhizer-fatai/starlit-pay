@@ -30,6 +30,7 @@ import { getSpendingKey, getUser, getViewingSecret, isVaultMode, signAuthRequest
 import { isValidPin } from "@/lib/keys";
 import { confirmPaymentWithPasskey, confirmPaymentWithPin, friendlyAuthError } from "@/lib/passkeyAccount";
 import { selfNoteSecret } from "@/lib/ownedNotes";
+import { withdrawFromPool } from "@/lib/privateWithdraw";
 import { withNoteLock } from "@/lib/reshield";
 import {
   getSmartWallet,
@@ -40,7 +41,6 @@ import {
   spendNote,
   claimPaymentLink,
   submitRelayerTransfer,
-  submitRelayerWithdraw,
 } from "@/lib/backend";
 import { getSpendableNotes, spendRootFor } from "@/lib/notes";
 import { bytesToHex, encryptNote } from "@/lib/crypto";
@@ -380,6 +380,42 @@ function SendPage() {
       const amt = Number(amount);
       if (!Number.isFinite(amt) || amt <= 0) throw new Error("Enter an amount greater than 0");
 
+      if (mode === "external") {
+        if (!isStellarAddress(rawTarget)) {
+          throw new Error("Enter a valid Stellar address (G… account or C… smart wallet)");
+        }
+        const hash = await withdrawFromPool({
+          user: me,
+          asset: asset as "XLM" | "USDC",
+          amount: amt,
+          recipient: rawTarget,
+          onStatus: setMessage,
+        });
+        if (linkCommitment) {
+          try {
+            await claimPaymentLink(linkCommitment, hash);
+          } catch (claimErr) {
+            console.error("Failed to mark payment link as claimed:", claimErr);
+          }
+        }
+        setMessage(`Withdrawal of ${amt} ${asset} to ${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)} completed! Tx: ${hash ? hash.slice(0, 8) + '...' : 'confirmed'}`);
+        setReceipt({
+          key: `withdraw-${hash || Date.now()}`,
+          direction: "out",
+          amount: amt,
+          asset,
+          party: `${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)}`,
+          date: Date.now(),
+          reference: hash || rawTarget,
+          referenceLabel: "Withdrawal Tx",
+          hash,
+        });
+        void refreshAssetBalances(me).catch(() => {});
+        setUsername("");
+        setAmount("");
+        return;
+      }
+
       const viewingSecret = getViewingSecret(me.email);
       if (!viewingSecret) {
         throw new Error("Wallet is locked. Please unlock your wallet on the Dashboard first.");
@@ -452,236 +488,136 @@ function SendPage() {
         changeEncryptedHex = changeEncrypted.ephemeralPublicKey + changeEncrypted.nonce + changeEncrypted.ciphertext;
       }
 
-      if (mode === "external") {
-        // WITHDRAWAL FLOW
-        if (!isStellarAddress(rawTarget)) {
-          throw new Error("Enter a valid Stellar address (G… account or C… smart wallet)");
-        }
+      // Send to a Starlit user
+      const recipient = rawTarget.replace(/^@/, "");
+      setMessage(`Connecting with @${recipient}...`);
+      const found = await lookupUser(recipient);
+      if (!found?.user?.public_encryption_key) {
+        throw new Error(`User @${recipient} has not set up their encryption keys.`);
+      }
+      const recipientViewingKey = found.user.public_encryption_key;
+      const recipientStellarAddress = found.user.stellar_address || found.user.public_encryption_key;
 
-        setMessage("Preparing secure withdrawal...");
-        const zkData = await generateShieldedPaymentProof(
-          input1.secret,
-          input1.commitment,
-          secret2Hex,
-          commitment2Hex,
-          rawTarget,
-          tokenAddress,
-          spendAmount,
-          changeAmount,
-          (msg) => setMessage(msg)
-        );
+      const recipientSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+      const recipientCommitmentHex = await calculateCommitment(
+        spendAmount,
+        recipientViewingKey,
+        tokenAddress,
+        recipientSecret
+      );
+      const recipientEncrypted = encryptNote(
+        spendAmount,
+        asset,
+        recipientSecret,
+        me.username,
+        recipientViewingKey
+      );
+      const recipientEncryptedHex =
+        recipientEncrypted.ephemeralPublicKey + recipientEncrypted.nonce + recipientEncrypted.ciphertext;
 
-        setMessage("Submitting transaction...");
-        const relayerRes = await submitRelayerWithdraw({
-          proof: zkData.proofHex,
-          nullifier_1: zkData.nullifier1Hex,
-          nullifier_2: zkData.nullifier2Hex,
-          recipient: rawTarget,
-          token: tokenAddress,
-          amount: spendAmount,
-          root: spendRoot,
-          change_commitment: changeCommitmentHex,
-          encrypted_change_note: changeEncryptedHex,
+      setMessage("Preparing secure payment...");
+      const zkData = await generateShieldedPaymentProof(
+        input1.secret,
+        input1.commitment,
+        secret2Hex,
+        commitment2Hex,
+        recipientStellarAddress,
+        tokenAddress,
+        spendAmount,
+        changeAmount,
+        (msg) => setMessage(msg)
+      );
+
+      setMessage("Sending payment...");
+
+      const relayerRes = await submitRelayerTransfer({
+        proof: zkData.proofHex,
+        nullifier_1: zkData.nullifier1Hex,
+        nullifier_2: zkData.nullifier2Hex,
+        output_commitment_1: recipientCommitmentHex,
+        encrypted_note_1: recipientEncryptedHex,
+        output_commitment_2: changeCommitmentHex,
+        encrypted_note_2: changeEncryptedHex,
+        root: spendRoot,
+      });
+
+      // 1. Save recipient note first
+      try {
+        await postNote({
+          commitment: recipientCommitmentHex,
+          encrypted_note: recipientEncryptedHex,
+          recipient_viewing_key: recipientViewingKey,
         });
+      } catch (postErr) {
+        console.error("Failed to register recipient note:", postErr);
+      }
 
-        // 1. Save change note first if generated so user balance is preserved
-        if (changeAmount > 0.0001) {
-          try {
-            await postNote({
-              commitment: changeCommitmentHex,
-              encrypted_note: changeEncryptedHex,
-              recipient_viewing_key: me.public_encryption_key || "",
-            });
-          } catch (postErr) {
-            console.error("Failed to register change note:", postErr);
-          }
-        }
-
-        // 2. Mark spent notes with signed authorization request
-        const timestamp = Date.now().toString();
-        const signature = me?.email ? (signAuthRequest(me.email, timestamp) || undefined) : undefined;
-        const spendAuth = signature ? { timestamp, signature } : {};
-
-        try {
-          await spendNote({ commitment: input1.commitment, ...spendAuth });
-        } catch (spendErr) {
-          console.error("Failed to mark input1 as spent in DB:", spendErr);
-        }
-
-        if (input2) {
-          try {
-            await spendNote({ commitment: input2.commitment, ...spendAuth });
-          } catch (spendErr) {
-            console.error("Failed to mark input2 as spent in DB:", spendErr);
-          }
-        }
-
-        // Save transaction history
-        const payload = JSON.stringify({
-          to: rawTarget,
-          amount: spendAmount,
-          asset,
-          type: "withdraw",
-          hash: relayerRes.hash,
-          at: new Date().toISOString(),
-        });
-        await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
-
-        if (linkCommitment) {
-          try {
-            await claimPaymentLink(linkCommitment, relayerRes.hash);
-          } catch (claimErr) {
-            console.error("Failed to mark payment link as claimed:", claimErr);
-          }
-        }
-
-        setMessage(`Withdrawal of ${spendAmount} ${asset} to ${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)} completed! Tx: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
-        setReceipt({
-          key: `withdraw-${relayerRes.hash || Date.now()}`,
-          direction: "out",
-          amount: spendAmount,
-          asset,
-          party: `${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)}`,
-          date: Date.now(),
-          reference: relayerRes.hash || rawTarget,
-          referenceLabel: "Withdrawal Tx",
-          hash: relayerRes.hash,
-        });
-        void refreshAssetBalances(me).catch(() => {});
-        setUsername("");
-        setAmount("");
-      } else {
-        // SEND TO STARLIT USER FLOW
-        const recipient = rawTarget.replace(/^@/, "");
-        setMessage(`Connecting with @${recipient}...`);
-        const found = await lookupUser(recipient);
-        if (!found?.user?.public_encryption_key) {
-          throw new Error(`User @${recipient} has not set up their encryption keys.`);
-        }
-        const recipientViewingKey = found.user.public_encryption_key;
-        const recipientStellarAddress = found.user.stellar_address || found.user.public_encryption_key;
-
-        const recipientSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-        const recipientCommitmentHex = await calculateCommitment(
-          spendAmount,
-          recipientViewingKey,
-          tokenAddress,
-          recipientSecret
-        );
-        const recipientEncrypted = encryptNote(
-          spendAmount,
-          asset,
-          recipientSecret,
-          me.username,
-          recipientViewingKey
-        );
-        const recipientEncryptedHex =
-          recipientEncrypted.ephemeralPublicKey + recipientEncrypted.nonce + recipientEncrypted.ciphertext;
-
-        setMessage("Preparing secure payment...");
-        const zkData = await generateShieldedPaymentProof(
-          input1.secret,
-          input1.commitment,
-          secret2Hex,
-          commitment2Hex,
-          recipientStellarAddress,
-          tokenAddress,
-          spendAmount,
-          changeAmount,
-          (msg) => setMessage(msg)
-        );
-
-        setMessage("Sending payment...");
-
-        const relayerRes = await submitRelayerTransfer({
-          proof: zkData.proofHex,
-          nullifier_1: zkData.nullifier1Hex,
-          nullifier_2: zkData.nullifier2Hex,
-          output_commitment_1: recipientCommitmentHex,
-          encrypted_note_1: recipientEncryptedHex,
-          output_commitment_2: changeCommitmentHex,
-          encrypted_note_2: changeEncryptedHex,
-          root: spendRoot,
-        });
-
-        // 1. Save recipient note first
+      // 2. Save change note if generated
+      if (changeAmount > 0.0001) {
         try {
           await postNote({
-            commitment: recipientCommitmentHex,
-            encrypted_note: recipientEncryptedHex,
-            recipient_viewing_key: recipientViewingKey,
+            commitment: changeCommitmentHex,
+            encrypted_note: changeEncryptedHex,
+            recipient_viewing_key: me.public_encryption_key || "",
           });
         } catch (postErr) {
-          console.error("Failed to register recipient note:", postErr);
+          console.error("Failed to register change note:", postErr);
         }
-
-        // 2. Save change note if generated
-        if (changeAmount > 0.0001) {
-          try {
-            await postNote({
-              commitment: changeCommitmentHex,
-              encrypted_note: changeEncryptedHex,
-              recipient_viewing_key: me.public_encryption_key || "",
-            });
-          } catch (postErr) {
-            console.error("Failed to register change note:", postErr);
-          }
-        }
-
-        // 3. Mark spent notes with signed authorization request
-        const timestamp = Date.now().toString();
-        const signature = me?.email ? (signAuthRequest(me.email, timestamp) || undefined) : undefined;
-        const spendAuth = signature ? { timestamp, signature } : {};
-
-        try {
-          await spendNote({ commitment: input1.commitment, ...spendAuth });
-        } catch (spendErr) {
-          console.error("Failed to mark input1 as spent in DB:", spendErr);
-        }
-
-        if (input2) {
-          try {
-            await spendNote({ commitment: input2.commitment, ...spendAuth });
-          } catch (spendErr) {
-            console.error("Failed to mark input2 as spent in DB:", spendErr);
-          }
-        }
-
-        // Save transaction history
-        const payload = JSON.stringify({
-          to: `@${recipient}`,
-          amount: spendAmount,
-          asset,
-          type: "send",
-          hash: relayerRes.hash,
-          at: new Date().toISOString(),
-        });
-        await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
-
-        if (linkCommitment) {
-          try {
-            await claimPaymentLink(linkCommitment, relayerRes.hash);
-          } catch (claimErr) {
-            console.error("Failed to mark payment link as claimed:", claimErr);
-          }
-        }
-
-        setMessage(`Sent ${spendAmount} ${asset} to @${recipient}! Tx Hash: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
-        setReceipt({
-          key: `send-${recipientCommitmentHex}`,
-          direction: "out",
-          amount: spendAmount,
-          asset,
-          party: recipient,
-          date: Date.now(),
-          reference: relayerRes.hash || recipientCommitmentHex,
-          referenceLabel: relayerRes.hash ? "Transaction Hash" : "Note commitment",
-          hash: relayerRes.hash,
-        });
-        void refreshAssetBalances(me).catch(() => {});
-        setUsername("");
-        setAmount("");
       }
+
+      // 3. Mark spent notes with signed authorization request
+      const timestamp = Date.now().toString();
+      const signature = me?.email ? (signAuthRequest(me.email, timestamp) || undefined) : undefined;
+      const spendAuth = signature ? { timestamp, signature } : {};
+
+      try {
+        await spendNote({ commitment: input1.commitment, ...spendAuth });
+      } catch (spendErr) {
+        console.error("Failed to mark input1 as spent in DB:", spendErr);
+      }
+
+      if (input2) {
+        try {
+          await spendNote({ commitment: input2.commitment, ...spendAuth });
+        } catch (spendErr) {
+          console.error("Failed to mark input2 as spent in DB:", spendErr);
+        }
+      }
+
+      // Save transaction history
+      const payload = JSON.stringify({
+        to: `@${recipient}`,
+        amount: spendAmount,
+        asset,
+        type: "send",
+        hash: relayerRes.hash,
+        at: new Date().toISOString(),
+      });
+      await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
+
+      if (linkCommitment) {
+        try {
+          await claimPaymentLink(linkCommitment, relayerRes.hash);
+        } catch (claimErr) {
+          console.error("Failed to mark payment link as claimed:", claimErr);
+        }
+      }
+
+      setMessage(`Sent ${spendAmount} ${asset} to @${recipient}! Tx Hash: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
+      setReceipt({
+        key: `send-${recipientCommitmentHex}`,
+        direction: "out",
+        amount: spendAmount,
+        asset,
+        party: recipient,
+        date: Date.now(),
+        reference: relayerRes.hash || recipientCommitmentHex,
+        referenceLabel: relayerRes.hash ? "Transaction Hash" : "Note commitment",
+        hash: relayerRes.hash,
+      });
+      void refreshAssetBalances(me).catch(() => {});
+      setUsername("");
+      setAmount("");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Send failed — try again");
     } finally {

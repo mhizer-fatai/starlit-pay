@@ -56,6 +56,10 @@ export function SmartWalletCard({
   const onRecoveredRef = useRef(onRecovered);
   onRecoveredRef.current = onRecovered;
 
+  // Lost wallet passkey: move everything to the private balance with the recovery key.
+  const [recoverOpen, setRecoverOpen] = useState(false);
+  const [recoverPin, setRecoverPin] = useState("");
+  const [recovered, setRecovered] = useState<string[]>([]);
   // null = unknown (not read yet or the read failed)
   const [hasRecovery, setHasRecovery] = useState<boolean | null>(null);
 
@@ -111,11 +115,6 @@ export function SmartWalletCard({
       setNeedsPasskey(false);
       await refresh();
     });
-
-  // Lost wallet passkey: move everything to the private balance with the recovery key.
-  const [recoverOpen, setRecoverOpen] = useState(false);
-  const [recoverPin, setRecoverPin] = useState("");
-  const [recovered, setRecovered] = useState<string[]>([]);
 
   const recover = (confirm: () => Promise<void>) =>
     run(async () => {

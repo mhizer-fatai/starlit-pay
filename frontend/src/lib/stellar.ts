@@ -72,11 +72,12 @@ export async function buildPublicPaymentTxXdr(
   if (assetCode === "XLM") {
     asset = StellarSdk.Asset.native();
   } else {
-    const matchedBalance = account.balances.find(
-      (b: any) => b.asset_code === assetCode && parseFloat(b.balance) > 0
-    ) || account.balances.find((b: any) => b.asset_code === assetCode);
+    const balances = account.balances as { asset_code?: string; asset_issuer?: string; balance: string }[];
+    const matchedBalance =
+      balances.find((b) => b.asset_code === assetCode && parseFloat(b.balance) > 0) ||
+      balances.find((b) => b.asset_code === assetCode);
     const effectiveIssuer =
-      (matchedBalance as any)?.asset_issuer ||
+      matchedBalance?.asset_issuer ||
       assetIssuer ||
       CLASSIC_TOKENS[assetCode] ||
       "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
@@ -104,14 +105,18 @@ export async function buildPublicPaymentTxXdr(
   return tx.toXDR();
 }
 
+interface HorizonSubmitError {
+  response?: { data?: { extras?: { result_codes?: { transaction: string; operations?: string[] } } } };
+}
+
 export async function submitSignedXdr(signedXdr: string): Promise<string> {
   try {
     const tx = StellarSdk.TransactionBuilder.fromXDR(signedXdr, NETWORK_PASSPHRASE);
-    const response = await horizon.submitTransaction(tx as any);
-    return (response as any).hash;
-  } catch (err: any) {
-    if (err.response?.data?.extras?.result_codes) {
-      const resultCodes = err.response.data.extras.result_codes;
+    const response = await horizon.submitTransaction(tx);
+    return response.hash;
+  } catch (err) {
+    const resultCodes = (err as HorizonSubmitError).response?.data?.extras?.result_codes;
+    if (resultCodes) {
       const opCodes = resultCodes.operations ? `, Operations: ${resultCodes.operations.join(", ")}` : "";
       throw new Error(`Transaction failed. Transaction code: ${resultCodes.transaction}${opCodes}`);
     }

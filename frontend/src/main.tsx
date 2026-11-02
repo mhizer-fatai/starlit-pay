@@ -3,8 +3,7 @@ import { Buffer } from "buffer";
 
 if (typeof window !== "undefined") {
   window.Buffer = Buffer;
-  // @ts-ignore
-  globalThis.Buffer = Buffer;
+  (globalThis as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
   // Enforce official custom domain: bounce any visitor away from the default Netlify subdomain
   if (window.location.hostname.endsWith(".netlify.app")) {
