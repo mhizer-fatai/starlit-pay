@@ -25,7 +25,7 @@ app.post("/api/gateway/deposit", async (req, res) => {
     return res.status(200).json({ status: "ok", ...result });
   } catch (err) {
     console.error(`Error processing /api/gateway/deposit for tx ${txHash}:`, err.message);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: "Could not process that deposit. It will be retried automatically." });
   }
 });
 

@@ -477,10 +477,7 @@ app.post("/api/faucet/fund", async (req, res) => {
   } catch (err) {
     const errorDetails = err.message || "Unknown faucet error";
     console.error("Faucet error details:", errorDetails);
-    res.status(500).json({
-      error: "Faucet transaction failed",
-      details: errorDetails
-    });
+    res.status(500).json({ error: "Faucet transaction failed" });
   }
 });
 

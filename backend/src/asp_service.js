@@ -1,9 +1,8 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { app, rpc, NETWORK_PASSPHRASE } from "./config.js";
+import { createComplianceChecker } from "./compliance.js";
 
 const ASP_CONTRACT_ID = process.env.ASP_CONTRACT_ID || null;
-const CACHE_TTL_MS = 60 * 1000;
-const complianceCache = new Map();
 
 // Known test/sanction addresses for local testing and simulation
 const DEFAULT_SANCTION_LIST = new Set([
@@ -11,66 +10,35 @@ const DEFAULT_SANCTION_LIST = new Set([
   "GBADACTORXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 ]);
 
+/** Read-only is_address_blocked call. Throws if the contract gave no answer. */
+async function queryAspContract(address) {
+  const contract = new StellarSdk.Contract(ASP_CONTRACT_ID);
+  const simTx = new StellarSdk.TransactionBuilder(
+    new StellarSdk.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0"),
+    { fee: StellarSdk.BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE }
+  )
+    .addOperation(contract.call("is_address_blocked", StellarSdk.Address.fromString(address).toScVal()))
+    .setTimeout(30)
+    .build();
+
+  const sim = await rpc.simulateTransaction(simTx);
+  if (StellarSdk.rpc.Api.isSimulationError(sim)) throw new Error(sim.error);
+  if (!sim?.result?.retval) throw new Error("The compliance contract returned no result.");
+  return Boolean(StellarSdk.scValToNative(sim.result.retval));
+}
+
 /**
- * Checks whether an address is blocked according to the ASP (Association Set Provider) policy.
- * Queries the Soroban ASP contract if configured, falling back to local list and in-memory cache.
+ * Checks whether an address is blocked by the ASP policy: local list, cache,
+ * then the Soroban ASP contract if one is configured.
  *
  * @param {string} address - Stellar G... or C... address to check
- * @returns {Promise<boolean>} - true if address is blocked/sanctioned, false otherwise
+ * @param {{failClosed?: boolean}} [options] - throw ComplianceUnavailableError when the contract can't answer
+ * @returns {Promise<boolean>} true if the address is blocked
  */
-export async function isAddressBlocked(address) {
-  if (!address || typeof address !== "string") {
-    return false;
-  }
-
-  // Check local known sanctions list
-  if (DEFAULT_SANCTION_LIST.has(address)) {
-    return true;
-  }
-
-  // Check in-memory cache
-  const cached = complianceCache.get(address);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-    return cached.blocked;
-  }
-
-  // If no ASP contract ID is set, allow (with caching)
-  if (!ASP_CONTRACT_ID || !/^C[A-Z2-7]{55}$/.test(ASP_CONTRACT_ID)) {
-    complianceCache.set(address, { blocked: false, timestamp: Date.now() });
-    return false;
-  }
-
-  try {
-    const contract = new StellarSdk.Contract(ASP_CONTRACT_ID);
-    const targetVal = StellarSdk.Address.fromString(address).toScVal();
-
-    // Call read-only query on ASP contract: is_address_blocked
-    const simTx = new StellarSdk.TransactionBuilder(
-      new StellarSdk.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0"),
-      {
-        fee: StellarSdk.BASE_FEE,
-        networkPassphrase: NETWORK_PASSPHRASE,
-      }
-    )
-      .addOperation(contract.call("is_address_blocked", targetVal))
-      .setTimeout(30)
-      .build();
-
-    const simRes = await rpc.simulateTransaction(simTx);
-    if (simRes && simRes.result && simRes.result.retval) {
-      const isBlocked = StellarSdk.scValToNative(simRes.result.retval);
-      complianceCache.set(address, { blocked: Boolean(isBlocked), timestamp: Date.now() });
-      return Boolean(isBlocked);
-    }
-
-    complianceCache.set(address, { blocked: false, timestamp: Date.now() });
-    return false;
-  } catch (err) {
-    console.warn(`[ASP Check] Failed to query ASP contract for ${address}:`, err.message);
-    // In case of transient RPC error, fallback to cache or allow to prevent service disruption
-    return false;
-  }
-}
+export const isAddressBlocked = createComplianceChecker({
+  queryContract: ASP_CONTRACT_ID && /^C[A-Z2-7]{55}$/.test(ASP_CONTRACT_ID) ? queryAspContract : null,
+  sanctionList: DEFAULT_SANCTION_LIST,
+});
 
 /**
  * Public API endpoint to check if an address passes ASP compliance screening.

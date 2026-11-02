@@ -1,6 +1,12 @@
 import { app, supabase } from "./config.js";
 import { authLayer } from "./auth_layer/mount.js";
 
+/** The signed-in user, or null: for routes open to everyone that treat members differently. */
+export function sessionUser(req) {
+  const session = authLayer.sessions?.authenticate(req)?.session;
+  return session ? { id: session.id, email: session.email, username: session.username } : null;
+}
+
 /** Authentication middleware: a passkey-layer session (access cookie or Bearer access token). */
 export function requireAuth(req, res, next) {
   const result = authLayer.sessions?.authenticate(req);

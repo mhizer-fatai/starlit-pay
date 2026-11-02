@@ -194,7 +194,8 @@ app.get("/api/health/db", async (req, res) => {
     const { count, error } = await supabase.from("users").select("*", { count: "exact", head: true });
     const latencyMs = Date.now() - startTime;
     if (error) {
-      return res.status(500).json({ status: "error", error: error.message, latencyMs, pool: dbPoolConfig });
+      console.error("Database health check failed:", error.message);
+      return res.status(500).json({ status: "error", error: "Database unavailable.", latencyMs, pool: dbPoolConfig });
     }
     res.json({
       status: "connected",
@@ -203,7 +204,8 @@ app.get("/api/health/db", async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (err) {
-    res.status(500).json({ status: "error", error: err.message, pool: dbPoolConfig });
+    console.error("Database health check failed:", err.message);
+    res.status(500).json({ status: "error", error: "Database unavailable.", pool: dbPoolConfig });
   }
 });
 

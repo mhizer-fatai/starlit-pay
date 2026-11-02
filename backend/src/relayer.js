@@ -2,6 +2,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import rateLimit from "express-rate-limit";
 import { app, rpc, horizon, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
 import { isAddressBlocked } from "./asp_service.js";
+import { ComplianceUnavailableError } from "./compliance.js";
 import { performRelayerGasCheck, getRelayerMonitorStatus } from "./relayer_monitor.js";
 import { authLayer } from "./auth_layer/mount.js";
 import { createPaymentApproval } from "./payment_approval.js";
@@ -25,6 +26,22 @@ const relayerLimiter = rateLimit({
   message: { error: "Too many transaction submissions. Please wait before attempting another relayer transaction." }
 });
 
+// Money leaving the pool must pass screening: if screening can't answer, refuse.
+async function refuseUnscreenedRecipient(recipient, res) {
+  try {
+    if (await isAddressBlocked(recipient, { failClosed: true })) {
+      res.status(403).json({ error: "Recipient address is restricted under compliance policy." });
+      return true;
+    }
+    return false;
+  } catch (err) {
+    if (!(err instanceof ComplianceUnavailableError)) throw err;
+    console.error(err.message);
+    res.status(503).json({ error: "Compliance check unavailable, try again shortly.", code: "compliance_unavailable" });
+    return true;
+  }
+}
+
 // Helper to validate Stellar/Soroban Contract ID format (starts with C, 56 chars)
 function isValidContractId(id) {
   return typeof id === "string" && /^C[A-Z2-7]{55}$/.test(id);
@@ -43,9 +60,7 @@ app.post("/api/relayer/submit", relayerLimiter, requirePaymentApproval, async (r
     return res.status(400).json({ error: "Missing parameters for transaction submission." });
   }
 
-  if (await isAddressBlocked(recipient)) {
-    return res.status(403).json({ error: "Recipient address is restricted under compliance policy." });
-  }
+  if (await refuseUnscreenedRecipient(recipient, res)) return;
 
   if (!relayerKeypair) {
     return res.status(500).json({ error: "Relayer not initialized on the server." });
@@ -100,7 +115,7 @@ app.post("/api/relayer/submit", relayerLimiter, requirePaymentApproval, async (r
     }
   } catch (error) {
     console.error("Relayer execution error:", error.message);
-    res.status(500).json({ error: error.message || "Failed to submit transaction via Relayer." });
+    res.status(500).json({ error: "Could not submit the transaction. Please try again." });
   }
 });
 
@@ -202,7 +217,7 @@ app.post("/api/relayer/transfer", relayerLimiter, requirePaymentApproval, async 
     }
   } catch (error) {
     console.error("Relayer transfer execution error:", error.message);
-    res.status(500).json({ error: error.message || "Failed to submit transfer transaction via Relayer." });
+    res.status(500).json({ error: "Could not submit the payment. Please try again." });
   }
 });
 
@@ -239,9 +254,7 @@ app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, async 
     return res.status(400).json({ error: "Missing parameters for withdraw transaction submission." });
   }
 
-  if (await isAddressBlocked(recipient)) {
-    return res.status(403).json({ error: "Recipient address is restricted under compliance policy." });
-  }
+  if (await refuseUnscreenedRecipient(recipient, res)) return;
 
   if (!relayerKeypair) {
     return res.status(500).json({ error: "Relayer not initialized on the server." });
@@ -313,7 +326,7 @@ app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, async 
     }
   } catch (error) {
     console.error("Relayer withdraw execution error:", error.message);
-    res.status(500).json({ error: error.message || "Failed to submit withdraw transaction via Relayer." });
+    res.status(500).json({ error: "Could not submit the withdrawal. Please try again." });
   }
 });
 
@@ -339,10 +352,18 @@ app.get("/api/relayer/health", async (req, res) => {
   });
 });
 
+function publicMonitorStatus() {
+  const status = getRelayerMonitorStatus();
+  return {
+    ...status,
+    lastError: status.lastError ? "Balance check failed." : null,
+    recentChecks: status.recentChecks?.map(({ error, ...check }) => ({ ...check, ...(error ? { error: "Balance check failed." } : {}) })),
+  };
+}
+
 // Endpoint to inspect background relayer monitor daemon status and check history
 app.get("/api/relayer/daemon/status", (req, res) => {
-  const daemonStatus = getRelayerMonitorStatus();
-  res.json(daemonStatus);
+  res.json(publicMonitorStatus());
 });
 
 // Endpoint to trigger an immediate relayer gas check on demand
@@ -350,8 +371,8 @@ app.post("/api/relayer/daemon/check-now", async (req, res) => {
   const checkResult = await performRelayerGasCheck();
   res.json({
     message: "Relayer gas check executed successfully.",
-    result: checkResult,
-    daemon: getRelayerMonitorStatus()
+    result: { ...checkResult, error: checkResult.error ? "Balance check failed." : undefined },
+    daemon: publicMonitorStatus()
   });
 });
 
