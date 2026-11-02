@@ -1,3 +1,5 @@
+import { logger } from "./http/logger.js";
+
 // Address screening (Association Set Provider). Pure policy: the contract query
 // is injected. When screening can't get an answer, callers choose: withdrawals
 // fail closed, because money leaving the pool can't be pulled back.
@@ -9,7 +11,7 @@ export class ComplianceUnavailableError extends Error {
   }
 }
 
-export function createComplianceChecker({ queryContract, sanctionList = new Set(), cacheTtlMs = 60_000, now = Date.now, warn = console.warn }) {
+export function createComplianceChecker({ queryContract, sanctionList = new Set(), cacheTtlMs = 60_000, now = Date.now, warn = logger.warn }) {
   const cache = new Map();
 
   return async function isAddressBlocked(address, { failClosed = false } = {}) {

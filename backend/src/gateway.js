@@ -5,6 +5,9 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import { app, rpc, horizon, supabase, gatewayKeypair, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "./config.js";
 import { calculateCommitment, encryptNoteForUser } from "./crypto.js";
 import { isAddressBlocked } from "./asp_service.js";
+import { validateBody } from "./http/validate.js";
+import { depositRequest } from "./http/schemas.js";
+import { logger } from "./http/logger.js";
 
 // Public endpoint exposing the deposit address the gateway daemon watches,
 // so the frontend never shows a stale hardcoded copy.
@@ -13,18 +16,15 @@ app.get("/api/gateway/address", (_req, res) => {
 });
 
 // Direct endpoint allowing clients (or external deposit flows) to trigger instant verification and shielding
-app.post("/api/gateway/deposit", async (req, res) => {
-  const { txHash } = req.body || {};
-  if (!txHash) {
-    return res.status(400).json({ error: "txHash is required" });
-  }
+app.post("/api/gateway/deposit", validateBody(depositRequest), async (req, res) => {
+  const { txHash } = req.body;
 
   try {
     const txRecord = await horizon.transactions().transaction(txHash).call();
     const result = await processDepositTransaction(txRecord);
     return res.status(200).json({ status: "ok", ...result });
   } catch (err) {
-    console.error(`Error processing /api/gateway/deposit for tx ${txHash}:`, err.message);
+    logger.error(`Error processing /api/gateway/deposit for tx ${txHash}:`, err.message);
     return res.status(500).json({ error: "Could not process that deposit. It will be retried automatically." });
   }
 });
@@ -40,7 +40,7 @@ try {
     }
   }
 } catch (err) {
-  console.error("Failed to read gateway indexer state:", err.message);
+  logger.error("Failed to read gateway indexer state:", err.message);
 }
 
 // Submits a shielded pool deposit from the gateway coordinator address using the gateway's key and sequence counter
@@ -138,11 +138,11 @@ export async function processDepositTransaction(txRecord) {
 
       const assetName = isNative ? "XLM" : "USDC";
 
-      console.log(`Gateway processing incoming deposit of ${amount} ${assetName} for @${user.username} (Memo: ${memoId})`);
+      logger.info(`Gateway processing incoming deposit of ${amount} ${assetName} for @${user.username} (Memo: ${memoId})`);
 
       const isBlocked = await isAddressBlocked(tx.source);
       if (isBlocked) {
-        console.warn(`[ASP COMPLIANCE BLOCK] Deposit from sanctioned address ${tx.source} rejected for @${user.username}.`);
+        logger.warn(`[ASP COMPLIANCE BLOCK] Deposit from sanctioned address ${tx.source} rejected for @${user.username}.`);
         return { processed: false, reason: "sanctioned_address" };
       }
 
@@ -158,7 +158,7 @@ export async function processDepositTransaction(txRecord) {
         .maybeSingle();
 
       if (existingNote) {
-        console.log(`Gateway: commitment ${commitmentHex} already processed. Skipping.`);
+        logger.info(`Gateway: commitment ${commitmentHex} already processed. Skipping.`);
         results.push({ processed: false, reason: "already_processed", commitment: commitmentHex });
         continue;
       }
@@ -173,12 +173,12 @@ export async function processDepositTransaction(txRecord) {
         }]);
 
       if (insertErr) {
-        console.error(`Gateway duplicate prevention insert failed: ${insertErr.message}`);
+        logger.error(`Gateway duplicate prevention insert failed: ${insertErr.message}`);
         continue;
       }
 
       try {
-        console.log(`Gateway submitting Soroban deposit of ${amount} ${assetName} with commitment ${commitmentHex}`);
+        logger.info(`Gateway submitting Soroban deposit of ${amount} ${assetName} with commitment ${commitmentHex}`);
         const depositTxHash = await submitGatewayDeposit(
           gatewayKeypair,
           activeContractId,
@@ -188,7 +188,7 @@ export async function processDepositTransaction(txRecord) {
           encryptedHex
         );
 
-        console.log(`Gateway successfully shielded deposit! Contract Tx: ${depositTxHash}`);
+        logger.info(`Gateway successfully shielded deposit! Contract Tx: ${depositTxHash}`);
 
         await supabase
           .from("shielded_notes")
@@ -206,7 +206,7 @@ export async function processDepositTransaction(txRecord) {
           contractTxHash: depositTxHash,
         });
       } catch (submitErr) {
-        console.error(`Gateway deposit transaction submission failed:`, submitErr.message);
+        logger.error(`Gateway deposit transaction submission failed:`, submitErr.message);
         await supabase.from("shielded_notes").delete().eq("commitment", commitmentHex);
         throw submitErr;
       }
@@ -239,10 +239,10 @@ async function runGatewayDaemon() {
     try {
       txsRes = await txsQuery.call();
       if (txsRes.records.length > 0) {
-        console.log(`Gateway discovered ${txsRes.records.length} new transaction record(s) on address ${gatewayAddress}`);
+        logger.info(`Gateway discovered ${txsRes.records.length} new transaction record(s) on address ${gatewayAddress}`);
       }
     } catch (horizonErr) {
-      console.error("Gateway Horizon query failed:", horizonErr.message || horizonErr);
+      logger.error("Gateway Horizon query failed:", horizonErr.message || horizonErr);
       isGatewayRunning = false;
       return;
     }
@@ -253,11 +253,11 @@ async function runGatewayDaemon() {
         lastProcessedTxToken = txRecord.paging_token;
         fs.writeFileSync(GATEWAY_STATE_FILE, JSON.stringify({ lastProcessedTxToken }), "utf-8");
       } catch (txErr) {
-        console.error(`Gateway failed to process tx ${txRecord.hash}:`, txErr.message);
+        logger.error(`Gateway failed to process tx ${txRecord.hash}:`, txErr.message);
       }
     }
   } catch (err) {
-    console.error("Gateway daemon error:", err.message);
+    logger.error("Gateway daemon error:", err.message);
   } finally {
     isGatewayRunning = false;
   }
@@ -281,7 +281,7 @@ async function ensureGatewayTrustlines() {
         (b) => b.asset_code === "USDC" && b.asset_issuer === issuer
       );
       if (!hasTrust) {
-        console.log(`Gateway: establishing trustline for USDC issuer ${issuer}...`);
+        logger.info(`Gateway: establishing trustline for USDC issuer ${issuer}...`);
         const usdcAsset = new StellarSdk.Asset("USDC", issuer);
         const tx = new StellarSdk.TransactionBuilder(account, {
           fee: StellarSdk.BASE_FEE,
@@ -292,21 +292,21 @@ async function ensureGatewayTrustlines() {
           .build();
         tx.sign(gatewayKeypair);
         await horizon.submitTransaction(tx);
-        console.log(`Gateway: successfully added trustline for USDC issuer ${issuer}`);
+        logger.info(`Gateway: successfully added trustline for USDC issuer ${issuer}`);
       }
     }
   } catch (err) {
-    console.error("Gateway trustline setup warning:", err.message);
+    logger.error("Gateway trustline setup warning:", err.message);
   }
 }
 
 // Starts the gateway polling daemon interval automatically when this script is imported
 export function startGateway() {
   if (gatewayKeypair) {
-    console.log(`Enterprise Deposit Gateway daemon started on address: ${gatewayKeypair.publicKey()}`);
-    ensureGatewayTrustlines().catch((e) => console.error("Trustline setup error:", e.message));
+    logger.info(`Enterprise Deposit Gateway daemon started on address: ${gatewayKeypair.publicKey()}`);
+    ensureGatewayTrustlines().catch((e) => logger.error("Trustline setup error:", e.message));
     setInterval(runGatewayDaemon, 15000);
   } else {
-    console.log("Enterprise Deposit Gateway daemon skipped (GATEWAY_SECRET_KEY not set).");
+    logger.info("Enterprise Deposit Gateway daemon skipped (GATEWAY_SECRET_KEY not set).");
   }
 }

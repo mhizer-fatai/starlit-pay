@@ -1,5 +1,6 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { app, rpc, NETWORK_PASSPHRASE, supabase } from "./config.js";
+import { logger } from "./http/logger.js";
 
 // A Merkle root the shielded pool currently accepts. Spends need one, but notes
 // posted by clients (received payments, change) are stored without a root, and
@@ -57,7 +58,7 @@ app.get("/api/pool/root", async (_req, res) => {
     if (!root) return res.status(503).json({ error: "No valid pool root is available right now." });
     res.json({ root });
   } catch (err) {
-    console.error("Pool root lookup failed:", err.message);
+    logger.error("Pool root lookup failed:", err.message);
     res.status(500).json({ error: "Could not look up the pool root." });
   }
 });

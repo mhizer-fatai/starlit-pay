@@ -1,5 +1,6 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { rpc, NETWORK_PASSPHRASE, relayerKeypair } from "./config.js";
+import { logger } from "./http/logger.js";
 
 // Keeps the shielded pool contract instance from being archived by calling its
 // public bump() entry point. The contract only extends the TTL once it drops
@@ -37,20 +38,20 @@ export async function bumpPoolTtl() {
     if (response.status === "ERROR") {
       throw new Error(`Tx submission failed: ${response.errorResult}`);
     }
-    console.log(`[TTL-KEEPER] Pool TTL bump submitted: ${response.hash}`);
+    logger.info(`[TTL-KEEPER] Pool TTL bump submitted: ${response.hash}`);
   } catch (err) {
-    console.error(`[TTL-KEEPER] Pool TTL bump failed: ${err.message}`);
+    logger.error(`[TTL-KEEPER] Pool TTL bump failed: ${err.message}`);
   }
 }
 
 export function startTtlKeeper() {
   if (keeperIntervalId) return;
   if (!relayerKeypair || !process.env.SHIELDED_POOL_CONTRACT_ID) {
-    console.log("Pool TTL keeper skipped (RELAYER_SECRET_KEY or SHIELDED_POOL_CONTRACT_ID not set).");
+    logger.info("Pool TTL keeper skipped (RELAYER_SECRET_KEY or SHIELDED_POOL_CONTRACT_ID not set).");
     return;
   }
 
   bumpPoolTtl();
   keeperIntervalId = setInterval(bumpPoolTtl, TTL_KEEPER_INTERVAL_MS);
-  console.log(`Pool TTL keeper started (interval: ${TTL_KEEPER_INTERVAL_MS}ms).`);
+  logger.info(`Pool TTL keeper started (interval: ${TTL_KEEPER_INTERVAL_MS}ms).`);
 }

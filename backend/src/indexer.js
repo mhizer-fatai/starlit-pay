@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { rpc, horizon, supabase } from "./config.js";
+import { logger } from "./http/logger.js";
 
 // Asynchronous Background Event Indexer
 const STATE_FILE = path.join(process.cwd(), "indexer_state.json");
@@ -15,7 +16,7 @@ try {
     }
   }
 } catch (err) {
-  console.error("Failed to read indexer state:", err.message);
+  logger.error("Failed to read indexer state:", err.message);
 }
 
 let isIndexing = false;
@@ -63,7 +64,7 @@ async function runIndexer() {
         }
         currentStart = currentEnd + 1;
       } catch (err) {
-        console.error(`Indexer range query failed [${currentStart}, ${currentEnd}]:`, err.message);
+        logger.error(`Indexer range query failed [${currentStart}, ${currentEnd}]:`, err.message);
         break;
       }
     }
@@ -82,9 +83,9 @@ async function runIndexer() {
             .eq("commitment", commitment);
 
           if (error) {
-            console.error(`Indexer DB update failed for deposit commitment ${commitment}:`, error.message);
+            logger.error(`Indexer DB update failed for deposit commitment ${commitment}:`, error.message);
           } else {
-            console.log(`Indexer successfully verified deposit commitment ${commitment} at root ${root} (ledger ${e.ledger})`);
+            logger.info(`Indexer successfully verified deposit commitment ${commitment} at root ${root} (ledger ${e.ledger})`);
           }
         } else if (topic0 === "transfer") {
           const root = Buffer.from(StellarSdk.scValToNative(e.topic[1])).toString("hex");
@@ -102,11 +103,11 @@ async function runIndexer() {
             .update({ root, ledger: e.ledger })
             .eq("commitment", commitment2);
 
-          if (error1) console.error(`Indexer DB update failed for transfer commitment 1 ${commitment1}:`, error1.message);
-          if (error2) console.error(`Indexer DB update failed for transfer commitment 2 ${commitment2}:`, error2.message);
+          if (error1) logger.error(`Indexer DB update failed for transfer commitment 1 ${commitment1}:`, error1.message);
+          if (error2) logger.error(`Indexer DB update failed for transfer commitment 2 ${commitment2}:`, error2.message);
 
           if (!error1 && !error2) {
-            console.log(`Indexer successfully verified transfer commitments [${commitment1}, ${commitment2}] at root ${root} (ledger ${e.ledger})`);
+            logger.info(`Indexer successfully verified transfer commitments [${commitment1}, ${commitment2}] at root ${root} (ledger ${e.ledger})`);
           }
         } else if (topic0 === "withdraw") {
           const root = Buffer.from(StellarSdk.scValToNative(e.topic[1])).toString("hex");
@@ -119,13 +120,13 @@ async function runIndexer() {
             .eq("commitment", changeCommitment);
 
           if (error) {
-            console.error(`Indexer DB update failed for withdraw change commitment ${changeCommitment}:`, error.message);
+            logger.error(`Indexer DB update failed for withdraw change commitment ${changeCommitment}:`, error.message);
           } else {
-            console.log(`Indexer successfully verified withdraw change commitment ${changeCommitment} at root ${root} (ledger ${e.ledger})`);
+            logger.info(`Indexer successfully verified withdraw change commitment ${changeCommitment} at root ${root} (ledger ${e.ledger})`);
           }
         }
       } catch (parseErr) {
-        console.error("Indexer failed to parse event:", parseErr.message);
+        logger.error("Indexer failed to parse event:", parseErr.message);
       }
     }
 
@@ -133,7 +134,7 @@ async function runIndexer() {
     fs.writeFileSync(STATE_FILE, JSON.stringify({ lastIndexedLedger }), "utf-8");
 
   } catch (err) {
-    console.error("Indexer main loop failed:", err.message);
+    logger.error("Indexer main loop failed:", err.message);
   } finally {
     isIndexing = false;
   }
@@ -141,6 +142,6 @@ async function runIndexer() {
 
 // Starts the polling indexer interval automatically when this script is imported
 export function startIndexer() {
-  console.log("Soroban Event Indexer started.");
+  logger.info("Soroban Event Indexer started.");
   setInterval(runIndexer, 15000);
 }

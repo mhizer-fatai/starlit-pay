@@ -6,6 +6,7 @@ import { registerPasskeyRoutes } from "./passkeys.js";
 import { registerVaultRoutes } from "./vault.js";
 import { provenEmail, safeUser } from "./identity.js";
 import { noAlerts } from "./alerts.js";
+import { logger } from "../http/logger.js";
 
 /** Express 4 ignores rejected promises; route them to the error handler instead. */
 function catchAsync(router) {
@@ -74,7 +75,7 @@ export function createAuthLayer({ store, identity, alerts = noAlerts, env = proc
 
   // Async handler errors: log server-side, never leak details to the client.
   router.use(LAYER_PATHS, (err, req, res, _next) => {
-    console.error(`[AUTH-LAYER] ${req.method} ${req.path} failed: ${err.message}`);
+    logger.error(`[AUTH-LAYER] ${req.method} ${req.path} failed: ${err.message}`);
     if (!res.headersSent) res.status(500).json({ error: "Something went wrong. Please try again." });
   });
 

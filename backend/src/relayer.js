@@ -3,9 +3,12 @@ import rateLimit from "express-rate-limit";
 import { app, rpc, horizon, relayerKeypair, NETWORK_PASSPHRASE } from "./config.js";
 import { isAddressBlocked } from "./asp_service.js";
 import { ComplianceUnavailableError } from "./compliance.js";
+import { validateBody } from "./http/validate.js";
+import { claimRequest, transferRequest, withdrawRequest } from "./http/schemas.js";
 import { performRelayerGasCheck, getRelayerMonitorStatus } from "./relayer_monitor.js";
 import { authLayer } from "./auth_layer/mount.js";
 import { createPaymentApproval } from "./payment_approval.js";
+import { logger } from "./http/logger.js";
 
 // Spends need a signed-in user who just confirmed with passkey or PIN (see payment_approval.js).
 const requirePaymentApproval = createPaymentApproval({ sessions: authLayer.sessions });
@@ -36,7 +39,7 @@ async function refuseUnscreenedRecipient(recipient, res) {
     return false;
   } catch (err) {
     if (!(err instanceof ComplianceUnavailableError)) throw err;
-    console.error(err.message);
+    logger.error(err.message);
     res.status(503).json({ error: "Compliance check unavailable, try again shortly.", code: "compliance_unavailable" });
     return true;
   }
@@ -48,16 +51,12 @@ function isValidContractId(id) {
 }
 
 // Submits client claims/withdrawals to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/submit", relayerLimiter, requirePaymentApproval, async (req, res) => {
+app.post("/api/relayer/submit", relayerLimiter, requirePaymentApproval, validateBody(claimRequest), async (req, res) => {
   const { proof, nullifier, recipient, token, amount, root } = req.body;
   const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
 
   if (!isValidContractId(activeContractId)) {
     return res.status(500).json({ error: "Invalid active contract configuration on server." });
-  }
-
-  if (!proof || !nullifier || !recipient || !token || !amount || !root) {
-    return res.status(400).json({ error: "Missing parameters for transaction submission." });
   }
 
   if (await refuseUnscreenedRecipient(recipient, res)) return;
@@ -67,7 +66,7 @@ app.post("/api/relayer/submit", relayerLimiter, requirePaymentApproval, async (r
   }
 
   try {
-    console.log(`Relayer submitting claim of ${amount} to ${recipient} for token ${token}...`);
+    logger.info(`Relayer submitting claim of ${amount} to ${recipient} for token ${token}...`);
 
     const account = await rpc.getAccount(relayerKeypair.publicKey());
     const contract = new StellarSdk.Contract(activeContractId);
@@ -114,13 +113,13 @@ app.post("/api/relayer/submit", relayerLimiter, requirePaymentApproval, async (r
       throw new Error(`Transaction finished with status: ${txResult.status}`);
     }
   } catch (error) {
-    console.error("Relayer execution error:", error.message);
+    logger.error("Relayer execution error:", error.message);
     res.status(500).json({ error: "Could not submit the transaction. Please try again." });
   }
 });
 
 // Submits client private pool-to-pool transfer to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/transfer", relayerLimiter, requirePaymentApproval, async (req, res) => {
+app.post("/api/relayer/transfer", relayerLimiter, requirePaymentApproval, validateBody(transferRequest), async (req, res) => {
   const {
     proof,
     nullifier_1,
@@ -137,25 +136,12 @@ app.post("/api/relayer/transfer", relayerLimiter, requirePaymentApproval, async 
     return res.status(500).json({ error: "Invalid active contract configuration on server." });
   }
 
-  if (
-    !proof ||
-    !nullifier_1 ||
-    !nullifier_2 ||
-    !output_commitment_1 ||
-    !encrypted_note_1 ||
-    !output_commitment_2 ||
-    !encrypted_note_2 ||
-    !root
-  ) {
-    return res.status(400).json({ error: "Missing parameters for transfer transaction submission." });
-  }
-
   if (!relayerKeypair) {
     return res.status(500).json({ error: "Relayer not initialized on the server." });
   }
 
   try {
-    console.log(`Relayer submitting transfer...`);
+    logger.info(`Relayer submitting transfer...`);
 
     const account = await rpc.getAccount(relayerKeypair.publicKey());
     const contract = new StellarSdk.Contract(activeContractId);
@@ -216,13 +202,13 @@ app.post("/api/relayer/transfer", relayerLimiter, requirePaymentApproval, async 
       throw new Error(`Transaction finished with status: ${txResult.status}`);
     }
   } catch (error) {
-    console.error("Relayer transfer execution error:", error.message);
+    logger.error("Relayer transfer execution error:", error.message);
     res.status(500).json({ error: "Could not submit the payment. Please try again." });
   }
 });
 
 // Submits client private pool-to-public withdrawal with change to Soroban Shielded Pool contract using relayer gas
-app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, async (req, res) => {
+app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, validateBody(withdrawRequest), async (req, res) => {
   const {
     proof,
     nullifier_1,
@@ -240,20 +226,6 @@ app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, async 
     return res.status(500).json({ error: "Invalid active contract configuration on server." });
   }
 
-  if (
-    !proof ||
-    !nullifier_1 ||
-    !nullifier_2 ||
-    !recipient ||
-    !token ||
-    !amount ||
-    !root ||
-    !change_commitment ||
-    !encrypted_change_note
-  ) {
-    return res.status(400).json({ error: "Missing parameters for withdraw transaction submission." });
-  }
-
   if (await refuseUnscreenedRecipient(recipient, res)) return;
 
   if (!relayerKeypair) {
@@ -261,7 +233,7 @@ app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, async 
   }
 
   try {
-    console.log(`Relayer submitting withdrawal with change...`);
+    logger.info(`Relayer submitting withdrawal with change...`);
 
     const account = await rpc.getAccount(relayerKeypair.publicKey());
     const contract = new StellarSdk.Contract(activeContractId);
@@ -325,7 +297,7 @@ app.post("/api/relayer/withdraw", relayerLimiter, requirePaymentApproval, async 
       throw new Error(`Transaction finished with status: ${txResult.status}`);
     }
   } catch (error) {
-    console.error("Relayer withdraw execution error:", error.message);
+    logger.error("Relayer withdraw execution error:", error.message);
     res.status(500).json({ error: "Could not submit the withdrawal. Please try again." });
   }
 });

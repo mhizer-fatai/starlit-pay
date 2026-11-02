@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { asyncHandler, errorMiddleware } from "../../http/errors.js";
+import { asyncHandler } from "../../http/errors.js";
 
 export function createPaymentLinksRouter({ service, requireAuth, currentUser }) {
   const router = Router();
@@ -29,6 +29,5 @@ export function createPaymentLinksRouter({ service, requireAuth, currentUser }) 
     })
   );
 
-  router.use("/api/payment-links", errorMiddleware);
   return router;
 }

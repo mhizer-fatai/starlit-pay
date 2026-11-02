@@ -1,4 +1,5 @@
 import express from "express";
+import { errorMiddleware } from "../../src/http/errors.js";
 
 /** Serves routers on an ephemeral port. A fake auth reads the test user from a header. */
 export async function serve(buildRouter) {
@@ -10,6 +11,7 @@ export async function serve(buildRouter) {
     return req.user ? next() : res.status(401).json({ error: "Unauthorized" });
   };
   app.use(buildRouter({ requireAuth, currentUser }));
+  app.use(errorMiddleware);
 
   const server = await new Promise((resolve) => {
     const s = app.listen(0, "127.0.0.1", () => resolve(s));

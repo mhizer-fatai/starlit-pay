@@ -17,12 +17,14 @@ import { startIndexer } from "./src/indexer.js";
 import { startGateway } from "./src/gateway.js";
 import { startRelayerMonitor } from "./src/relayer_monitor.js";
 import { startTtlKeeper } from "./src/ttl_keeper.js";
+import { errorMiddleware, notFound } from "./src/http/errors.js";
+import { logger } from "./src/http/logger.js";
 
 // Start background services. Set BACKGROUND_JOBS=off for a local server that
 // shares production's database and wallets, so deposits are never processed twice.
 startRelayerMonitor();
 if (process.env.BACKGROUND_JOBS === "off") {
-  console.log("Background jobs disabled (BACKGROUND_JOBS=off): indexer, gateway and TTL keeper not started.");
+  logger.info("Background jobs disabled (BACKGROUND_JOBS=off): indexer, gateway and TTL keeper not started.");
 } else {
   startIndexer();
   startGateway();
@@ -46,7 +48,37 @@ app.get("/", (req, res) => {
   });
 });
 
+// Last, after every route.
+app.use(notFound);
+app.use(errorMiddleware);
+
 // Start HTTP Server
-app.listen(PORT, () => {
-  console.log(`Starlit Pay backend database router listening on http://localhost:${PORT}`);
+const server = app.listen(PORT, () => {
+  logger.info(`Starlit Pay backend listening on port ${PORT}`);
+});
+
+// Render stops the old instance with SIGTERM on every deploy: let requests in
+// flight finish (a relayed payment can take many seconds), then exit.
+const SHUTDOWN_GRACE_MS = 25_000;
+let shuttingDown = false;
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`${signal} received, finishing requests in flight`);
+  server.close(() => process.exit(0));
+  server.closeIdleConnections();
+  setTimeout(() => {
+    logger.warn("Shutdown grace period ended with requests still open");
+    process.exit(1);
+  }, SHUTDOWN_GRACE_MS).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
+// A background job's stray rejection must not take payments down with it.
+process.on("unhandledRejection", (reason) => logger.error("Unhandled promise rejection", reason));
+process.on("uncaughtException", (err) => {
+  logger.error("Uncaught exception, exiting", err);
+  process.exit(1);
 });

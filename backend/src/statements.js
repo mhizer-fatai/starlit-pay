@@ -1,6 +1,7 @@
 import nodemailer from "nodemailer";
 import { app } from "./config.js";
 import { requireAuth } from "./auth.js";
+import { logger } from "./http/logger.js";
 
 // Emails a generated account statement to the authenticated user's OWN inbox
 // address only (never an arbitrary recipient — this must not become an open
@@ -61,7 +62,7 @@ app.post("/api/statements/email", requireAuth, async (req, res) => {
     });
     res.status(200).json({ sent: true, to: req.user.email });
   } catch (error) {
-    console.error("Statement email error:", error.message);
+    logger.error("Statement email error:", error.message);
     res.status(502).json({ error: "Failed to send email. Please try again later." });
   }
 });

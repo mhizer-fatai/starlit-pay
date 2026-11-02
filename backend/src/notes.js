@@ -3,6 +3,10 @@ import path from "path";
 import { app, supabase, rpc, GATEWAY_ADDRESS } from "./config.js";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { authLayer } from "./auth_layer/mount.js";
+import { validateBody } from "./http/validate.js";
+import { postNoteRequest, spendNoteRequest } from "./http/schemas.js";
+import { logger } from "./http/logger.js";
+
 
 /**
  * Id of the signed-in user (passkey session), or
@@ -74,17 +78,14 @@ app.get("/api/notes/:viewingKey", async (req, res) => {
     if (error) throw error;
     res.status(200).json({ notes });
   } catch (error) {
-    console.error("Fetch notes error:", error.message);
+    logger.error("Fetch notes error:", error.message);
     res.status(500).json({ error: "Failed to fetch shielded notes" });
   }
 });
 
 // Caches a new shielded note commitment (unauthenticated, anyone can send you a note)
-app.post("/api/notes", async (req, res) => {
+app.post("/api/notes", validateBody(postNoteRequest), async (req, res) => {
   const { commitment, encrypted_note, recipient_viewing_key } = req.body;
-  if (!commitment || !encrypted_note || !recipient_viewing_key) {
-    return res.status(400).json({ error: "Missing parameters to cache note." });
-  }
   try {
     const { data: note, error } = await supabase
       .from("shielded_notes")
@@ -95,17 +96,14 @@ app.post("/api/notes", async (req, res) => {
     if (error) throw error;
     res.status(201).json({ note });
   } catch (error) {
-    console.error("Save note error:", error.message);
+    logger.error("Save note error:", error.message);
     res.status(500).json({ error: "Failed to save shielded note" });
   }
 });
 
 // Marks a commitment note as spent in cache database (authenticated)
-app.post("/api/notes/spend", async (req, res) => {
+app.post("/api/notes/spend", validateBody(spendNoteRequest), async (req, res) => {
   const { commitment, timestamp, signature } = req.body;
-  if (!commitment) {
-    return res.status(400).json({ error: "Commitment is required." });
-  }
   try {
     // 1. Fetch note to get recipient's viewing key and status
     const { data: note, error: noteError } = await supabase
@@ -159,7 +157,7 @@ app.post("/api/notes/spend", async (req, res) => {
     if (updateError) throw updateError;
     res.status(200).json({ success: true });
   } catch (error) {
-    console.error("Spend note error:", error.message);
+    logger.error("Spend note error:", error.message);
     res.status(500).json({ error: "Failed to mark note as spent" });
   }
 });
@@ -211,7 +209,7 @@ async function getLiveSorobanBalances() {
 
     return `${usdcBalance} USDC & ${xlmBalance.toLocaleString()} XLM`;
   } catch (err) {
-    console.warn("Live Soroban RPC balance check warning:", err.message);
+    logger.warn("Live Soroban RPC balance check warning:", err.message);
     return "113 USDC & 6,658 XLM";
   }
 }
@@ -233,7 +231,7 @@ try {
     }
   }
 } catch (e) {
-  console.warn("Could not load faucet_state.json:", e.message);
+  logger.warn("Could not load faucet_state.json:", e.message);
 }
 
 function saveFaucetState() {
@@ -244,7 +242,7 @@ function saveFaucetState() {
     }
     fs.writeFileSync(FAUCET_STATE_FILE, JSON.stringify(obj, null, 2), "utf8");
   } catch (e) {
-    console.warn("Could not save faucet_state.json:", e.message);
+    logger.warn("Could not save faucet_state.json:", e.message);
   }
 }
 
@@ -476,7 +474,7 @@ app.post("/api/faucet/fund", async (req, res) => {
     });
   } catch (err) {
     const errorDetails = err.message || "Unknown faucet error";
-    console.error("Faucet error details:", errorDetails);
+    logger.error("Faucet error details:", errorDetails);
     res.status(500).json({ error: "Faucet transaction failed" });
   }
 });
@@ -508,7 +506,7 @@ app.get("/api/stats", async (req, res) => {
       status: "live"
     });
   } catch (error) {
-    console.error("Stats API error:", error.message);
+    logger.error("Stats API error:", error.message);
     res.status(500).json({ error: "Failed to fetch stats" });
   }
 });

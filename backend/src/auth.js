@@ -1,5 +1,6 @@
 import { app, supabase } from "./config.js";
 import { authLayer } from "./auth_layer/mount.js";
+import { logger } from "./http/logger.js";
 
 /** The signed-in user, or null: for routes open to everyone that treat members differently. */
 export function sessionUser(req) {
@@ -63,7 +64,7 @@ app.post("/api/auth/login", async (req, res) => {
     const { identity_commitment: _secret, ...safeUser } = user;
     res.status(200).json({ exists: true, user: safeUser });
   } catch (error) {
-    console.error("Login error:", error.message);
+    logger.error("Login error:", error.message);
     res.status(500).json({ error: "Failed to authenticate user" });
   }
 });
@@ -135,7 +136,7 @@ app.post("/api/users/register", async (req, res) => {
     const { identity_commitment: _secret, ...safeUser } = newUser;
     res.status(201).json({ user: safeUser });
   } catch (error) {
-    console.error("Registration error:", error.message);
+    logger.error("Registration error:", error.message);
     res.status(500).json({ error: "Failed to register user" });
   }
 });
@@ -165,7 +166,7 @@ app.get("/api/users/lookup/:username", async (req, res) => {
 
     res.status(200).json({ user });
   } catch (error) {
-    console.error("User lookup error:", error.message);
+    logger.error("User lookup error:", error.message);
     res.status(500).json({ error: "Failed to resolve user" });
   }
 });
@@ -215,7 +216,7 @@ const handleProfileUpdate = async (req, res) => {
     const { identity_commitment: _secret, ...safeUser } = user;
     res.status(200).json({ user: safeUser });
   } catch (error) {
-    console.error("Profile update error:", error.message);
+    logger.error("Profile update error:", error.message);
     res.status(500).json({ error: "Failed to update profile" });
   }
 };

@@ -1,5 +1,6 @@
 import { app, supabase } from "./config.js";
 import { requireAuth } from "./auth.js";
+import { logger } from "./http/logger.js";
 
 const DEFAULTS = {
   language: "en",
@@ -39,7 +40,7 @@ app.get("/api/users/me/settings", requireAuth, async (req, res) => {
     if (insertError) throw insertError;
     res.status(200).json({ settings: created });
   } catch (error) {
-    console.error("Fetch settings error:", error.message);
+    logger.error("Fetch settings error:", error.message);
     res.status(500).json({ error: "Failed to load settings" });
   }
 });
@@ -103,7 +104,7 @@ app.patch("/api/users/me/settings", requireAuth, async (req, res) => {
     if (error) throw error;
     res.status(200).json({ settings: data });
   } catch (error) {
-    console.error("Update settings error:", error.message);
+    logger.error("Update settings error:", error.message);
     res.status(500).json({ error: "Failed to save settings" });
   }
 });

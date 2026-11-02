@@ -3,6 +3,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import { app, rpc, NETWORK_PASSPHRASE, relayerKeypair, supabase } from "./config.js";
 import { requireAuth } from "./auth.js";
 import { checkRelayRequest, createdContractIds, rawP256FromCose, RelayRuleError } from "./smart_wallet_rules.js";
+import { logger } from "./http/logger.js";
 
 // Public smart wallet: an OpenZeppelin smart account per user, controlled by a
 // passkey that Stellar verifies on-chain (secp256r1). The frontend uses
@@ -115,7 +116,7 @@ app.get("/api/smart-wallet", requireAuth, async (req, res) => {
       config: { ...CONFIG, xlmSac: XLM_SAC, poolContract: POOL_CONTRACT, networkPassphrase: NETWORK_PASSPHRASE },
     });
   } catch (err) {
-    console.error("Smart wallet lookup failed:", err.message);
+    logger.error("Smart wallet lookup failed:", err.message);
     res.status(500).json({ error: "Could not load your smart wallet." });
   }
 });
@@ -140,10 +141,10 @@ app.post("/api/smart-wallet/birth", requireAuth, async (req, res) => {
       .from("users")
       .update({ smart_wallet_tx_hash: birth.txHash, smart_wallet_ledger: birth.ledger })
       .eq("id", req.user.id);
-    if (error) console.warn("Could not store wallet birth (run schema_smart_wallet.sql):", error.message);
+    if (error) logger.warn("Could not store wallet birth (run schema_smart_wallet.sql):", error.message);
     res.json({ birth });
   } catch (err) {
-    console.error("Smart wallet birth check failed:", err.message);
+    logger.error("Smart wallet birth check failed:", err.message);
     res.status(500).json({ error: "Could not check the wallet's creation." });
   }
 });
@@ -201,12 +202,12 @@ app.post("/api/smart-wallet/relay/:token", async (req, res) => {
         .update({ smart_wallet_tx_hash: sent.hash, smart_wallet_ledger: done.ledger })
         .eq("id", userId)
         .eq("smart_wallet_address", checked.contractId);
-      if (birthError) console.warn("Could not store wallet birth (run schema_smart_wallet.sql):", birthError.message);
+      if (birthError) logger.warn("Could not store wallet birth (run schema_smart_wallet.sql):", birthError.message);
     }
-    console.log(`[SMART-WALLET] sponsored ${checked.kind} for user ${userId}: ${sent.hash}`);
+    logger.info(`[SMART-WALLET] sponsored ${checked.kind} for user ${userId}: ${sent.hash}`);
     res.json({ success: true, data: { hash: sent.hash, status: "SUCCESS", ledger: done.ledger } });
   } catch (err) {
-    console.error("[SMART-WALLET] relay failed:", err.message);
+    logger.error("[SMART-WALLET] relay failed:", err.message);
     fail(res, 500, "Could not submit the wallet transaction.", "RELAY_ERROR");
   }
 });

@@ -5,11 +5,17 @@ import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { requestContext } from "./http/requestContext.js";
+import { accessLog, logger } from "./http/logger.js";
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// First, so every later step (and its logs) carries the request id.
+app.use(requestContext);
+app.use(accessLog);
 
 // Behind Render (and the Netlify /api proxy) the client IP arrives in
 // X-Forwarded-For. Set TRUST_PROXY to the number of proxy hops (e.g. 1 on
@@ -44,7 +50,8 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     // X-Client-*: sent by smart-account-kit's relayer client
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Supabase-Auth", "X-Client-Name", "X-Client-Version"]
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Supabase-Auth", "X-Client-Name", "X-Client-Version"],
+    exposedHeaders: ["X-Request-Id"]
   })
 );
 
@@ -105,7 +112,10 @@ const sessionAuthLimiter = rateLimit({
 app.use("/api/auth/", sessionAuthLimiter);
 app.use("/api/vault/", sessionAuthLimiter);
 
-app.use(express.json());
+// Larger bodies only where a route accepts them; everything else stays small.
+app.use("/api/statements/email", express.json({ limit: "8mb" }));
+app.patch(/^\/api\/users\/(me|profile)$/, express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "100kb" }));
 app.use(cookieParser());
 
 // Configures Horizon and Soroban RPC clients
@@ -122,9 +132,9 @@ if (process.env.RELAYER_SECRET_KEY) {
   try {
     const cleanSecret = process.env.RELAYER_SECRET_KEY.replace(/['"]/g, "").trim();
     relayerKeypair = StellarSdk.Keypair.fromSecret(cleanSecret);
-    console.log(`Relayer initialized with address: ${relayerKeypair.publicKey()}`);
+    logger.info(`Relayer initialized with address: ${relayerKeypair.publicKey()}`);
   } catch (err) {
-    console.error("Invalid RELAYER_SECRET_KEY configured:", err.message);
+    logger.error("Invalid RELAYER_SECRET_KEY configured:", err.message);
   }
 }
 
@@ -134,9 +144,9 @@ if (process.env.GATEWAY_SECRET_KEY) {
   try {
     const cleanSecret = process.env.GATEWAY_SECRET_KEY.replace(/['"]/g, "").trim();
     gatewayKeypair = StellarSdk.Keypair.fromSecret(cleanSecret);
-    console.log(`Gateway initialized with address: ${gatewayKeypair.publicKey()}`);
+    logger.info(`Gateway initialized with address: ${gatewayKeypair.publicKey()}`);
   } catch (err) {
-    console.error("Invalid GATEWAY_SECRET_KEY configured:", err.message);
+    logger.error("Invalid GATEWAY_SECRET_KEY configured:", err.message);
   }
 }
 
@@ -149,7 +159,7 @@ if (!supabaseUrl || !supabaseServiceKey) {
   throw new Error("Critical security configuration error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be configured in environment.");
 }
 if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.warn("Security notice: SUPABASE_SERVICE_ROLE_KEY is not set; falling back to SUPABASE_ANON_KEY. Tables must not be readable by the public anon key.");
+  logger.warn("Security notice: SUPABASE_SERVICE_ROLE_KEY is not set; falling back to SUPABASE_ANON_KEY. Tables must not be readable by the public anon key.");
 }
 
 const DB_POOL_MAX_SOCKETS = parseInt(process.env.DB_POOL_MAX_SOCKETS || "50", 10);
@@ -194,7 +204,7 @@ app.get("/api/health/db", async (req, res) => {
     const { count, error } = await supabase.from("users").select("*", { count: "exact", head: true });
     const latencyMs = Date.now() - startTime;
     if (error) {
-      console.error("Database health check failed:", error.message);
+      logger.error("Database health check failed:", error.message);
       return res.status(500).json({ status: "error", error: "Database unavailable.", latencyMs, pool: dbPoolConfig });
     }
     res.json({
@@ -204,7 +214,7 @@ app.get("/api/health/db", async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (err) {
-    console.error("Database health check failed:", err.message);
+    logger.error("Database health check failed:", err.message);
     res.status(500).json({ status: "error", error: "Database unavailable.", pool: dbPoolConfig });
   }
 });

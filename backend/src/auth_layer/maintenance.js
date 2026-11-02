@@ -1,3 +1,5 @@
+import { logger } from "../http/logger.js";
+
 // Periodic cleanup for the auth layer: unused WebAuthn challenges past their
 // expiry, and refresh-token rows past theirs. Consumed refresh tokens are kept
 // until they expire, because a reused consumed token is how theft is detected.
@@ -16,10 +18,10 @@ export function startAuthMaintenance(store, { now = () => Date.now(), intervalMs
     try {
       const removed = await purgeExpired(store, now());
       if (removed.challenges || removed.sessions) {
-        console.log(`[AUTH-MAINTENANCE] Purged ${removed.challenges} expired challenges, ${removed.sessions} expired sessions.`);
+        logger.info(`[AUTH-MAINTENANCE] Purged ${removed.challenges} expired challenges, ${removed.sessions} expired sessions.`);
       }
     } catch (err) {
-      console.error(`[AUTH-MAINTENANCE] Cleanup failed: ${err.message}`);
+      logger.error(`[AUTH-MAINTENANCE] Cleanup failed: ${err.message}`);
     }
   };
   void run();

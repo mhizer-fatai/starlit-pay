@@ -1,6 +1,7 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { app, rpc, NETWORK_PASSPHRASE } from "./config.js";
 import { createComplianceChecker } from "./compliance.js";
+import { logger } from "./http/logger.js";
 
 const ASP_CONTRACT_ID = process.env.ASP_CONTRACT_ID || null;
 
@@ -60,7 +61,7 @@ app.get("/api/compliance/check/:address", async (req, res) => {
       aspContract: ASP_CONTRACT_ID || "local-compliance-filter"
     });
   } catch (err) {
-    console.error("Compliance endpoint error:", err.message);
+    logger.error("Compliance endpoint error:", err.message);
     res.status(500).json({ error: "Failed to evaluate compliance status." });
   }
 });

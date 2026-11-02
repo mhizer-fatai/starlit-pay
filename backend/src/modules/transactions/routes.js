@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { asyncHandler, errorMiddleware } from "../../http/errors.js";
+import { asyncHandler } from "../../http/errors.js";
 
 export function createTransactionsRouter({ service, requireAuth }) {
   const router = Router();
@@ -20,6 +20,5 @@ export function createTransactionsRouter({ service, requireAuth }) {
     })
   );
 
-  router.use("/api/transactions", errorMiddleware);
   return router;
 }

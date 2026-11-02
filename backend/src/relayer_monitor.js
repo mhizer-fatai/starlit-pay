@@ -1,4 +1,5 @@
 import { horizon, relayerKeypair } from "./config.js";
+import { logger } from "./http/logger.js";
 
 // Relayer Gas Monitoring Configuration Defaults
 const DEFAULT_WARN_THRESHOLD_XLM = 50; // Warn if relayer balance drops below 50 XLM
@@ -64,9 +65,9 @@ async function dispatchWebhookAlert(level, balanceXlm, address) {
     });
 
     state.lastAlertSentAt = now;
-    console.log(`[RELAYER-ALERT] Webhook alert successfully dispatched to ${ALERT_WEBHOOK_URL}`);
+    logger.info(`[RELAYER-ALERT] Webhook alert successfully dispatched to ${ALERT_WEBHOOK_URL}`);
   } catch (err) {
-    console.error(`[RELAYER-ALERT] Failed to send webhook alert: ${err.message}`);
+    logger.error(`[RELAYER-ALERT] Failed to send webhook alert: ${err.message}`);
   }
 }
 
@@ -103,21 +104,21 @@ export async function performRelayerGasCheck() {
     if (balance < CRITICAL_THRESHOLD_XLM) {
       checkStatus = "CRITICAL";
       state.status = "CRITICAL";
-      console.error(
+      logger.error(
         `[RELAYER-ALERT] [CRITICAL] [${timestamp}] Relayer gas reserve CRITICALLY LOW! Address: ${address} | Balance: ${balance} XLM | Critical Threshold: ${CRITICAL_THRESHOLD_XLM} XLM. Sponsored transactions at risk of failing.`
       );
       dispatchWebhookAlert("CRITICAL", balance, address).catch(() => {});
     } else if (balance < WARN_THRESHOLD_XLM) {
       checkStatus = "WARNING";
       state.status = "WARNING";
-      console.warn(
+      logger.warn(
         `[RELAYER-ALERT] [WARNING] [${timestamp}] Relayer gas reserve below warning threshold. Address: ${address} | Balance: ${balance} XLM | Warn Threshold: ${WARN_THRESHOLD_XLM} XLM. Top up recommended.`
       );
       dispatchWebhookAlert("WARNING", balance, address).catch(() => {});
     } else {
       checkStatus = "HEALTHY";
       state.status = "HEALTHY";
-      console.log(
+      logger.info(
         `[RELAYER-MONITOR] [${timestamp}] Status: HEALTHY | Relayer: ${address.slice(0, 6)}...${address.slice(-4)} | Balance: ${balance.toFixed(4)} XLM | Warn: ${WARN_THRESHOLD_XLM} XLM | Critical: ${CRITICAL_THRESHOLD_XLM} XLM | Latency: ${responseTimeMs}ms | Checks: ${state.checkCount}`
       );
     }
@@ -142,7 +143,7 @@ export async function performRelayerGasCheck() {
     state.lastError = err.message;
     state.lastCheckedAt = timestamp;
 
-    console.error(
+    logger.error(
       `[RELAYER-MONITOR] [ERROR] [${timestamp}] Balance check failed for relayer ${address}: ${err.message} (Consecutive failures: ${state.consecutiveErrors})`
     );
 
@@ -166,31 +167,31 @@ export async function performRelayerGasCheck() {
 // Starts the automated background relayer gas monitoring daemon
 export function startRelayerMonitor() {
   if (state.isRunning) {
-    console.log("[RELAYER-MONITOR] Monitor daemon is already running.");
+    logger.info("[RELAYER-MONITOR] Monitor daemon is already running.");
     return;
   }
 
   if (!relayerKeypair) {
     state.status = "NOT_INITIALIZED";
-    console.log("[RELAYER-MONITOR] Relayer keypair not configured. Monitor daemon skipped.");
+    logger.info("[RELAYER-MONITOR] Relayer keypair not configured. Monitor daemon skipped.");
     return;
   }
 
   state.isRunning = true;
   state.startedAt = new Date().toISOString();
-  console.log(
+  logger.info(
     `[RELAYER-MONITOR] Starting automated background daemon. Interval: ${MONITOR_INTERVAL_MS / 1000}s | Warn Threshold: ${WARN_THRESHOLD_XLM} XLM | Critical Threshold: ${CRITICAL_THRESHOLD_XLM} XLM`
   );
 
   // Run immediate first check on startup
   performRelayerGasCheck().catch((e) => {
-    console.error("[RELAYER-MONITOR] Startup check error:", e.message);
+    logger.error("[RELAYER-MONITOR] Startup check error:", e.message);
   });
 
   // Run periodic automated checks
   monitorIntervalId = setInterval(() => {
     performRelayerGasCheck().catch((e) => {
-      console.error("[RELAYER-MONITOR] Periodic check error:", e.message);
+      logger.error("[RELAYER-MONITOR] Periodic check error:", e.message);
     });
   }, MONITOR_INTERVAL_MS);
 
@@ -208,7 +209,7 @@ export function stopRelayerMonitor() {
   }
   state.isRunning = false;
   state.status = "STOPPED";
-  console.log("[RELAYER-MONITOR] Background daemon stopped.");
+  logger.info("[RELAYER-MONITOR] Background daemon stopped.");
 }
 
 // Returns full telemetry state for API endpoints and observability dashboards

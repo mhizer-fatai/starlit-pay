@@ -1,5 +1,6 @@
 import { app } from "./config.js";
 import { fetchCoinGeckoPrices, fetchFirstAvailable, fetchStellarDexPrices } from "./price_sources.js";
+import { logger } from "./http/logger.js";
 
 // Live crypto prices proxied through the backend so browsers never touch
 // upstream APIs directly (avoids CORS issues and per-client rate limiting).
@@ -25,7 +26,7 @@ async function refreshPrices() {
       const prices = await fetchFirstAvailable(SOURCES);
       cache = { ...prices, updatedAt: Date.now(), stale: false };
     } catch (err) {
-      console.warn("Price refresh failed, serving cache:", err.message);
+      logger.warn("Price refresh failed, serving cache:", err.message);
       cache = { ...cache, stale: true };
     } finally {
       refreshPromise = null;
@@ -48,7 +49,7 @@ app.get("/api/prices", async (_req, res) => {
       source: cache.source,
     });
   } catch (error) {
-    console.error("Prices API error:", error.message);
+    logger.error("Prices API error:", error.message);
     res.status(200).json({ ...FALLBACK, updatedAt: 0, stale: true, source: "fallback" });
   }
 });

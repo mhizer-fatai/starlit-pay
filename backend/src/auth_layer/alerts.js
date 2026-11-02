@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { logger } from "../http/logger.js";
 
 // Security emails to the account owner. Best effort: a failed or unconfigured
 // mailer never blocks the action that triggered it. Uses the same SMTP_* env
@@ -47,7 +48,7 @@ export function createEmailAlerts(env = process.env) {
       try {
         await transport.sendMail({ from: env.SMTP_FROM || SMTP_USER, to: user.email, subject, text });
       } catch (err) {
-        console.error(`[AUTH-ALERTS] Could not send ${event} email: ${err.message}`);
+        logger.error(`[AUTH-ALERTS] Could not send ${event} email: ${err.message}`);
       }
     },
   };
