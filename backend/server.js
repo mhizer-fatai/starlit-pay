@@ -14,7 +14,7 @@ import "./src/modules/transactions/index.js";
 import "./src/pool_root.js";
 import "./src/smart_wallet.js";
 import { startIndexer } from "./src/indexer.js";
-import { startGateway } from "./src/gateway.js";
+import { startGateway } from "./src/modules/gateway/index.js";
 import { startRelayerMonitor } from "./src/relayer_monitor.js";
 import { startTtlKeeper } from "./src/ttl_keeper.js";
 import { errorMiddleware, notFound } from "./src/http/errors.js";

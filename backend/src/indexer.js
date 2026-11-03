@@ -1,147 +1,46 @@
-import fs from "fs";
-import path from "path";
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { rpc, horizon, supabase } from "./config.js";
+import { rpc, supabase } from "./config.js";
 import { logger } from "./http/logger.js";
+import { createDaemonState } from "./daemon_state.js";
+import { createEventScanner } from "./modules/indexer/scanner.js";
 
-// Asynchronous Background Event Indexer
-const STATE_FILE = path.join(process.cwd(), "indexer_state.json");
-let lastIndexedLedger = 3300000;
+// Background event indexer: records the Merkle root each pool deposit,
+// transfer or withdrawal produced on the notes it created.
 
-try {
-  if (fs.existsSync(STATE_FILE)) {
-    const stateData = JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
-    if (stateData && stateData.lastIndexedLedger) {
-      lastIndexedLedger = stateData.lastIndexedLedger;
-    }
-  }
-} catch (err) {
-  logger.error("Failed to read indexer state:", err.message);
+const POLL_INTERVAL_MS = 15_000;
+const hex = (value) => Buffer.from(value).toString("hex");
+
+async function setRoot(commitment, root, ledger) {
+  const { error } = await supabase.from("shielded_notes").update({ root, ledger }).eq("commitment", commitment);
+  // Thrown so the scan stops here and retries, instead of losing the root.
+  if (error) throw new Error(`Indexer DB update failed for ${commitment}: ${error.message}`);
 }
 
-let isIndexing = false;
-async function runIndexer() {
-  if (isIndexing) return;
-  isIndexing = true;
-
+export async function applyPoolEvent(e) {
+  let kind, root, values;
   try {
-    const activeContractId = process.env.SHIELDED_POOL_CONTRACT_ID;
-    if (!activeContractId) {
-      isIndexing = false;
-      return;
-    }
-
-    const latestLedgerRes = await horizon.ledgers().limit(1).order("desc").call();
-    const latestLedger = latestLedgerRes.records[0].sequence;
-
-    if (lastIndexedLedger >= latestLedger) {
-      isIndexing = false;
-      return;
-    }
-
-    let currentStart = lastIndexedLedger;
-    const chunkSize = 10000;
-    let foundEvents = [];
-
-    while (currentStart <= latestLedger) {
-      const currentEnd = Math.min(latestLedger, currentStart + chunkSize);
-      const filter = {
-        startLedger: currentStart,
-        endLedger: currentEnd + 1,
-        filters: [
-          {
-            type: "contract",
-            contractIds: [activeContractId]
-          }
-        ],
-        limit: 1000
-      };
-
-      try {
-        const res = await rpc.getEvents(filter);
-        if (res.events && res.events.length > 0) {
-          foundEvents.push(...res.events);
-        }
-        currentStart = currentEnd + 1;
-      } catch (err) {
-        logger.error(`Indexer range query failed [${currentStart}, ${currentEnd}]:`, err.message);
-        break;
-      }
-    }
-
-    for (const e of foundEvents) {
-      try {
-        const topic0 = StellarSdk.scValToNative(e.topic[0]).toString();
-        if (topic0 === "deposit") {
-          const root = Buffer.from(StellarSdk.scValToNative(e.topic[1])).toString("hex");
-          const valArray = StellarSdk.scValToNative(e.value);
-          const commitment = Buffer.from(valArray[0]).toString("hex");
-
-          const { error } = await supabase
-            .from("shielded_notes")
-            .update({ root, ledger: e.ledger })
-            .eq("commitment", commitment);
-
-          if (error) {
-            logger.error(`Indexer DB update failed for deposit commitment ${commitment}:`, error.message);
-          } else {
-            logger.info(`Indexer successfully verified deposit commitment ${commitment} at root ${root} (ledger ${e.ledger})`);
-          }
-        } else if (topic0 === "transfer") {
-          const root = Buffer.from(StellarSdk.scValToNative(e.topic[1])).toString("hex");
-          const valArray = StellarSdk.scValToNative(e.value);
-          const commitment1 = Buffer.from(valArray[2]).toString("hex");
-          const commitment2 = Buffer.from(valArray[4]).toString("hex");
-
-          const { error: error1 } = await supabase
-            .from("shielded_notes")
-            .update({ root, ledger: e.ledger })
-            .eq("commitment", commitment1);
-
-          const { error: error2 } = await supabase
-            .from("shielded_notes")
-            .update({ root, ledger: e.ledger })
-            .eq("commitment", commitment2);
-
-          if (error1) logger.error(`Indexer DB update failed for transfer commitment 1 ${commitment1}:`, error1.message);
-          if (error2) logger.error(`Indexer DB update failed for transfer commitment 2 ${commitment2}:`, error2.message);
-
-          if (!error1 && !error2) {
-            logger.info(`Indexer successfully verified transfer commitments [${commitment1}, ${commitment2}] at root ${root} (ledger ${e.ledger})`);
-          }
-        } else if (topic0 === "withdraw") {
-          const root = Buffer.from(StellarSdk.scValToNative(e.topic[1])).toString("hex");
-          const valArray = StellarSdk.scValToNative(e.value);
-          const changeCommitment = Buffer.from(valArray[2]).toString("hex");
-
-          const { error } = await supabase
-            .from("shielded_notes")
-            .update({ root, ledger: e.ledger })
-            .eq("commitment", changeCommitment);
-
-          if (error) {
-            logger.error(`Indexer DB update failed for withdraw change commitment ${changeCommitment}:`, error.message);
-          } else {
-            logger.info(`Indexer successfully verified withdraw change commitment ${changeCommitment} at root ${root} (ledger ${e.ledger})`);
-          }
-        }
-      } catch (parseErr) {
-        logger.error("Indexer failed to parse event:", parseErr.message);
-      }
-    }
-
-    lastIndexedLedger = Math.max(1, latestLedger - 3);
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ lastIndexedLedger }), "utf-8");
-
+    kind = StellarSdk.scValToNative(e.topic[0]).toString();
+    if (!["deposit", "transfer", "withdraw"].includes(kind)) return;
+    root = hex(StellarSdk.scValToNative(e.topic[1]));
+    values = StellarSdk.scValToNative(e.value);
   } catch (err) {
-    logger.error("Indexer main loop failed:", err.message);
-  } finally {
-    isIndexing = false;
+    logger.error("Indexer failed to parse event:", err);
+    return;
   }
+
+  const commitments =
+    kind === "deposit" ? [hex(values[0])] : kind === "transfer" ? [hex(values[2]), hex(values[4])] : [hex(values[2])];
+  for (const commitment of commitments) await setRoot(commitment, root, e.ledger);
+  logger.info(`Indexer recorded ${kind} at root ${root} (ledger ${e.ledger})`);
 }
 
-// Starts the polling indexer interval automatically when this script is imported
 export function startIndexer() {
-  logger.info("Soroban Event Indexer started.");
-  setInterval(runIndexer, 15000);
+  const contractId = process.env.SHIELDED_POOL_CONTRACT_ID;
+  if (!contractId) {
+    logger.info("Indexer skipped (SHIELDED_POOL_CONTRACT_ID not set).");
+    return;
+  }
+  logger.info("Soroban event indexer started.");
+  const scan = createEventScanner({ rpc, contractId, state: createDaemonState(supabase), applyEvent: applyPoolEvent, logger });
+  setInterval(scan, POLL_INTERVAL_MS);
 }
