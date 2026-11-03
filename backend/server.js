@@ -3,10 +3,12 @@ dns.setDefaultResultOrder("ipv4first");
 
 import { app, PORT } from "./src/config.js";
 import "./src/auth.js";
-import "./src/relayer.js";
+import "./src/modules/relayer/index.js";
 import "./src/asp_service.js";
 import "./src/modules/payment_links/index.js";
-import "./src/notes.js";
+import "./src/modules/notes/index.js";
+import "./src/modules/faucet/index.js";
+import "./src/modules/stats/index.js";
 import "./src/prices.js";
 import "./src/settings.js";
 import "./src/statements.js";

@@ -235,7 +235,7 @@ export const faucetStatus = (viewingKey: string) =>
   req<{ canClaim: boolean; remainingMs: number; nextClaimAt?: string }>(
     `/api/faucet/status/${encodeURIComponent(viewingKey)}`,
   );
-export const faucetFund = (body: { viewingKey: string; depositMemo?: string; timestamp?: string; signature?: string; captchaToken?: string; asset?: string }) =>
+export const faucetFund = (body: { viewingKey: string; depositMemo?: string; timestamp?: string; signature?: string; captchaToken?: string }) =>
   req<{ success: boolean; hash?: string; amountXlm?: number; amountUsdc?: number }>(
     "/api/faucet/fund",
     { method: "POST", body: JSON.stringify(body) },

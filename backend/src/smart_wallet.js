@@ -4,6 +4,7 @@ import { app, rpc, NETWORK_PASSPHRASE, relayerKeypair, supabase } from "./config
 import { requireAuth } from "./auth.js";
 import { checkRelayRequest, createdContractIds, rawP256FromCose, RelayRuleError } from "./smart_wallet_rules.js";
 import { logger } from "./http/logger.js";
+import { withRelayerAccount } from "./relayer_account.js";
 
 // Public smart wallet: an OpenZeppelin smart account per user, controlled by a
 // passkey that Stellar verifies on-chain (secp256r1). The frontend uses
@@ -171,24 +172,30 @@ app.post("/api/smart-wallet/relay/:token", async (req, res) => {
       throw err;
     }
 
-    const account = await rpc.getAccount(relayerKeypair.publicKey());
-    let tx = new StellarSdk.TransactionBuilder(account, { fee: StellarSdk.BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE })
-      .addOperation(StellarSdk.Operation.invokeHostFunction({ func: checked.func, auth: checked.auth }))
-      .setTimeout(60)
-      .build();
-    tx = await rpc.prepareTransaction(tx);
+    // The relayer account is shared: wait our turn (see relayer_account.js).
+    const outcome = await withRelayerAccount(async () => {
+      const account = await rpc.getAccount(relayerKeypair.publicKey());
+      let tx = new StellarSdk.TransactionBuilder(account, { fee: StellarSdk.BASE_FEE, networkPassphrase: NETWORK_PASSPHRASE })
+        .addOperation(StellarSdk.Operation.invokeHostFunction({ func: checked.func, auth: checked.auth }))
+        .setTimeout(60)
+        .build();
+      tx = await rpc.prepareTransaction(tx);
 
-    // The submitted authorization must be exactly what was checked.
-    const preparedAuth = tx.operations[0].auth.map((a) => a.toXDR("base64")).sort().join();
-    const checkedAuth = checked.auth.map((a) => a.toXDR("base64")).sort().join();
-    if (preparedAuth !== checkedAuth) return fail(res, 403, "Authorization changed during preparation.", "NOT_SPONSORED");
-    if (Number(tx.fee) > MAX_FEE_STROOPS) return fail(res, 403, "This transaction is too expensive to sponsor.", "FEE_TOO_HIGH");
+      // The submitted authorization must be exactly what was checked.
+      const preparedAuth = tx.operations[0].auth.map((a) => a.toXDR("base64")).sort().join();
+      const checkedAuth = checked.auth.map((a) => a.toXDR("base64")).sort().join();
+      if (preparedAuth !== checkedAuth) return { fail: [403, "Authorization changed during preparation.", "NOT_SPONSORED"] };
+      if (Number(tx.fee) > MAX_FEE_STROOPS) return { fail: [403, "This transaction is too expensive to sponsor.", "FEE_TOO_HIGH"] };
 
-    tx.sign(relayerKeypair);
-    const sent = await rpc.sendTransaction(tx);
-    if (sent.status === "ERROR") return fail(res, 502, "The network rejected the transaction.", "SUBMIT_FAILED");
-    const done = await waitForTx(sent.hash);
-    if (done.status !== "SUCCESS") return fail(res, 502, `Transaction ${done.status.toLowerCase()}.`, "TX_FAILED");
+      tx.sign(relayerKeypair);
+      const sent = await rpc.sendTransaction(tx);
+      if (sent.status === "ERROR") return { fail: [502, "The network rejected the transaction.", "SUBMIT_FAILED"] };
+      const done = await waitForTx(sent.hash);
+      if (done.status !== "SUCCESS") return { fail: [502, `Transaction ${done.status.toLowerCase()}.`, "TX_FAILED"] };
+      return { sent, done };
+    });
+    if (outcome.fail) return fail(res, ...outcome.fail);
+    const { sent, done } = outcome;
 
     if (checked.kind === "deploy") {
       await supabase

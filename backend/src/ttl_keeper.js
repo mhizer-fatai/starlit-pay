@@ -1,6 +1,7 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { rpc, NETWORK_PASSPHRASE, relayerKeypair } from "./config.js";
 import { logger } from "./http/logger.js";
+import { waitForTransaction, withRelayerAccount } from "./relayer_account.js";
 
 // Keeps the shielded pool contract instance from being archived by calling its
 // public bump() entry point. The contract only extends the TTL once it drops
@@ -15,30 +16,34 @@ export async function bumpPoolTtl() {
   if (!relayerKeypair || !contractId) return;
 
   try {
-    const account = await rpc.getAccount(relayerKeypair.publicKey());
-    const contract = new StellarSdk.Contract(contractId);
+    // The relayer account is shared: wait our turn (see relayer_account.js).
+    await withRelayerAccount(async () => {
+      const account = await rpc.getAccount(relayerKeypair.publicKey());
+      const contract = new StellarSdk.Contract(contractId);
 
-    let tx = new StellarSdk.TransactionBuilder(account, {
-      fee: StellarSdk.BASE_FEE,
-      networkPassphrase: NETWORK_PASSPHRASE,
-    })
-      .addOperation(contract.call("bump"))
-      .setTimeout(180)
-      .build();
+      let tx = new StellarSdk.TransactionBuilder(account, {
+        fee: StellarSdk.BASE_FEE,
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(contract.call("bump"))
+        .setTimeout(180)
+        .build();
 
-    const simulation = await rpc.simulateTransaction(tx);
-    if (StellarSdk.rpc.Api.isSimulationError(simulation)) {
-      throw new Error(`Simulation failed: ${simulation.error}`);
-    }
+      const simulation = await rpc.simulateTransaction(tx);
+      if (StellarSdk.rpc.Api.isSimulationError(simulation)) {
+        throw new Error(`Simulation failed: ${simulation.error}`);
+      }
 
-    tx = StellarSdk.rpc.assembleTransaction(tx, simulation).build();
-    tx.sign(relayerKeypair);
+      tx = StellarSdk.rpc.assembleTransaction(tx, simulation).build();
+      tx.sign(relayerKeypair);
 
-    const response = await rpc.sendTransaction(tx);
-    if (response.status === "ERROR") {
-      throw new Error(`Tx submission failed: ${response.errorResult}`);
-    }
-    logger.info(`[TTL-KEEPER] Pool TTL bump submitted: ${response.hash}`);
+      const response = await rpc.sendTransaction(tx);
+      if (response.status === "ERROR") {
+        throw new Error(`Tx submission failed: ${response.errorResult}`);
+      }
+      const result = await waitForTransaction(rpc, response.hash);
+      logger.info(`[TTL-KEEPER] Pool TTL bump ${result.status.toLowerCase()}: ${response.hash}`);
+    });
   } catch (err) {
     logger.error(`[TTL-KEEPER] Pool TTL bump failed: ${err.message}`);
   }

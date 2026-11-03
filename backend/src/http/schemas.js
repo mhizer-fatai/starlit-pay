@@ -3,15 +3,6 @@ import { contractId, hex32, hexBytes, positiveAmount, stellarAddress, txHash } f
 
 // Request bodies for the routes that move money or write notes.
 
-export const claimRequest = z.object({
-  proof: hexBytes,
-  nullifier: hex32,
-  recipient: stellarAddress,
-  token: contractId,
-  amount: positiveAmount,
-  root: hex32,
-});
-
 export const transferRequest = z.object({
   proof: hexBytes,
   nullifier_1: hex32,
@@ -48,3 +39,5 @@ export const spendNoteRequest = z.object({
 });
 
 export const depositRequest = z.object({ txHash });
+
+export const faucetFundRequest = z.object({ captchaToken: z.string().max(4096).optional() });

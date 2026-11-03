@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { poolAssetCode, TOKEN_CONTRACTS as TOKENS } from "../../tokens.js";
 
 // Turns a payment to the gateway address into a private note in the pool.
 //
@@ -8,10 +9,6 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 // user changing keys, can't credit it again. A note's commitment depends on the
 // recipient's current keys, so it could never serve as that record.
 
-const TOKENS = {
-  XLM: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-  USDC: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-};
 const DUST = 0.0001;
 export const MAX_ATTEMPTS = 5;
 // RPC keeps about 7 days of transactions: older outcomes can't be looked up.
@@ -63,7 +60,7 @@ export function createDepositProcessor({
   async function processPayment({ txRecord, opIndex, op, user, source, memo }) {
     const key = { txHash: txRecord.hash, opIndex };
     const amount = parseFloat(op.amount);
-    const asset = op.asset.isNative() ? "XLM" : "USDC";
+    const asset = poolAssetCode(op.asset);
 
     const noteSecret = crypto.createHmac("sha256", gatewaySecret).update(txRecord.hash).digest("hex");
     const commitment = await calculateCommitment(amount, user.public_encryption_key, TOKENS[asset], noteSecret);
@@ -127,7 +124,10 @@ export function createDepositProcessor({
     const tx = envelope instanceof StellarSdk.FeeBumpTransaction ? envelope.innerTransaction : envelope;
     const payments = tx.operations
       .map((op, opIndex) => ({ op, opIndex }))
-      .filter(({ op }) => op.type === "payment" && op.destination === gatewayAddress && parseFloat(op.amount) > DUST);
+      .filter(({ op }) => op.type === "payment" && op.destination === gatewayAddress && parseFloat(op.amount) > DUST)
+      // Only the pool's own assets: a look-alike "USDC" from another issuer
+      // would otherwise be credited as real USDC.
+      .filter(({ op }) => poolAssetCode(op.asset));
     if (!payments.length) return { processed: false, reason: "no_payment" };
 
     const user = await repository.findUserByMemo(memo);

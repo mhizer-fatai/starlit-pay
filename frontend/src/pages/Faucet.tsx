@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Turnstile, type TurnstileInstance } from "@marsidev/react-turnstile";
-import { Check, ChevronDown, Droplets } from "lucide-react";
+import { Droplets } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
@@ -13,7 +13,8 @@ import { faucetFund, faucetStatus } from "@/lib/backend";
 import { loadPrivateBalances } from "@/lib/wallet";
 import { useSidebar } from "@/lib/sidebar";
 
-const COOLDOWN_SECONDS = 4 * 60 * 60;
+const COOLDOWN_SECONDS = 24 * 60 * 60;
+const DRIP_LABEL = "10 XLM + 20 USDC";
 
 function formatCooldown(totalSec: number): string {
   const s = Math.max(0, Math.ceil(totalSec));
@@ -28,8 +29,6 @@ function FaucetPage() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [checking, setChecking] = useState(true);
   const [me, setMe] = useState<SessionUser | null>(null);
-  const [asset, setAsset] = useState("USDC");
-  const [assetOpen, setAssetOpen] = useState(false);
   const [captchaSolved, setCaptchaSolved] = useState(false);
   const [captchaToken, setCaptchaToken] = useState("");
   const turnstileRef = useRef<TurnstileInstance | undefined>(undefined);
@@ -37,7 +36,6 @@ function FaucetPage() {
   const [cooldownSeconds, setCooldownSeconds] = useState(0);
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState("");
-  const assetRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     document.title = "Faucet — Starlit Pay";
@@ -50,7 +48,7 @@ function FaucetPage() {
       }
       setMe(user);
       setChecking(false);
-      // Seed the 4h cooldown from this browser (backup) then sync with backend.
+      // Seed the 24h cooldown from this browser (backup) then sync with backend.
       try {
         const lastClaim = parseInt(localStorage.getItem(`starlit_faucet_last_claim_${user.id}`) || "0", 10);
         const elapsed = Math.floor(Date.now() / 1000) - lastClaim;
@@ -94,16 +92,6 @@ function FaucetPage() {
     }
   }
 
-  useEffect(() => {
-    function onDocClick(event: MouseEvent) {
-      if (assetRef.current && !assetRef.current.contains(event.target as Node)) {
-        setAssetOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
   async function handleClaim() {
     setError("");
     setStatus("");
@@ -116,7 +104,7 @@ function FaucetPage() {
       return;
     }
     if (claiming || cooldownSeconds > 0) return;
-    const claimLabel = asset === "XLM" ? "100 XLM" : "50 USDC";
+    const claimLabel = DRIP_LABEL;
     setClaiming(true);
     try {
       // Snapshot balances so we can detect the credit landing (old behavior).
@@ -129,7 +117,6 @@ function FaucetPage() {
         viewingKey: me.public_encryption_key,
         depositMemo: me.deposit_memo || undefined,
         captchaToken,
-        asset,
       });
 
       // Poll for the private-balance credit (gateway shields async, ~2s cadence).
@@ -203,42 +190,9 @@ function FaucetPage() {
               </p>
 
               <div className="faucet-form">
-                <label className="send-label">
-                  Select Asset
-                  <div className="send-select" ref={assetRef}>
-                    <button
-                      type="button"
-                      className="send-select-trigger"
-                      onClick={() => setAssetOpen((value) => !value)}
-                      aria-haspopup="listbox"
-                      aria-expanded={assetOpen}
-                    >
-                      <span>{asset}</span>
-                      <ChevronDown className={assetOpen ? "rotate-180" : ""} />
-                    </button>
-                    {assetOpen && (
-                      <ul className="send-select-menu" role="listbox">
-                        {["USDC", "XLM"].map((option) => (
-                          <li key={option}>
-                            <button
-                              type="button"
-                              role="option"
-                              aria-selected={asset === option}
-                              className={asset === option ? "selected" : ""}
-                              onClick={() => {
-                                setAsset(option);
-                                setAssetOpen(false);
-                              }}
-                            >
-                              {option}
-                              {asset === option && <Check className="size-4" />}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </label>
+                <p className="faucet-desc">
+                  Each claim sends <strong>{DRIP_LABEL}</strong> to your private balance, once every 24 hours.
+                </p>
 
                 <div className="captcha-wrap">
                   <label className="send-label">Captcha Challenge</label>

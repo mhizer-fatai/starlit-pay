@@ -4,6 +4,7 @@ import { calculateCommitment, encryptNoteForUser } from "../../crypto.js";
 import { isAddressBlocked } from "../../asp_service.js";
 import { createDaemonState } from "../../daemon_state.js";
 import { logger } from "../../http/logger.js";
+import { USDC_ISSUER } from "../../tokens.js";
 import { createGatewayChain } from "./chain.js";
 import { createGatewayDaemon } from "./daemon.js";
 import { createGatewayRepository } from "./repository.js";
@@ -36,10 +37,8 @@ app.use(createGatewayRouter({ processor, chain: chain ?? { fetchTransaction: (ha
 
 async function ensureGatewayTrustlines() {
   const account = await horizon.loadAccount(gatewayKeypair.publicKey());
-  const usdcIssuers = [
-    "GA25KROVBCHI76V7PMMVOOZEOA4WDROCHMOJMXFWX2D4ZCEM7KEUZJM2", // Common Testnet USDC Issuer
-    "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN", // Official Circle Mainnet Issuer
-  ];
+  // The pool's USDC: payments in any other USDC are not credited.
+  const usdcIssuers = [USDC_ISSUER];
   for (const issuer of usdcIssuers) {
     if (account.balances.some((b) => b.asset_code === "USDC" && b.asset_issuer === issuer)) continue;
     logger.info(`Gateway: establishing trustline for USDC issuer ${issuer}...`);
