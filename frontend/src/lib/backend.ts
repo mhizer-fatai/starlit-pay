@@ -98,12 +98,14 @@ export interface AuthResponse {
 // token so a JWT is never issued before the PIN is verified.
 // Unlock mode (with identity_commitment): backend verifies the PIN-derived
 // commitment and only then returns { exists: true, user, token }.
-export const login = (email: string, identity_commitment?: string) =>
+export const login = (email: string, identity_commitment?: string, emailProof?: string | null) =>
   req<AuthResponse>("/api/auth/login", {
     method: "POST",
     body: JSON.stringify(
       identity_commitment ? { email, identity_commitment } : { email },
     ),
+    // The backend answers only the owner of the email (Google sign-in).
+    headers: emailProof ? { "X-Supabase-Auth": emailProof } : undefined,
   });
 
 export const register = (body: {
@@ -330,17 +332,6 @@ export const notifyGatewayDeposit = (txHash: string) =>
     body: JSON.stringify({ txHash }),
   });
 
-// Sends the generated statement file to the user's own inbox (server-side).
-export const emailStatement = (body: {
-  filename: string;
-  mime: string;
-  contentBase64: string;
-  subject?: string;
-}) =>
-  req<{ sent: boolean; to: string }>(
-    "/api/statements/email",
-    { method: "POST", body: JSON.stringify(body) },
-  );
 export const complianceCheck = (address: string) =>
   req<{ address: string; blocked: boolean; status: string }>(
     `/api/compliance/check/${encodeURIComponent(address)}`,

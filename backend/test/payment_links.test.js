@@ -169,7 +169,7 @@ describe("payment links", () => {
   });
 
   test("only the signed-in owner creates a link", async () => {
-    const body = { creator_id: "alice", amount: 5, commitment: "c2" };
+    const body = { creator_id: "alice", amount: 5, commitment: "ab".repeat(16) };
     assert.equal((await http.call("POST", "/api/payment-links", { body })).status, 401);
     assert.equal((await http.call("POST", "/api/payment-links", { body, as: "bob" })).status, 403);
     const res = await http.call("POST", "/api/payment-links", { body, as: "alice" });

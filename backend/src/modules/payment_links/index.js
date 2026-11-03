@@ -1,5 +1,5 @@
-import { app, supabase, rpc, relayerKeypair, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "../../config.js";
-import { requireAuth, sessionUser } from "../../auth.js";
+import { supabase, rpc, relayerKeypair, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "../../config.js";
+import { requireAuth, sessionUser } from "../../http/auth.js";
 import { createTransactionReader } from "./chain.js";
 import { createPaymentLinksRepository } from "./repository.js";
 import { createPaymentLinksService } from "./service.js";
@@ -12,4 +12,4 @@ const service = createPaymentLinksService({
   relayerAddress: relayerKeypair?.publicKey(),
   poolContract: process.env.SHIELDED_POOL_CONTRACT_ID,
 });
-app.use(createPaymentLinksRouter({ service, requireAuth, currentUser: sessionUser }));
+export const paymentLinksRouter = createPaymentLinksRouter({ service, requireAuth, currentUser: sessionUser });

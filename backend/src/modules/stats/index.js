@@ -1,6 +1,6 @@
 import { Router } from "express";
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { app, rpc, supabase, NETWORK_PASSPHRASE } from "../../config.js";
+import { rpc, supabase, NETWORK_PASSPHRASE } from "../../config.js";
 import { asyncHandler, HttpError } from "../../http/errors.js";
 import { logger } from "../../http/logger.js";
 import { TOKEN_CONTRACTS } from "../../tokens.js";
@@ -50,4 +50,4 @@ router.get(
     }
   })
 );
-app.use(router);
+export const statsRouter = router;

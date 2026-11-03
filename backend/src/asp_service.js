@@ -1,9 +1,9 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { app, rpc, NETWORK_PASSPHRASE } from "./config.js";
+import { rpc, NETWORK_PASSPHRASE } from "./config.js";
 import { createComplianceChecker } from "./compliance.js";
-import { logger } from "./http/logger.js";
 
 const ASP_CONTRACT_ID = process.env.ASP_CONTRACT_ID || null;
+export const aspContractId = ASP_CONTRACT_ID;
 
 // Known test/sanction addresses for local testing and simulation
 const DEFAULT_SANCTION_LIST = new Set([
@@ -41,27 +41,3 @@ export const isAddressBlocked = createComplianceChecker({
   sanctionList: DEFAULT_SANCTION_LIST,
 });
 
-/**
- * Public API endpoint to check if an address passes ASP compliance screening.
- * Used by frontend before generating proofs or initiating withdrawals.
- */
-app.get("/api/compliance/check/:address", async (req, res) => {
-  const { address } = req.params;
-
-  if (!address || !StellarSdk.StrKey.isValidEd25519PublicKey(address)) {
-    return res.status(400).json({ error: "Invalid Stellar public address format." });
-  }
-
-  try {
-    const blocked = await isAddressBlocked(address);
-    res.json({
-      address,
-      blocked,
-      status: blocked ? "BLOCKED" : "CLEAN",
-      aspContract: ASP_CONTRACT_ID || "local-compliance-filter"
-    });
-  } catch (err) {
-    logger.error("Compliance endpoint error:", err.message);
-    res.status(500).json({ error: "Failed to evaluate compliance status." });
-  }
-});

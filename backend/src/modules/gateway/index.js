@@ -1,5 +1,5 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { app, rpc, horizon, supabase, gatewayKeypair, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "../../config.js";
+import { rpc, horizon, supabase, gatewayKeypair, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "../../config.js";
 import { calculateCommitment, encryptNoteForUser } from "../../crypto.js";
 import { isAddressBlocked } from "../../asp_service.js";
 import { createDaemonState } from "../../daemon_state.js";
@@ -33,7 +33,7 @@ const processor = gatewayKeypair
       },
     };
 
-app.use(createGatewayRouter({ processor, chain: chain ?? { fetchTransaction: (hash) => horizon.transactions().transaction(hash).call() }, gatewayAddress: GATEWAY_ADDRESS, logger }));
+export const gatewayRouter = createGatewayRouter({ processor, chain: chain ?? { fetchTransaction: (hash) => horizon.transactions().transaction(hash).call() }, gatewayAddress: GATEWAY_ADDRESS, logger });
 
 async function ensureGatewayTrustlines() {
   const account = await horizon.loadAccount(gatewayKeypair.publicKey());

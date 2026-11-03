@@ -1,6 +1,6 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { app, rpc, supabase, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "../../config.js";
-import { requireAuth } from "../../auth.js";
+import { rpc, supabase, GATEWAY_ADDRESS, NETWORK_PASSPHRASE } from "../../config.js";
+import { requireAuth } from "../../http/auth.js";
 import { logger } from "../../http/logger.js";
 import { USDC_ISSUER } from "../../tokens.js";
 import { createFaucetRepository } from "./repository.js";
@@ -27,14 +27,12 @@ async function sendPayment({ memo, xlm, usdc }) {
 const production = process.env.NODE_ENV === "production";
 if (!process.env.TURNSTILE_SECRET_KEY) logger.info("Faucet captcha not enforced (TURNSTILE_SECRET_KEY not set).");
 
-app.use(
-  createFaucetRouter({
-    service: createFaucetService({
-      repository: createFaucetRepository(supabase),
-      sendPayment,
-      verifyCaptcha: createCaptchaVerifier({ secret: process.env.TURNSTILE_SECRET_KEY, production }),
-      logger,
-    }),
-    requireAuth,
-  })
-);
+export const faucetRouter = createFaucetRouter({
+  service: createFaucetService({
+    repository: createFaucetRepository(supabase),
+    sendPayment,
+    verifyCaptcha: createCaptchaVerifier({ secret: process.env.TURNSTILE_SECRET_KEY, production }),
+    logger,
+  }),
+  requireAuth,
+});

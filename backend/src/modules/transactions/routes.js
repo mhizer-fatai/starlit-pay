@@ -1,5 +1,10 @@
 import { Router } from "express";
+import { z } from "zod";
 import { asyncHandler } from "../../http/errors.js";
+import { validateBody } from "../../http/validate.js";
+
+// The size limit is the service's (413), not a validation error.
+const recordRequest = z.object({ user_id: z.string().min(1).max(64), encrypted_payload: z.string().min(1) });
 
 export function createTransactionsRouter({ service, requireAuth }) {
   const router = Router();
@@ -15,6 +20,7 @@ export function createTransactionsRouter({ service, requireAuth }) {
   router.post(
     "/api/transactions",
     requireAuth,
+    validateBody(recordRequest),
     asyncHandler(async (req, res) => {
       res.status(201).json({ transaction: await service.record(req.user, req.body) });
     })

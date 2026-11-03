@@ -43,6 +43,11 @@ test("the whole server starts and answers", async (t) => {
   assert.equal(health.status, 503);
   assert.equal((await health.json()).checks.database.status, "fail");
   assert.equal((await fetch(`${base}/api/metrics`)).status, 404);
-  // The claim route had no caller and is gone.
+  assert.equal((await fetch(`${base}/api/prices`)).status, 200);
+  assert.equal((await fetch(`${base}/api/users/me/settings`, { headers: { "x-requested-with": "starlit" } })).status, 401);
+  assert.equal((await fetch(`${base}/api/smart-wallet`, { headers: { "x-requested-with": "starlit" } })).status, 401);
+  assert.equal((await fetch(`${base}/api/compliance/check/not-an-address`)).status, 400);
+  // Removed: the statement email (no email service) and the unused pool claim.
+  assert.equal((await post("/api/statements/email")).status, 404);
   assert.equal((await post("/api/relayer/submit")).status, 404);
 });

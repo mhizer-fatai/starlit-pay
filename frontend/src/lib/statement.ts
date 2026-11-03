@@ -221,16 +221,6 @@ export async function buildStatementPdf(
   return buffer.slice(0);
 }
 
-export function bytesToBase64(bytes: ArrayBuffer | Uint8Array): string {
-  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as ArrayBuffer);
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < data.length; i += chunk) {
-    binary += String.fromCharCode(...data.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
-
 export function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

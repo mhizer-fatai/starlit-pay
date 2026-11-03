@@ -1,27 +1,49 @@
 import dns from "dns";
 dns.setDefaultResultOrder("ipv4first");
 
-import { app, PORT } from "./src/config.js";
-import "./src/auth.js";
-import "./src/modules/relayer/index.js";
-import "./src/asp_service.js";
-import "./src/modules/payment_links/index.js";
-import "./src/modules/notes/index.js";
-import "./src/modules/faucet/index.js";
-import "./src/modules/stats/index.js";
-import "./src/modules/health/index.js";
-import "./src/prices.js";
-import "./src/settings.js";
-import "./src/statements.js";
-import "./src/modules/transactions/index.js";
-import "./src/pool_root.js";
-import "./src/smart_wallet.js";
+import { PORT } from "./src/config.js";
+import { app } from "./src/http/app.js";
+import { authLayer } from "./src/auth_layer/mount.js";
+import { usersRouter } from "./src/modules/users/index.js";
+import { settingsRouter } from "./src/modules/settings/index.js";
+import { complianceRouter } from "./src/modules/compliance/index.js";
+import { relayerRouter } from "./src/modules/relayer/index.js";
+import { paymentLinksRouter } from "./src/modules/payment_links/index.js";
+import { notesRouter } from "./src/modules/notes/index.js";
+import { faucetRouter } from "./src/modules/faucet/index.js";
+import { statsRouter } from "./src/modules/stats/index.js";
+import { healthRouter } from "./src/modules/health/index.js";
+import { pricesRouter } from "./src/modules/prices/index.js";
+import { transactionsRouter } from "./src/modules/transactions/index.js";
+import { poolRouter } from "./src/modules/pool/index.js";
+import { smartWalletRouter } from "./src/modules/smart_wallet/index.js";
+import { gatewayRouter, startGateway } from "./src/modules/gateway/index.js";
 import { startIndexer } from "./src/indexer.js";
-import { startGateway } from "./src/modules/gateway/index.js";
 import { startRelayerMonitor } from "./src/relayer_monitor.js";
 import { startTtlKeeper } from "./src/ttl_keeper.js";
 import { errorMiddleware, notFound } from "./src/http/errors.js";
 import { logger } from "./src/http/logger.js";
+
+// Every route, in one place. Middleware runs first (src/http/app.js).
+for (const router of [
+  authLayer.router,
+  usersRouter,
+  settingsRouter,
+  complianceRouter,
+  relayerRouter,
+  paymentLinksRouter,
+  notesRouter,
+  faucetRouter,
+  statsRouter,
+  healthRouter,
+  pricesRouter,
+  transactionsRouter,
+  poolRouter,
+  smartWalletRouter,
+  gatewayRouter,
+]) {
+  app.use(router);
+}
 
 // Start background services. Set BACKGROUND_JOBS=off for a local server that
 // shares production's database and wallets, so deposits are never processed twice.

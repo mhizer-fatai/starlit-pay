@@ -1,5 +1,5 @@
 import rateLimit from "express-rate-limit";
-import { app, rpc, relayerKeypair, NETWORK_PASSPHRASE } from "../../config.js";
+import { rpc, relayerKeypair, NETWORK_PASSPHRASE } from "../../config.js";
 import { isAddressBlocked } from "../../asp_service.js";
 import { authLayer } from "../../auth_layer/mount.js";
 import { createPaymentApproval } from "../../payment_approval.js";
@@ -72,19 +72,17 @@ const monitor = {
   },
 };
 
-app.use(
-  createRelayerRouter({
-    service,
-    monitor,
-    // Spends need a signed-in user who just confirmed with passkey or PIN (see payment_approval.js).
-    requirePaymentApproval: createPaymentApproval({ sessions: authLayer.sessions }),
-    paymentLimiter: rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 20,
-      standardHeaders: true,
-      legacyHeaders: false,
-      message: { error: "Too many transaction submissions. Please wait before attempting another relayer transaction." },
-    }),
-    checkLimiter: rateLimit({ windowMs: 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, message: { error: "Too many checks. Try again shortly." } }),
-  })
-);
+export const relayerRouter = createRelayerRouter({
+  service,
+  monitor,
+  // Spends need a signed-in user who just confirmed with passkey or PIN (see payment_approval.js).
+  requirePaymentApproval: createPaymentApproval({ sessions: authLayer.sessions }),
+  paymentLimiter: rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many transaction submissions. Please wait before attempting another relayer transaction." },
+  }),
+  checkLimiter: rateLimit({ windowMs: 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false, message: { error: "Too many checks. Try again shortly." } }),
+});

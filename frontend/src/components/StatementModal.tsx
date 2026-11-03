@@ -4,12 +4,10 @@ import { Check, Download, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { emailStatement } from "@/lib/backend";
 import { usePrices } from "@/lib/prices";
 import {
   buildStatementPdf,
   buildStatementXls,
-  bytesToBase64,
   downloadBlob,
   type StatementFormat,
 } from "@/lib/statement";
@@ -41,15 +39,6 @@ function defaultTo(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** Hides most of an address: timothy@gmail.com → ti*****@g***.c** */
-function maskEmail(email: string): string {
-  const [local = "", domain = ""] = email.split("@");
-  if (!local || !domain) return "your email";
-  const [host = "", ...rest] = domain.split(".");
-  const tld = rest.join(".");
-  return `${local.slice(0, 2)}*****@${host.slice(0, 1)}***${tld ? `.${tld.slice(0, 1)}**` : ""}`;
-}
-
 export function StatementModal({
   feed,
   email,
@@ -65,7 +54,6 @@ export function StatementModal({
   const [range, setRange] = useState<StatementRange>("last-month");
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(defaultTo);
-  const [sendCopy, setSendCopy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -79,40 +67,14 @@ export function StatementModal({
       const items = filterFeedByRange(feed, range, from, to);
       const period = statementPeriodLabel(range, from, to);
       const owner = userName || email.split("@")[0] || "user";
-      let filename: string;
-      let mime: string;
-      let bytes: ArrayBuffer | Uint8Array;
-
       if (format === "pdf") {
         const buffer = await buildStatementPdf(items, period, email, prices);
-        filename = statementFilename(owner, "pdf");
-        mime = "application/pdf";
-        bytes = buffer;
-        downloadBlob(new Blob([buffer as BlobPart], { type: mime }), filename);
+        downloadBlob(new Blob([buffer as BlobPart], { type: "application/pdf" }), statementFilename(owner, "pdf"));
       } else {
         const html = buildStatementXls(items, period, prices);
-        filename = statementFilename(owner, "xls");
-        mime = "application/vnd.ms-excel";
-        bytes = new TextEncoder().encode(html);
-        downloadBlob(new Blob([bytes as BlobPart], { type: `${mime};charset=utf-8` }), filename);
+        downloadBlob(new Blob([html], { type: "application/vnd.ms-excel;charset=utf-8" }), statementFilename(owner, "xls"));
       }
-
-      if (sendCopy) {
-        if (!email) {
-          setError("No email address on your account to send to.");
-          return;
-        }
-        setStatus(`Sending a copy to ${maskEmail(email)}…`);
-        await emailStatement({
-          filename,
-          mime,
-          contentBase64: bytesToBase64(bytes),
-          subject: `Your Starlit Pay statement (${period})`,
-        });
-        setStatus(`Downloaded and emailed to ${maskEmail(email)}.`);
-      } else {
-        setStatus(`Downloaded ${items.length} transaction${items.length === 1 ? "" : "s"}.`);
-      }
+      setStatus(`Downloaded ${items.length} transaction${items.length === 1 ? "" : "s"}.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Statement failed — try again.");
     } finally {
@@ -204,22 +166,6 @@ export function StatementModal({
                 </label>
               </div>
             )}
-          </div>
-
-          <div className="modal-row">
-            <span className="modal-label">
-              Send a copy to my email{email ? ` (${maskEmail(email)})` : ""}
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={sendCopy}
-              aria-label="Send a copy to my email inbox"
-              onClick={() => setSendCopy((value) => !value)}
-              className={`settings-toggle ${sendCopy ? "settings-toggle-on" : "settings-toggle-off"}`}
-            >
-              <span className="settings-toggle-thumb" />
-            </button>
           </div>
 
           {status && (

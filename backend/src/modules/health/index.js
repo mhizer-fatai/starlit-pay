@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import { Router } from "express";
-import { app, rpc, supabase } from "../../config.js";
+import { dbPoolConfig, rpc, supabase } from "../../config.js";
 import { asyncHandler } from "../../http/errors.js";
+import { logger } from "../../http/logger.js";
 import { metrics } from "../../http/metrics.js";
 import { getRelayerMonitorStatus } from "../../relayer_monitor.js";
 import { createDaemonState } from "../../daemon_state.js";
@@ -75,8 +76,19 @@ router.get(
     res.status(report.status === "down" ? 503 : 200).json(report);
   })
 );
+// Database only, with its connection settings.
+router.get("/api/health/db", async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    await count(supabase.from("users").select("*", { count: "exact", head: true }));
+    res.json({ status: "connected", latencyMs: Date.now() - startedAt, pool: dbPoolConfig, timestamp: new Date().toISOString() });
+  } catch (err) {
+    logger.error("Database health check failed:", err);
+    res.status(500).json({ status: "error", error: "Database unavailable.", latencyMs: Date.now() - startedAt, pool: dbPoolConfig });
+  }
+});
 router.get("/api/metrics", (req, res) => {
   if (!metricsAllowed(req)) return res.status(404).json({ error: "Not found.", code: "not_found" });
   res.type("text/plain; version=0.0.4").send(metrics.render());
 });
-app.use(router);
+export const healthRouter = router;

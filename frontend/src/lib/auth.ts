@@ -19,7 +19,7 @@ import {
   type DerivedKeys,
 } from "@/lib/keys";
 import { closeVault, type OpenedVault, type VaultSecrets } from "@/lib/vault";
-import { authApi } from "@/lib/vault/client";
+import { authApi, getEmailProof } from "@/lib/vault/client";
 import { startAutoReshield, stopAutoReshield } from "@/lib/reshield";
 
 export { sha256 };
@@ -202,7 +202,7 @@ export async function getUser(): Promise<SessionUser | null> {
 export async function lookupByEmail(
   email: string,
 ): Promise<{ exists: boolean; user: SessionUser | null }> {
-  const res = await login(email.toLowerCase().trim());
+  const res = await login(email.toLowerCase().trim(), undefined, await getEmailProof());
   if (res.exists === false || !res.user) return { exists: false, user: null };
   return { exists: true, user: res.user };
 }
@@ -214,7 +214,7 @@ export async function lookupByEmail(
 export async function unlockWithPin(email: string, pin: string): Promise<SessionUser> {
   const clean = email.toLowerCase().trim();
   const derived = await deriveKeysFromEmailAndPin(clean, pin);
-  const res = await login(clean, await identityCommitment(derived.spendingKey));
+  const res = await login(clean, await identityCommitment(derived.spendingKey), await getEmailProof());
   if (res.exists === false || !res.user) {
     throw new Error("Account not found. Please create a PIN first.");
   }
