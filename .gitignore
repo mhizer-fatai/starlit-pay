@@ -11,7 +11,6 @@ contracts/target/
 .env.local
 .env.*.local
 *.env
-.agents/mcp_config.json
 
 # Local state databases/JSON logs
 backend/gateway_state.json
@@ -44,8 +43,6 @@ stellar-dev-skill/
 .gemini/
 netlify/
 
-# Personal agent rules
-agent_rule.md
 
 # Video and Media Output (HyperFrames)
 video/
@@ -63,3 +60,9 @@ securityplan.md
 
 # Personal Claude Code settings
 .claude/settings.local.json
+
+# Personal files and AI tool folders (not part of the project)
+.agents/
+.claude/
+agent_rule.md
+INSTAWARD_TODO.md
