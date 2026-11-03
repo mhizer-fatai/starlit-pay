@@ -1,4 +1,4 @@
-// Supabase/Postgres store for the passkey auth layer. Requires backend/schema_auth.sql.
+// Supabase/Postgres store for the passkey auth layer. Requires backend/sql/schema_auth.sql.
 // Operations that must be atomic are single statements or Postgres functions.
 
 function check({ data, error }) {

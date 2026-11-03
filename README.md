@@ -35,7 +35,7 @@ The goal: on-chain, the system looks like a single large pool of assets, so no o
 ### 1. Database Configuration (Supabase)
 1.  Create a free project on [Supabase](https://supabase.com).
 2.  Go to the **SQL Editor** tab in your Supabase Dashboard.
-3.  Click **New Query**, copy the contents of `backend/schema.sql`, and click **Run**. This will create the required `users` and `payment_links` tables.
+3.  Click **New Query**, copy the contents of `backend/sql/schema.sql`, and click **Run**. This will create the required `users` and `payment_links` tables.
 4.  Configure Google OAuth (optional) in your Supabase Dashboard under Auth Providers.
 
 ### 2. Configure Environment Variables
