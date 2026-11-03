@@ -319,6 +319,7 @@ export const notifyGatewayDeposit = (txHash: string) =>
     reason?: string;
     operations?: Array<{
       processed: boolean;
+      reason?: string;
       amount: number;
       asset: string;
       commitment: string;

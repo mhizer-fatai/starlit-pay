@@ -6,6 +6,7 @@ import { getSpendingKey, getViewingSecret, signAuthRequest, type SessionUser } f
 import { fetchNotes, postNote, postTransaction, spendNote, submitRelayerWithdraw } from "@/lib/backend";
 import { bytesToHex, encryptNote } from "@/lib/crypto";
 import { getSpendableNotes, spendRootFor } from "@/lib/notes";
+import { withoutSpentOnChain } from "@/lib/spentNotes";
 import { selfNoteSecret } from "@/lib/ownedNotes";
 import { TOKENS } from "@/lib/stellar";
 import type { Transfer } from "@/lib/wallet";
@@ -34,7 +35,7 @@ export async function withdrawFromPool(input: {
 
   onStatus("Finding your private funds…");
   const { notes } = await fetchNotes(viewingKey);
-  const spendable = getSpendableNotes(notes, viewingSecret, asset);
+  const spendable = await withoutSpentOnChain(getSpendableNotes(notes, viewingSecret, asset));
   const inputs: typeof spendable = [];
   let inputSum = 0;
   for (const note of spendable) {

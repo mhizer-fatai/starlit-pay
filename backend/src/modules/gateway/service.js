@@ -30,6 +30,13 @@ export function createDepositProcessor({
   // An attempt is stale once its pool transaction can no longer land.
   const staleMs = (chain.txTimeoutSeconds + 120) * 1000;
 
+  // A payment set aside needs a person: it is never retried automatically.
+  // List them with: SELECT * FROM gateway_deposits WHERE status = 'needs_review';
+  async function setAside(key, reason) {
+    await repository.update(key, { status: "needs_review", last_error: reason });
+    logger.error(`Gateway set deposit ${key.txHash}:${key.opIndex} aside for review: ${reason}`);
+  }
+
   /** Decides whether this process may (re)try a payment someone already recorded. */
   async function mayRetry(key, row) {
     if (row.status === "done" || row.status === "legacy") return { skip: "already_processed" };
@@ -39,7 +46,7 @@ export function createDepositProcessor({
 
     if (row.pool_tx_hash) {
       if (age > LOOKUP_WINDOW_MS) {
-        await repository.update(key, { status: "needs_review", last_error: "outcome no longer visible on RPC" });
+        await setAside(key, "outcome no longer visible on RPC");
         return { skip: "needs_review" };
       }
       if ((await chain.transactionStatus(row.pool_tx_hash)) === "SUCCESS") {
@@ -48,7 +55,7 @@ export function createDepositProcessor({
       }
     }
     if (row.attempts >= MAX_ATTEMPTS) {
-      await repository.update(key, { status: "needs_review" });
+      await setAside(key, `failed ${row.attempts} times; last error: ${row.last_error ?? "unknown"}`);
       return { skip: "needs_review" };
     }
     if (!(await repository.takeOver(key, row))) return { skip: "in_progress" };
@@ -80,7 +87,7 @@ export function createDepositProcessor({
     logger.info(`Gateway processing deposit of ${amount} ${asset} for @${user.username} (memo ${memo})`);
     if (await isAddressBlocked(source)) {
       logger.warn(`[ASP COMPLIANCE BLOCK] Deposit from ${source} rejected for @${user.username}.`);
-      await repository.update(key, { status: "needs_review", last_error: "sender blocked by screening" });
+      await setAside(key, "sender blocked by screening");
       return { processed: false, reason: "sanctioned_address" };
     }
 

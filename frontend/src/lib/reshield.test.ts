@@ -6,6 +6,7 @@ const m = vi.hoisted(() => ({
   events: [] as string[],
 }));
 
+vi.mock("@/lib/spentNotes", () => ({ withoutSpentOnChain: async <T,>(notes: T[]) => notes }));
 vi.mock("@/lib/backend", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/backend")>()),
   fetchNotes: vi.fn(async (viewingKey: string) => ({

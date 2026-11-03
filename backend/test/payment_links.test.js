@@ -37,13 +37,16 @@ describe("payment links", () => {
   let link;
   let chainTx;
   let claims;
+  let usedHashes;
 
   const repository = {
     create: async (row) => ({ id: "l1", ...row }),
     findByCommitment: async (commitment) => (commitment === "c1" ? link : null),
-    markClaimed: async () => {
+    markClaimed: async (commitment, txHash) => {
       claims += 1;
+      if (usedHashes.has(txHash)) return "hash_used";
       if (link.status !== "pending") return null;
+      usedHashes.add(txHash);
       link.status = "claimed";
       return link;
     },
@@ -63,6 +66,7 @@ describe("payment links", () => {
   after(() => http.close());
   beforeEach(() => {
     claims = 0;
+    usedHashes = new Set();
     chainTx = walletPayment();
     link = {
       commitment: "c1",
@@ -148,6 +152,15 @@ describe("payment links", () => {
     assert.deepEqual(results.map((r) => r.status).sort(), [200, 400]);
   });
 
+  test("one payment settles one link only", async () => {
+    assert.equal((await claim({ txHash: HASH })).status, 200);
+    link = { ...link, status: "pending" }; // a second link, same owner, same amount
+    const again = await claim({ txHash: HASH.toUpperCase() });
+    assert.equal(again.status, 409);
+    assert.equal(again.body.code, "payment_already_used");
+    assert.equal(link.status, "pending");
+  });
+
   test("unknown links are 404, and viewing a link still reports expiry", async () => {
     assert.equal((await http.call("POST", "/api/payment-links/nope/claim", { body: { txHash: HASH } })).status, 404);
     assert.equal((await http.call("GET", "/api/payment-links/nope")).status, 404);
@@ -176,6 +189,12 @@ describe("reading a transaction from the network", () => {
       rpc: { getTransaction: async () => ({ status, envelopeXdr: tx?.toEnvelope().toXDR("base64"), createdAt: 1000 }) },
       networkPassphrase: NP,
     });
+
+  test("a look-alike USDC from another issuer is not USDC", async () => {
+    const fake = new S.Asset("USDC", S.Keypair.random().publicKey());
+    const tx = build(S.Operation.payment({ destination: GATEWAY, asset: fake, amount: "10" }), S.Memo.id("147823"));
+    assert.notEqual((await reader(tx)("hash")).payments[0].asset, "USDC");
+  });
 
   test("extracts a memo payment", async () => {
     const usdc = new S.Asset("USDC", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5");

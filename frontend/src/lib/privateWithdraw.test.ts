@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
 }));
 const notesApi = vi.hoisted(() => ({ getSpendableNotes: vi.fn(), spendRootFor: vi.fn() }));
 
+vi.mock("@/lib/spentNotes", () => ({ withoutSpentOnChain: async <T,>(notes: T[]) => notes }));
 vi.mock("@/lib/backend", () => api);
 vi.mock("@/lib/notes", () => notesApi);
 vi.mock("@/lib/auth", () => ({

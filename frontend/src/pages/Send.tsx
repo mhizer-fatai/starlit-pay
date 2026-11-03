@@ -43,6 +43,7 @@ import {
   submitRelayerTransfer,
 } from "@/lib/backend";
 import { getSpendableNotes, spendRootFor } from "@/lib/notes";
+import { withoutSpentOnChain } from "@/lib/spentNotes";
 import { bytesToHex, encryptNote } from "@/lib/crypto";
 import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
 import { TOKENS, isStellarAddress } from "@/lib/stellar";
@@ -427,7 +428,7 @@ function SendPage() {
       // 1. Fetch user's current private notes
       setMessage("Fetching your shielded notes...");
       const notesRes = await fetchNotes(me.public_encryption_key || "");
-      const spendableNotes = getSpendableNotes(notesRes.notes, viewingSecret, asset);
+      const spendableNotes = await withoutSpentOnChain(getSpendableNotes(notesRes.notes, viewingSecret, asset));
 
       const totalAvailable = spendableNotes.reduce((acc, n) => acc + n.amount, 0);
       if (totalAvailable < amt) {

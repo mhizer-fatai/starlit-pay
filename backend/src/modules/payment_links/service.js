@@ -58,7 +58,8 @@ export function createPaymentLinksService({ repository, readTransaction, gateway
         throw new HttpError(400, "That transaction does not pay this link.");
       }
 
-      const claimed = await repository.markClaimed(commitment);
+      const claimed = await repository.markClaimed(commitment, txHash.toLowerCase());
+      if (claimed === "hash_used") throw new HttpError(409, "That payment was already used for another payment link.", "payment_already_used");
       if (!claimed) throw new HttpError(400, "This payment link has already been claimed.");
       return claimed;
     },

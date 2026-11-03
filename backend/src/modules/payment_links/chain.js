@@ -1,6 +1,9 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
+import { poolAssetCode } from "../../tokens.js";
 
-const describeAsset = (asset) => (asset.isNative() ? "XLM" : asset.getCode());
+// "XLM" or "USDC" only for the pool's real assets: a look-alike USDC from
+// another issuer must not pay a USDC link.
+const describeAsset = (asset) => poolAssetCode(asset) ?? (asset.isNative() ? "XLM" : `${asset.getCode()}:${asset.getIssuer()}`);
 
 /** Reads a transaction from the network into the facts a payment link claim needs. Null if unknown. */
 export function createTransactionReader({ rpc, networkPassphrase }) {

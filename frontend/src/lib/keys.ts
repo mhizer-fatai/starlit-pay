@@ -83,6 +83,8 @@ export interface DecryptedNote {
   amount: number;
   asset: string;
   sender?: string;
+  /** The note secret; needed to compute its nullifier. */
+  secret?: string;
 }
 
 /**
@@ -109,6 +111,7 @@ export function decryptShieldedNote(
           amount?: unknown;
           asset?: unknown;
           sender?: unknown;
+          secret?: unknown;
         };
         const amount = Number(obj.amount);
         if (Number.isFinite(amount)) {
@@ -116,6 +119,7 @@ export function decryptShieldedNote(
             amount,
             asset: typeof obj.asset === "string" && obj.asset ? obj.asset : "USDC",
             sender: typeof obj.sender === "string" ? obj.sender : undefined,
+            secret: typeof obj.secret === "string" ? obj.secret : undefined,
           };
         }
       }
@@ -128,6 +132,7 @@ export function decryptShieldedNote(
       amount?: unknown;
       asset?: unknown;
       sender?: unknown;
+      secret?: unknown;
     };
     const amount = Number(obj?.amount);
     if (Number.isFinite(amount)) {
@@ -135,6 +140,7 @@ export function decryptShieldedNote(
         amount,
         asset: typeof obj.asset === "string" && obj.asset ? obj.asset : "USDC",
         sender: typeof obj.sender === "string" ? obj.sender : undefined,
+        secret: typeof obj.secret === "string" ? obj.secret : undefined,
       };
     }
   } catch {

@@ -11,6 +11,7 @@ import {
   type BackendTransaction,
 } from "@/lib/backend";
 import { bytesToHex, decryptShieldedNote } from "@/lib/keys";
+import { reportSpent, spentOnChain } from "@/lib/spentNotes";
 
 // Live prices come from usePrices()/fetchPrices() in lib/prices.ts. There is
 // deliberately no static fallback: an unknown price stays unknown (null).
@@ -58,14 +59,21 @@ export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBal
   // All notes, for history; only unspent ones count towards the balance.
   const { notes } = await fetchNotes(user.public_encryption_key, timestamp, signature, { includeSpent: true });
 
-  const out: PrivateBalances = { usdc: 0, xlm: 0, notes: [] };
-  for (const note of notes) {
-    if (!note.encrypted_note) continue;
-    const decrypted = decryptShieldedNote(note.encrypted_note, keys.viewing.secretKey);
-    if (!decrypted || !Number.isFinite(decrypted.amount)) continue;
+  const readable = notes.flatMap((note) => {
+    const decrypted = note.encrypted_note ? decryptShieldedNote(note.encrypted_note, keys.viewing.secretKey) : null;
+    if (!decrypted || !Number.isFinite(decrypted.amount)) return [];
     const asset = decrypted.asset.toUpperCase();
-    if (asset !== "USDC" && asset !== "XLM") continue;
-    const unspent = !note.status || note.status === "unspent";
+    if (asset !== "USDC" && asset !== "XLM") return [];
+    return [{ note, decrypted, asset, secret: decrypted.secret || note.commitment, commitment: note.commitment }];
+  });
+  // The database can still say "unspent" for a note the pool has spent (see spentNotes.ts).
+  const marked = readable.filter(({ note }) => !note.status || note.status === "unspent");
+  const spentNow = await spentOnChain(marked);
+  reportSpent(spentNow);
+
+  const out: PrivateBalances = { usdc: 0, xlm: 0, notes: [] };
+  for (const { note, decrypted, asset } of readable) {
+    const unspent = (!note.status || note.status === "unspent") && !spentNow.has(note.commitment);
     if (unspent && asset === "USDC") out.usdc += decrypted.amount;
     else if (unspent) out.xlm += decrypted.amount;
     out.notes.push({

@@ -1,4 +1,5 @@
 const NOT_FOUND = "PGRST116";
+const UNIQUE_VIOLATION = "23505";
 
 export function createPaymentLinksRepository(supabase) {
   return {
@@ -19,15 +20,20 @@ export function createPaymentLinksRepository(supabase) {
       return data;
     },
 
-    /** Claims only a pending link, so two simultaneous claims can't both win. Null if it wasn't pending. */
-    async markClaimed(commitment) {
+    /**
+     * Claims only a pending link, so two simultaneous claims can't both win.
+     * Null if it wasn't pending; "hash_used" if that payment already claimed
+     * another link (claim_tx_hash is unique, see schema_phase3.sql).
+     */
+    async markClaimed(commitment, txHash) {
       const { data, error } = await supabase
         .from("payment_links")
-        .update({ status: "claimed" })
+        .update({ status: "claimed", claim_tx_hash: txHash })
         .eq("commitment", commitment)
         .eq("status", "pending")
         .select()
         .maybeSingle();
+      if (error?.code === UNIQUE_VIOLATION) return "hash_used";
       if (error) throw error;
       return data;
     },

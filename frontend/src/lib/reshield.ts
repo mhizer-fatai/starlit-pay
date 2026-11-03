@@ -11,6 +11,7 @@
 import { fetchNotes } from "@/lib/backend";
 import type { DerivedKeys } from "@/lib/keys";
 import { getSpendableNotes, type SpendableNote } from "@/lib/notes";
+import { withoutSpentOnChain } from "@/lib/spentNotes";
 import { isSelfCreated } from "@/lib/ownedNotes";
 import { moveNotes, signedTimestamp } from "@/lib/selfTransfer";
 
@@ -43,7 +44,7 @@ export async function findForeignNotes(keys: DerivedKeys) {
   const { notes } = await fetchNotes(keys.viewing.publicKey, timestamp, signature);
   const foreign: Record<string, SpendableNote[]> = {};
   for (const asset of ASSETS) {
-    const spendable = getSpendableNotes(notes, keys.viewing.secretKey, asset);
+    const spendable = await withoutSpentOnChain(getSpendableNotes(notes, keys.viewing.secretKey, asset));
     const checked = await Promise.all(spendable.map(async (n) => ((await isSelfCreated(keys.spendingKey, n)) ? null : n)));
     foreign[asset] = checked.filter((n): n is SpendableNote => n !== null);
   }

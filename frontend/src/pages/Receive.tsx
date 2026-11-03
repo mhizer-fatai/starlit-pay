@@ -127,8 +127,13 @@ function ReceivePage() {
 
       setWalletMessage(`Deposit submitted! Shielding funds into private balance for tx ${hash.slice(0, 8)}...`);
       try {
-        await notifyGatewayDeposit(hash);
-        setWalletMessage(`Deposit of ${amt} ${selectedAsset} confirmed and shielded into your private balance!`);
+        const result = await notifyGatewayDeposit(hash);
+        // processed is false while the background gateway is still shielding it.
+        setWalletMessage(
+          result.processed || result.operations?.some((op) => op.reason === "already_processed")
+            ? `Deposit of ${amt} ${selectedAsset} confirmed and shielded into your private balance!`
+            : `Deposit of ${amt} ${selectedAsset} received. Shielding it into your private balance (about 15 seconds)…`,
+        );
       } catch {
         setWalletMessage(`Deposit of ${amt} ${selectedAsset} submitted! Tx: ${hash.slice(0, 8)}... (Auto-shielding in ~15s)`);
       }
