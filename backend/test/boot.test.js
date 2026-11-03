@@ -38,6 +38,11 @@ test("the whole server starts and answers", async (t) => {
   assert.equal((await post("/api/relayer/withdraw")).status, 401);
   assert.equal((await post("/api/gateway/deposit")).status, 400);
   assert.equal((await fetch(`${base}/api/relayer/daemon/status`)).status, 200);
+  // Health answers (down here: the database is a placeholder); metrics stay hidden without a token.
+  const health = await fetch(`${base}/api/health`);
+  assert.equal(health.status, 503);
+  assert.equal((await health.json()).checks.database.status, "fail");
+  assert.equal((await fetch(`${base}/api/metrics`)).status, 404);
   // The claim route had no caller and is gone.
   assert.equal((await post("/api/relayer/submit")).status, 404);
 });

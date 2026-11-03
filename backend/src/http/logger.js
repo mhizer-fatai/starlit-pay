@@ -1,4 +1,5 @@
 import { currentRequestId } from "./requestContext.js";
+import { metrics } from "./metrics.js";
 
 // Structured logs: one JSON object per line in production, readable text in a
 // terminal. Takes the same arguments as console; a trailing plain object
@@ -60,6 +61,7 @@ export function accessLog(req, res, next) {
       durationMs: Math.round(performance.now() - startedAt),
     };
     (res.statusCode >= 500 ? logger.error : logger.info)("request", fields);
+    metrics.recordRequest(req.method, req.route ? fields.route : "unmatched", res.statusCode, fields.durationMs);
   });
   next();
 }

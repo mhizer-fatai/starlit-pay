@@ -9,6 +9,7 @@ import "./src/modules/payment_links/index.js";
 import "./src/modules/notes/index.js";
 import "./src/modules/faucet/index.js";
 import "./src/modules/stats/index.js";
+import "./src/modules/health/index.js";
 import "./src/prices.js";
 import "./src/settings.js";
 import "./src/statements.js";
@@ -44,6 +45,7 @@ app.get("/", (req, res) => {
     startedAt,
     uptimeSeconds: Math.round(process.uptime()),
     checks: {
+      health: "/api/health",
       database: "/api/health/db",
       relayerMonitor: "/api/relayer/daemon/status",
     },
