@@ -1,114 +1,170 @@
 # Starlit Pay
 
-Starlit Pay is a consumer-grade, privacy-by-default multi-asset wallet on Stellar (Soroban) supporting **XLM, USDC, and EURC**. It is designed around client-side zero-knowledge proofs, a Web2-like email & PIN onboarding UX, and built-in Viewing Key compliance disclosures.
+Starlit Pay is a privacy wallet on Stellar. Your balance lives in a shielded pool
+(a Soroban contract modelled on Nethermind's Stellar Private Payments), so on
+chain no one can see how much you hold or whom you pay. You sign in with a
+passkey, pay people by username, and never need XLM for fees: a relayer pays
+them.
 
-> **⚠️ Status: Testnet preview, not audited.** Zero-knowledge proof generation and on-chain verification are **not implemented yet**: the frontend produces placeholder proofs and the on-chain verifier accepts any well-formed proof. Do not use with real funds. See [Implementation Status](#-implementation-status).
+**Live on testnet:** [starlitpay.xyz](https://starlitpay.xyz) · API [api.starlitpay.xyz](https://api.starlitpay.xyz)
 
-The goal: on-chain, the system looks like a single large pool of assets, so no one can see your balance or whom you are paying. Off-chain, your browser holds your key material, generates proofs, and decrypts your transaction logs.
-
----
-
-## ⚡ Key Features
-
-1.  **Shielded multi-asset pool (Soroban + Rust)**: Deposits lock public XLM, USDC, or EURC into a contract, creating private note commitments. Spent nullifiers check for double-spends without linking claims to deposits.
-2.  **Web2 UX (Email Auth & 6-digit PIN)**: Users onboard using an email address. A 6-digit payment PIN encrypts their derived seed locally using AES-GCM and authenticates them on the database.
-3.  **In-Browser ZK Prover (in development)**: Planned Circom + Groth16 (BN254) proofs generated client-side in WebAssembly, binding each spend to its recipient and outputs. Currently a placeholder.
-4.  **Auditor Viewing Keys**: Dual-key cryptography splits the wallet into a *Spending Key* and a *Viewing Key*. Users can share their Viewing Key with tax authorities or auditors to decrypt their history read-only without giving up control of their funds.
-5.  **Decentralized User Registry**: Matches usernames (aliases) with public encryption keys and identity commitments using a Supabase PostgreSQL routing layer.
+> **⚠️ Testnet preview, not audited. Do not use real funds.**
+> Zero-knowledge proofs are not implemented yet: the app sends placeholder proofs
+> and the on-chain verifier accepts them. Until real proofs ship, the pool cannot
+> check that a spend uses the spender's own notes, and the relayer is a trusted
+> party. See [Status](#status).
 
 ---
 
-## 🛠️ Tech Stack & Architecture
+## What you can do
 
-*   **Smart Contracts**: Rust (`soroban-sdk` v25+), modelled on the **Nethermind Stellar Private Payments (SPP)** modular architecture:
-    *   `pool`: Shielded UTXO note pool with TTL state management.
-    *   `verifier`: Groth16 verifier contract (**currently a stub**; real BN254 pairing verification is planned).
-    *   `asp`: Association Set Providers (Merkle membership & SMT exclusion trees).
-*   **ZK Prover (planned)**: Circom + Groth16 over BN254 (snarkjs, WASM) running in-browser, aligned with Nethermind SPP. The Noir circuit in `circuits/` is an early prototype and not wired into the app.
-*   **Frontend**: React + Vite + Vanilla CSS (Glassmorphism design system).
-*   **Backend Database Router**: Node.js + Express + Supabase Client (managing user registries, gasless transaction relaying, and note indexing).
+- **Sign in with a passkey.** Google confirms your email once; after that a
+  passkey (fingerprint, face or screen lock) signs you in. Your keys are stored
+  encrypted in a vault that your passkey, a 6-digit PIN or a one-time recovery
+  code can open. Older email + PIN accounts upgrade to a passkey.
+- **Hold XLM and USDC privately.** Your private balance is a set of encrypted
+  notes in the shielded pool, readable only with your viewing key.
+- **Deposit** from any Stellar wallet: scan a SEP-0007 QR code, connect a wallet,
+  or pay the deposit address with your memo. The gateway credits each payment
+  exactly once.
+- **Send privately** to a Starlit username, or withdraw to any Stellar address.
+- **Move funds between private and public.** Each account can create a public
+  smart wallet (an OpenZeppelin smart account controlled by your passkey, verified on
+  chain with secp256r1). Transfer moves funds between it and your private balance.
+- **Request payments** with a payment link that anyone can pay, with or without
+  a Starlit account.
+- **Download statements** as PDF or Excel.
+- **Get test funds** from the faucet: 10 XLM and 20 USDC, once every 24 hours.
 
----
-
-## 🚀 Setup & Installation
-
-### 1. Database Configuration (Supabase)
-1.  Create a free project on [Supabase](https://supabase.com).
-2.  Go to the **SQL Editor** tab in your Supabase Dashboard.
-3.  Click **New Query**, copy the contents of `backend/sql/schema.sql`, and click **Run**. This will create the required `users` and `payment_links` tables.
-4.  Configure Google OAuth (optional) in your Supabase Dashboard under Auth Providers.
-
-### 2. Configure Environment Variables
-1.  Create a `.env` file in the `frontend/` folder based on `frontend/.env.example`:
-    ```bash
-    cp frontend/.env.example frontend/.env
-    ```
-2.  Create a `.env` file in the `backend/` folder based on `backend/.env.example`:
-    ```bash
-    cp backend/.env.example backend/.env
-    ```
-3.  Fill in your Supabase URL and Anon Key in both files.
-
-### 3. Launch Backend Database Router
-1.  Navigate to the backend directory:
-    ```bash
-    cd backend
-    npm start
-    ```
-    *(You should see: `Starlit Pay backend database router listening on http://localhost:3001`)*
-
-### 4. Launch React Frontend
-1.  Navigate to the frontend directory:
-    ```bash
-    cd ../frontend
-    ```
-2.  Start the Vite dev server:
-    ```bash
-    npm run dev
-    ```
-3.  Open `http://localhost:5173` in your browser.
-
----
-
-## 🔄 Cryptographic Flow Details
+## How a private payment works
 
 ```
-   [ Alice ]                                   [ Blockchain ]
-       |                                             |
-       |--- 1. Deposit 100 USDC -------------------->| (Locks 100 USDC)
-       |    Commitment: C                            | (Adds C to Merkle Tree)
-       |                                             |
-       |--- 2. Send 30 USDC to @bob ---------------->| (Bob signs and submits)
-       |    ZK Proof: Proof                          | (Checks ZK proof on-chain)
-       |    Spent Nullifier: N                       | (Marks N as spent)
-       |    Recipient Hash: H                        | (Transfers USDC to Bob)
-       |                                             |
-   [ Bob ]                                           |
-       |                                             |
-       |<-- 3. Scans Events & Decrypts note ---------|
-       |    (Using Bob's Viewing Key)                |
+ [ Alice's browser ]            [ Starlit backend ]             [ Shielded pool ]
+        |                               |                               |
+        |-- 1. deposit 100 USDC ------> gateway ------------------------>| note C added
+        |                               |                               |   to the Merkle tree
+        |-- 2. pay @bob 30 USDC         |                               |
+        |   builds the proof, spends    |                               |
+        |   note C (nullifier N),       |                               |
+        |   encrypts 30 for Bob and     |                               |
+        |   70 change for herself ----> relayer submits, pays the fee -->| N marked spent,
+        |                               |                               |   2 new notes added
+ [ Bob's browser ]                      |                               |
+        |<-- 3. fetches his notes, decrypts them with his viewing key ---|
 ```
 
----
+Notes are encrypted to their recipient, so the backend stores them without being
+able to read them, and wallets check whether their notes are spent with the pool
+directly. The backend does see what is public on Stellar anyway (deposit and
+withdrawal amounts) and, for now, each user's own payment history records,
+which are stored unencrypted.
 
-## 📋 Implementation Status
+## Repository
 
-| Component | Status |
+| Folder | What it is |
 |---|---|
-| Testnet deposits, relayer gas sponsorship, SEP-0007 gateway | ✅ Working |
-| Note encryption (NaCl box, x25519-xsalsa20-poly1305) | ✅ Working |
-| On-chain Merkle tree & nullifier tracking | ✅ Working (but not enforced by proofs, see below) |
-| Client-side ZK proof generation | ❌ Placeholder (`frontend/src/lib/zk.ts` hashes inputs; no prover) |
-| On-chain Groth16 verification | ❌ Stub (`contracts/src/verifier.rs` returns `Ok(true)`) |
-| ASP compliance proofs | ❌ Not implemented (pool uses a plain admin address blocklist) |
-| Independent security audit | ❌ Not audited |
+| `frontend/` | React + Vite app. Key derivation, note encryption, proofs (placeholder) and passkeys all run in the browser. |
+| `backend/` | Node.js + Express API: accounts and passkey sessions, relayer, deposit gateway, event indexer, notes, faucet, payment links. |
+| `backend/sql/` | Database schema for Supabase, with its [run order](backend/sql/README.md). |
+| `contracts/` | Soroban contracts in Rust: `pool` (shielded pool), `verifier` (stub), `asp` (compliance screening). |
+| `circuits/` | Early Noir prototype of the payment circuit; not wired into the app. |
 
-Because proofs are not yet verified, the pool's spend functions do not protect funds cryptographically. As an interim guard, `claim`, `withdraw` and `transfer` must be authorized by the configured Starlit relayer (`set_relayer`), so the relayer is a trusted party until real proof verification ships. This is a testnet-only preview.
+### Backend
 
-## 🔒 Security Model (Target Design)
+Each feature is a module under `backend/src/modules/`, split into routes,
+service and repository, and mounted in one place (`backend/server.js`). Every
+request gets an ID, structured JSON logs, input validation (zod), a rate limit
+and one error handler. Payments need a fresh passkey or PIN confirmation, and
+users can only read and change their own data.
 
-The properties below describe the intended design once real proof verification ships. They are **not enforced today**.
+Money paths are built to survive restarts and retries: each deposit is recorded
+before it is shielded so it is credited once; relayer transactions take turns on
+the shared account; the gateway and indexer keep their position in the database.
 
-*   **Anti-Replay Guard**: Spent nullifiers are stored on-chain and a reused nullifier is rejected. Without proof verification, though, nothing ties a nullifier to a real note, so this does not yet prevent double-spends.
-*   **Front-Running Prevention (planned)**: The recipient is bound into the proof's public inputs, so a changed destination address would fail verification once the verifier is real.
-*   **Dual-Key Separation**: The Spending Key is never transmitted over the network and is decrypted in-memory only when verifying transfers. The Viewing Key is used strictly for read-only history decryption.
+`GET /api/health` reports the database, Stellar RPC, relayer balance, gateway
+queue and indexer lag. `GET /api/metrics` (Prometheus format) is enabled by
+setting `METRICS_TOKEN`.
+
+## Run it locally
+
+You need **Node.js 26** (see `.nvmrc`), a [Supabase](https://supabase.com)
+project with Google sign-in enabled, and testnet Stellar accounts for the relayer,
+gateway and faucet.
+
+1. **Database.** In the Supabase SQL editor, run the files in `backend/sql/` in
+   the [listed order](backend/sql/README.md).
+2. **Configuration.** Copy the examples and fill them in:
+   ```bash
+   cp backend/.env.example backend/.env
+   cp frontend/.env.example frontend/.env
+   ```
+   The backend needs the Supabase **service-role** key, `AUTH_SESSION_SECRET`,
+   `PIN_PEPPER_KEY`, and the relayer, gateway and faucet keys. For passkeys on
+   your machine keep `WEBAUTHN_RP_ID=localhost` and set `WEBAUTHN_ORIGINS` to
+   the frontend's address.
+3. **Backend:**
+   ```bash
+   cd backend
+   npm install
+   npm run dev
+   ```
+   It answers at `http://localhost:3001`. If your local server shares a
+   database with a deployed one, set `BACKGROUND_JOBS=off` so deposits are not
+   processed twice.
+4. **Frontend:**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   Open `http://localhost:5173`.
+
+## Tests
+
+```bash
+cd backend && npm test                                     # API, services and a full server boot
+cd frontend && npm run lint && npm run typecheck && npm test
+```
+
+GitHub Actions runs both on every push to `main` and `backend`.
+
+## Status
+
+| Part | Status |
+|---|---|
+| Passkey sign-in, key vault, PIN and recovery code | ✅ Working |
+| Deposits (gateway, SEP-0007, wallet connect), exactly once | ✅ Working |
+| Private send, withdraw, payment links, statements | ✅ Working |
+| Public smart wallet (passkey on chain) and transfers | ✅ Working |
+| Note encryption (NaCl box: x25519-xsalsa20-poly1305) | ✅ Working |
+| Merkle tree and nullifier tracking on chain | ✅ Working, but not enforced by proofs |
+| Fee sponsorship by the relayer | ✅ Working |
+| Client-side ZK proofs (Circom + Groth16 over BN254) | ❌ Placeholder (`frontend/src/lib/zk.ts`) |
+| On-chain proof verification | ❌ Stub (`contracts/src/verifier.rs` accepts any proof) |
+| Compliance screening contract (ASP) | ⚠️ Written (`contracts/src/asp.rs`), not deployed; withdrawals fail closed against the built-in blocklist |
+| Sharing a viewing key with an auditor | ❌ Planned |
+| Security audit | ❌ Not audited |
+
+Because proofs are not verified yet, the pool's spend functions accept a call
+only from the Starlit relayer (`set_relayer`). The relayer is therefore trusted
+until real verification ships; that is the next milestone. See
+[ROADMAP.md](ROADMAP.md).
+
+## Security model
+
+Today:
+
+- **Keys stay in the browser.** The spending key never leaves your device
+  unencrypted. The server stores your key vault only in encrypted form; opening
+  it takes your passkey, your PIN (checked by the server, with limited attempts)
+  or your recovery code.
+- **Viewing and spending are separate.** The viewing key decrypts your notes and
+  history; it cannot move funds.
+- **Spent notes can't be reused.** The pool records each nullifier and rejects a
+  repeat.
+
+Once real proofs ship:
+
+- **Only your own notes can be spent.** A spend must prove it knows the note's
+  secret, with no trusted relayer.
+- **The recipient can't be changed in flight.** It is bound into the proof.
