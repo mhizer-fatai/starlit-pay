@@ -66,3 +66,6 @@ securityplan.md
 .claude/
 agent_rule.md
 INSTAWARD_TODO.md
+
+# Personal design notes (not part of the repo)
+docs/zk-design.md
