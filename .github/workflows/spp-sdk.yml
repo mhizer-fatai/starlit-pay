@@ -52,6 +52,18 @@ jobs:
           tar -xzf "$RUNNER_TEMP/circuits.tar.gz" -C target/circuits-artifacts --wildcards '*.r1cs'
           sh deployments/scripts/circuit-artifacts.sh verify
 
+      # The SDK ships circomlib's source (LGPL) beside the circuits; stage it
+      # at the revision SPP pins, as their circuit build would.
+      - name: circomlib (pinned revision)
+        working-directory: spp
+        run: |
+          set -eu
+          rev="$(tr -d ' \r\n' < circuits/circomlib.lock)"
+          git init -q circuits/src/circomlib
+          git -C circuits/src/circomlib fetch -q --depth 1 https://github.com/iden3/circomlib "$rev"
+          git -C circuits/src/circomlib checkout -q FETCH_HEAD
+          test "$(git -C circuits/src/circomlib rev-parse HEAD)" = "$rev"
+
       - name: Build sdk/web
         working-directory: spp
         run: |
