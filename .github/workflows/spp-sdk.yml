@@ -27,6 +27,20 @@ jobs:
           ref: ${{ env.SPP_COMMIT }}
           path: spp
 
+      # Starlit's small changes to SPP, one file each in .github/spp-patches.
+      - uses: actions/checkout@v4
+        with:
+          path: starlit
+          sparse-checkout: .github/spp-patches
+
+      - name: Starlit patches
+        run: |
+          set -eu
+          for patch in starlit/.github/spp-patches/*.patch; do
+            echo "applying $patch"
+            git -C spp apply --verbose "../$patch"
+          done
+
       - name: Rust toolchain (from SPP's rust-toolchain.toml)
         working-directory: spp
         run: |
@@ -86,6 +100,7 @@ jobs:
           ls dist/circuits | head -80
           echo "spp_commit=$SPP_COMMIT" > "$out/BUILD_INFO.txt"
           echo "circuits=$CIRCUITS_TAG" >> "$out/BUILD_INFO.txt"
+          (cd "$GITHUB_WORKSPACE/starlit/.github/spp-patches" && sha256sum *.patch | sed 's/^/patch=/') >> "$out/BUILD_INFO.txt"
           (cd "$out" && find . -type f | sort | xargs sha256sum > SHA256SUMS)
           du -sh "$out"/dist/* "$out"/dist/circuits/* || true
 
