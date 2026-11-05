@@ -69,7 +69,13 @@ test("refuses extra operations, high fees and long-lived transactions", async ()
   await refused(service().sign(transact({ ops: 2 }), "u1"));
   await refused(service().sign(transact({ fee: "60000000" }), "u1"));
   await refused(service().sign(transact({ timeout: 3600 }), "u1"));
-  await refused(service().sign(transact({ timeout: 0 }), "u1"));
+});
+
+test("a transaction without an expiry (as SPP builds them) gets a 5-minute one from the payer", async () => {
+  const signed = S.TransactionBuilder.fromXDR(await service().sign(transact({ timeout: 0 }), "u1"), NP);
+  const left = Number(signed.timeBounds.maxTime) - Math.floor(Date.now() / 1000);
+  assert.ok(left > 290 && left <= 300, `expires in ${left}s`);
+  assert.ok(payer.verify(signed.hash(), signed.signatures[0].signature()));
 });
 
 test("refuses authorizations from any account other than the source", async () => {

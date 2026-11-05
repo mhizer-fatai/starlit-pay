@@ -12,6 +12,9 @@ import { HttpError } from "../../http/errors.js";
 
 const MAX_FEE_STROOPS = 50_000_000; // 5 XLM: far above a normal transact
 const MAX_VALIDITY_SECONDS = 600;
+// SPP builds transactions with no expiry; the payer, as the only signer,
+// adds this one so a signed transaction can't linger.
+const DEFAULT_VALIDITY_SECONDS = 300;
 
 export function createZkPayer({ payerKeypair, networkPassphrase, pools, isAddressBlocked, logger, now = () => Date.now() }) {
   const payer = payerKeypair?.publicKey() ?? null;
@@ -22,11 +25,25 @@ export function createZkPayer({ payerKeypair, networkPassphrase, pools, isAddres
   };
 
   function parse(xdr) {
+    let tx;
     try {
-      return StellarSdk.TransactionBuilder.fromXDR(xdr, networkPassphrase);
+      tx = StellarSdk.TransactionBuilder.fromXDR(xdr, networkPassphrase);
     } catch {
       throw new HttpError(400, "Invalid transaction.", "validation_error");
     }
+    const neverExpires = !tx.timeBounds || Number(tx.timeBounds.maxTime) === 0;
+    return tx instanceof StellarSdk.FeeBumpTransaction || !neverExpires ? tx : withExpiry(tx);
+  }
+
+  function withExpiry(tx) {
+    const envelope = tx.toEnvelope();
+    const maxTime = Math.floor(now() / 1000) + DEFAULT_VALIDITY_SECONDS;
+    envelope.v1().tx().cond(
+      StellarSdk.xdr.Preconditions.precondTime(
+        new StellarSdk.xdr.TimeBounds({ minTime: StellarSdk.xdr.Uint64.fromString("0"), maxTime: StellarSdk.xdr.Uint64.fromString(String(maxTime)) })
+      )
+    );
+    return new StellarSdk.Transaction(envelope, networkPassphrase);
   }
 
   /** Throws unless `tx` is exactly what the payer agrees to pay for. Returns the transfer details. */
