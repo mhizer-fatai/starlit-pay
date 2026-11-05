@@ -1,0 +1,84 @@
+name: Build SPP browser SDK
+
+# Builds Nethermind's Stellar Private Payments browser SDK from source, at the
+# commit Starlit's testnet contracts were deployed from. The published npm
+# package predates encrypted browser storage (keyProvider), which Starlit needs.
+
+on:
+  push:
+    branches: [spp-sdk-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SPP_COMMIT: b37c5b8ae1c8d33a8ab0cc427756a734bfec19c0
+  CIRCUITS_TAG: circuits-v0.7
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: NethermindEth/stellar-private-payments
+          ref: ${{ env.SPP_COMMIT }}
+          path: spp
+
+      - name: Rust toolchain (from SPP's rust-toolchain.toml)
+        working-directory: spp
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+
+      - name: wasm-bindgen
+        run: cargo install wasm-bindgen-cli --version 0.2.128 --locked --force
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Released circuit artifacts (checksum verified)
+        working-directory: spp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release download "$CIRCUITS_TAG" -R NethermindEth/stellar-private-payments -p 'circuits.tar.gz*' -D "$RUNNER_TEMP"
+          (cd "$RUNNER_TEMP" && sha256sum -c circuits.tar.gz.sha256)
+          mkdir -p target/circuits-artifacts
+          tar -xzf "$RUNNER_TEMP/circuits.tar.gz" -C target/circuits-artifacts --wildcards '*.r1cs'
+          sh deployments/scripts/circuit-artifacts.sh verify
+
+      - name: Build sdk/web
+        working-directory: spp
+        run: |
+          npm ci --prefix sdk/web
+          npm run build --prefix sdk/web
+
+      - name: Package what Starlit uses
+        working-directory: spp/sdk/web
+        run: |
+          set -eu
+          out="$RUNNER_TEMP/spp-web-sdk"
+          mkdir -p "$out/dist/circuits"
+          cp package.json README.md "$out/"
+          cp -r js "$out/js"
+          find dist -maxdepth 1 -type f -exec cp {} "$out/dist/" \;
+          cp -r dist/workers dist/licenses "$out/dist/"
+          # Only the blocklist transaction circuit, its lock and notices.
+          cp dist/circuits/circuits.json dist/circuits/NOTICE.txt "$out/dist/circuits/" 2>/dev/null || cp dist/circuits/circuits.json "$out/dist/circuits/"
+          cp dist/circuits/policy_tx_2_2_B.* dist/circuits/policy_tx_2_2_B_proving_key.bin "$out/dist/circuits/" 2>/dev/null || true
+          ls dist/circuits | head -80
+          echo "spp_commit=$SPP_COMMIT" > "$out/BUILD_INFO.txt"
+          echo "circuits=$CIRCUITS_TAG" >> "$out/BUILD_INFO.txt"
+          (cd "$out" && find . -type f | sort | xargs sha256sum > SHA256SUMS)
+          du -sh "$out"/dist/* "$out"/dist/circuits/* || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spp-web-sdk
+          path: ${{ runner.temp }}/spp-web-sdk
+          retention-days: 30
