@@ -4,6 +4,8 @@ node_modules/
 # Production/Build outputs
 dist/
 dist-ssr/
+# Not build output: the SPP browser SDK, built by .github/workflows/spp-sdk.yml
+!frontend/public/zk/spp/dist/
 contracts/target/
 
 # Environment configurations and secrets

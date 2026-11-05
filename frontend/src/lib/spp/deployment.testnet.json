@@ -1,0 +1,47 @@
+{
+  "network": "testnet",
+  "kdf_domain": "Starlit Pay",
+  "deployer": "GC5D3R2NO4BV3F5WDQ34IQHBFYPVTDKMS27V5NUL7PIIJHICVQ4IRWZV",
+  "admin": "GC5D3R2NO4BV3F5WDQ34IQHBFYPVTDKMS27V5NUL7PIIJHICVQ4IRWZV",
+  "asp_membership": "CAMJX22KMXJXXR6IAONMJKIFJWE2LZOKI5I4VXXNZVHDK4HLPW7UFBTF",
+  "added_asp_memberships": [],
+  "asp_non_membership": "CAODCXL4NST5WAZAKE5ZHNFT2WFNI7GIN5XJE5PGM2M46WWLQ7JF76MY",
+  "asp_membership_wasm_hash": "48a7ec5c5ebcb8e44aff04fc68d3f2b68467f821a9fbc61483454cd178647b17",
+  "asp_non_membership_wasm_hash": "9248be56781cd5a46eeb0ad31b87f76d9d6b35a93a63b5501e29f437d173e7d7",
+  "verifiers": {
+    "B": "CCPYS6EVHVXT4KGGBK43K73XFEFSXW7X4FRNYNREZNTFCQKPYJRFEAAS"
+  },
+  "public_key_registry": "CCTWXJO4ZNS6KZHGRUVCNV5HQJAHQMXRXMF7UT5TJ7CXCT7YSYCJN3MU",
+  "public_key_registry_verifier": "CARGP5LPPWHIVG47Z4SSVFR5PZSFS2IL72PXZAXXNBYQZX7HCP3HMQ2F",
+  "public_key_registry_verifier_wasm_hash": "3f8d6905984bf8f3f1ad55e4ef7b08d258c23a195a7d4aab6fef9ccf484795f3",
+  "pools": [
+    {
+      "poolContractId": "CBPXO3XY6DVA4K6MU3K2JFYUOLUBFOMP2ACFFNVUP5LQZUZXFSTABPUX",
+      "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "deploymentLedger": 5561537,
+      "enabled": true,
+      "policyFlags": [
+        "blocklist"
+      ],
+      "asset": {
+        "kind": "native"
+      }
+    },
+    {
+      "poolContractId": "CBRXBWOEVQRNP7ZLGUTKG5UQBEFSOLLVHV4UEEVBKRPECB763YGHANLY",
+      "tokenContractId": "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+      "deploymentLedger": 5561545,
+      "enabled": true,
+      "policyFlags": [
+        "blocklist"
+      ],
+      "asset": {
+        "kind": "classic",
+        "code": "USDC",
+        "issuer": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+      }
+    }
+  ],
+  "rpcUrl": "https://soroban-testnet.stellar.org/",
+  "networkPassphrase": "Test SDF Network ; September 2015"
+}

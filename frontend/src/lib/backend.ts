@@ -312,6 +312,12 @@ export const getSmartWalletRelayToken = () =>
 /** A Merkle root the shielded pool currently accepts (checked on-chain by the backend). */
 export const getPoolRoot = () => req<{ root: string }>("/api/pool/root");
 
+// --- Private pool with real proofs (SPP): the backend pays for transfers and withdrawals ---
+export const getZkPayer = () => req<{ address: string }>("/api/zk/payer");
+/** The payer signs only a transact call to Starlit's pools; needs a fresh passkey/PIN confirmation. */
+export const signWithZkPayer = (xdr: string) =>
+  req<{ signedTxXdr: string }>("/api/zk/payer/sign", { method: "POST", body: JSON.stringify({ xdr }) });
+
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
 export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
 export const notifyGatewayDeposit = (txHash: string) =>

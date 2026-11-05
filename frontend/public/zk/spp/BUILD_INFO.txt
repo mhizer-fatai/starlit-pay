@@ -1,0 +1,2 @@
+spp_commit=b37c5b8ae1c8d33a8ab0cc427756a734bfec19c0
+circuits=circuits-v0.7
