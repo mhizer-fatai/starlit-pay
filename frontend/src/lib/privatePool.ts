@@ -8,8 +8,8 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 
-import { getZkPayer, signWithZkPayer } from "@/lib/backend";
-import { createOwnerSigner, createZkSigner, deriveZkStorageKey } from "@/lib/zkSigner";
+import { getZkPayer, lookupZkKeys, publishZkKeys, signWithZkPayer, type ZkKeys } from "@/lib/backend";
+import { createOwnerSigner, createZkSigner, deriveZkStorageKey, signZkKeys, zkKeysSignedBy } from "@/lib/zkSigner";
 import type * as Spp from "../../public/zk/spp/js/types/index";
 
 import deploymentJson from "./spp/deployment.testnet.json";
@@ -75,7 +75,11 @@ export interface Payer {
 }
 const backendPayer: Payer = { address: async () => (await getZkPayer()).address, sign: signWithZkPayer };
 
-export function openPrivateSession(stellarSecretKey: string, payer: Payer = backendPayer): Promise<PrivateSession> {
+export function openPrivateSession(
+  stellarSecretKey: string,
+  payer: Payer = backendPayer,
+  publish: (keys: ZkKeys) => Promise<unknown> = publishZkKeys
+): Promise<PrivateSession> {
   const owner = StellarSdk.Keypair.fromSecret(stellarSecretKey);
   if (session?.owner === owner.publicKey()) return session.ready;
   const previous = session;
@@ -108,11 +112,18 @@ export function openPrivateSession(stellarSecretKey: string, payer: Payer = back
     // an owner-only account; the keys are then stored for the payer account.
     const { networkPassphrase } = deployment;
     const ownerOnly = await client.account({ networkPassphrase, userAddress: owner.publicKey() }, createOwnerSigner(owner));
+    let published: Spp.UserPublicKeys;
     try {
-      await ownerOnly.derivePrivacyKeys();
+      published = await ownerOnly.derivePrivacyKeys();
     } finally {
       ownerOnly.free();
     }
+
+    // Publish the public keys, signed by the wallet, so others can pay this user.
+    // Not fatal: paying and receiving by keys still works without it.
+    publish(signZkKeys(owner, published.notePublicKey, published.encryptionPublicKey)).catch((err) =>
+      console.warn("Could not publish private-payment keys:", err)
+    );
 
     const payerAddress = await payer.address();
     const account = await client.account(
@@ -147,6 +158,20 @@ export function openPrivateSession(stellarSecretKey: string, payer: Payer = back
     if (session?.ready === ready) session = null;
   });
   return ready;
+}
+
+export class RecipientKeysError extends Error {}
+
+/**
+ * A Starlit user's private-payment keys, checked against their wallet's
+ * signature here in the app: a server that swapped them would be caught.
+ */
+export async function recipientKeys(username: string, lookup = lookupZkKeys) {
+  const { keys } = await lookup(username);
+  if (!zkKeysSignedBy(keys.stellarAddress, keys)) {
+    throw new RecipientKeysError(`Couldn't verify @${keys.username}'s private keys, so nothing was sent.`);
+  }
+  return { username: keys.username, noteKey: keys.noteKey, encryptionKey: keys.encryptionKey };
 }
 
 /** Closes the session (on lock or sign-out), so decrypted notes leave memory. */

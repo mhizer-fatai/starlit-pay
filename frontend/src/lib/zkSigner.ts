@@ -6,6 +6,7 @@
 // transaction source and the pool's sender, so the user never needs XLM for
 // fees, and it signs on the backend, which checks the transaction first.
 
+import { Buffer } from "buffer";
 import * as StellarSdk from "@stellar/stellar-sdk";
 
 import { hkdf } from "@/lib/vault/crypto";
@@ -61,6 +62,24 @@ export function createZkSigner({ owner, payerAddress, signWithPayer }: ZkSignerD
       return { signedTxXdr, signerAddress: payerAddress };
     },
   };
+}
+
+/** What a user's wallet signs to publish their private keys; the backend checks the same text. */
+export function zkKeysMessage(noteKey: string, encryptionKey: string): string {
+  return `Starlit Pay private keys\nnote: ${noteKey.toLowerCase()}\nencryption: ${encryptionKey.toLowerCase()}`;
+}
+
+export function signZkKeys(owner: StellarSdk.Keypair, noteKey: string, encryptionKey: string) {
+  return { noteKey, encryptionKey, signature: owner.signMessage(zkKeysMessage(noteKey, encryptionKey)).toString("base64") };
+}
+
+/** Checks a recipient's keys were signed by their wallet, so the server can't swap them. */
+export function zkKeysSignedBy(address: string, keys: { noteKey: string; encryptionKey: string; signature: string }): boolean {
+  try {
+    return StellarSdk.Keypair.fromPublicKey(address).verifyMessage(zkKeysMessage(keys.noteKey, keys.encryptionKey), Buffer.from(keys.signature, "base64"));
+  } catch {
+    return false;
+  }
 }
 
 /**

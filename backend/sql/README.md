@@ -11,7 +11,8 @@ database, run them in this order:
 6. `schema_gateway.sql`: exactly-once deposits and background job positions
 7. `schema_faucet.sql`: faucet cooldown
 8. `schema_phase3.sql`: one payment per payment link
-9. `schema_lockdown.sql`: locks every table to the backend's service role (run
+9. `schema_zk_keys.sql`: users' public keys for private payments (real ZK)
+10. `schema_lockdown.sql`: locks every table to the backend's service role (run
    it after the backend is deployed with `SUPABASE_SERVICE_ROLE_KEY`)
 
 The gateway also needs a starting position (`daemon_state` row `gateway`), so

@@ -318,6 +318,17 @@ export const getZkPayer = () => req<{ address: string }>("/api/zk/payer");
 export const signWithZkPayer = (xdr: string) =>
   req<{ signedTxXdr: string }>("/api/zk/payer/sign", { method: "POST", body: JSON.stringify({ xdr }) });
 
+export interface ZkKeys {
+  noteKey: string;
+  encryptionKey: string;
+  /** SEP-53 signature of both keys by the user's wallet key, base64. */
+  signature: string;
+}
+export const publishZkKeys = (keys: ZkKeys) =>
+  req<{ keys: { noteKey: string; encryptionKey: string } }>("/api/zk/keys", { method: "PUT", body: JSON.stringify(keys) });
+export const lookupZkKeys = (username: string) =>
+  req<{ keys: ZkKeys & { username: string; stellarAddress: string } }>(`/api/zk/keys/${encodeURIComponent(username)}`);
+
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
 export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
 export const notifyGatewayDeposit = (txHash: string) =>

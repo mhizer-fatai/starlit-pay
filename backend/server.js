@@ -18,6 +18,7 @@ import { transactionsRouter } from "./src/modules/transactions/index.js";
 import { poolRouter } from "./src/modules/pool/index.js";
 import { smartWalletRouter } from "./src/modules/smart_wallet/index.js";
 import { zkPayerRouter } from "./src/modules/zk_payer/index.js";
+import { zkKeysRouter } from "./src/modules/zk_keys/index.js";
 import { gatewayRouter, startGateway } from "./src/modules/gateway/index.js";
 import { startIndexer } from "./src/indexer.js";
 import { startRelayerMonitor } from "./src/relayer_monitor.js";
@@ -42,6 +43,7 @@ for (const router of [
   poolRouter,
   smartWalletRouter,
   zkPayerRouter,
+  zkKeysRouter,
   gatewayRouter,
 ]) {
   app.use(router);
