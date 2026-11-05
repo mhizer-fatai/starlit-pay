@@ -69,4 +69,4 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 // endpoint all resolve through this so they can never disagree.
 const GATEWAY_ADDRESS = process.env.GATEWAY_PUBLIC_KEY || gatewayKeypair?.publicKey() || "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
 
-export { PORT, rpc, horizon, NETWORK_PASSPHRASE, relayerKeypair, gatewayKeypair, zkPayerKeypair, supabase, dbPoolConfig, GATEWAY_ADDRESS };
+export { PORT, RPC_URL, rpc, horizon, NETWORK_PASSPHRASE, relayerKeypair, gatewayKeypair, zkPayerKeypair, supabase, dbPoolConfig, GATEWAY_ADDRESS };

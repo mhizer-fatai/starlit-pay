@@ -8,7 +8,7 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 
-import { getZkPayer, lookupZkKeys, publishZkKeys, signWithZkPayer, type ZkKeys } from "@/lib/backend";
+import { BACKEND_URL, getZkPayer, lookupZkKeys, publishZkKeys, signWithZkPayer, type ZkKeys } from "@/lib/backend";
 import { createOwnerSigner, createZkSigner, deriveZkStorageKey, signZkKeys, zkKeysSignedBy } from "@/lib/zkSigner";
 import type * as Spp from "../../public/zk/spp/js/types/index";
 
@@ -64,22 +64,33 @@ export interface PrivateSession {
 
 let session: { owner: string; ready: Promise<PrivateSession> } | null = null;
 
+export interface Payer {
+  address(): Promise<string>;
+  sign(xdr: string): Promise<{ signedTxXdr: string }>;
+}
+
+export interface SessionOptions {
+  payer?: Payer;
+  publish?: (keys: ZkKeys) => Promise<unknown>;
+  rpcUrl?: string;
+  /** Starlit's archive of the pools' history (Stellar RPC keeps ~7 days). */
+  historyUrl?: string;
+}
+
+const defaults: Required<SessionOptions> = {
+  payer: { address: async () => (await getZkPayer()).address, sign: signWithZkPayer },
+  publish: publishZkKeys,
+  rpcUrl: RPC_URL,
+  historyUrl: `${BACKEND_URL}/api/zk/history`,
+};
+
 /**
  * Opens (once per page) the private-pool session for an unlocked wallet.
  * The first open on a device creates the encrypted local database and syncs
  * the pools; later opens reuse it.
  */
-export interface Payer {
-  address(): Promise<string>;
-  sign(xdr: string): Promise<{ signedTxXdr: string }>;
-}
-const backendPayer: Payer = { address: async () => (await getZkPayer()).address, sign: signWithZkPayer };
-
-export function openPrivateSession(
-  stellarSecretKey: string,
-  payer: Payer = backendPayer,
-  publish: (keys: ZkKeys) => Promise<unknown> = publishZkKeys
-): Promise<PrivateSession> {
+export function openPrivateSession(stellarSecretKey: string, options: SessionOptions = {}): Promise<PrivateSession> {
+  const { payer, publish, rpcUrl, historyUrl } = { ...defaults, ...options };
   const owner = StellarSdk.Keypair.fromSecret(stellarSecretKey);
   if (session?.owner === owner.publicKey()) return session.ready;
   const previous = session;
@@ -100,7 +111,9 @@ export function openPrivateSession(
     }
 
     const client = await spp.Client.new({
-      rpcUrl: RPC_URL,
+      rpcUrl,
+      // Used only when the RPC no longer holds the pools' early ledgers.
+      bootnodeUrl: historyUrl,
       storage,
       contractConfig: deployment,
       circuitsBaseUrl: new URL(`${SDK_BASE}dist/circuits/`, window.location.origin).href,
