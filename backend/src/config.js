@@ -31,6 +31,9 @@ function loadKeypair(envName, label) {
 
 const relayerKeypair = loadKeypair("RELAYER_SECRET_KEY", "Relayer");
 const gatewayKeypair = loadKeypair("GATEWAY_SECRET_KEY", "Gateway");
+// Pays for private-pool (ZK) transactions. A separate account keeps its
+// sequence numbers apart from the relayer's; falls back to the relayer.
+const zkPayerKeypair = loadKeypair("ZK_PAYER_SECRET_KEY", "ZK payer") ?? relayerKeypair;
 
 // The backend must use the secret service-role key: tables are locked to that
 // role by RLS. The anon key is public (it ships in the frontend bundle).
@@ -66,4 +69,4 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
 // endpoint all resolve through this so they can never disagree.
 const GATEWAY_ADDRESS = process.env.GATEWAY_PUBLIC_KEY || gatewayKeypair?.publicKey() || "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
 
-export { PORT, rpc, horizon, NETWORK_PASSPHRASE, relayerKeypair, gatewayKeypair, supabase, dbPoolConfig, GATEWAY_ADDRESS };
+export { PORT, rpc, horizon, NETWORK_PASSPHRASE, relayerKeypair, gatewayKeypair, zkPayerKeypair, supabase, dbPoolConfig, GATEWAY_ADDRESS };
