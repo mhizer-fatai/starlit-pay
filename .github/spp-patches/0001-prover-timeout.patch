@@ -1,0 +1,15 @@
+diff --git a/sdk/web/src/workers/prover.rs b/sdk/web/src/workers/prover.rs
+index 6b8a5fb..074d5f7 100644
+--- a/sdk/web/src/workers/prover.rs
++++ b/sdk/web/src/workers/prover.rs
+@@ -493,7 +493,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
+     Ok(resp)
+ }
+ 
+-const PROVE_TIMEOUT_MS: u32 = 30_000;
++// Starlit: the first proof on a device also downloads and prepares the
++// circuit (~18 MB), and phones prove slower than desktops; 30 s failed both.
++const PROVE_TIMEOUT_MS: u32 = 300_000;
+ 
+ /// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
+ #[wasm_bindgen]
