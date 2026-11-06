@@ -30,11 +30,11 @@ import { useSidebar } from "@/lib/sidebar";
 import {
   activityTitle,
   buildActivityFeed,
-  loadPrivateBalances,
   loadUserTransactions,
   type ActivityItem,
   type BalanceNote,
 } from "@/lib/wallet";
+import { loadAppBalances } from "@/lib/privateWallet";
 
 const actionButtonClass = "hover:bg-dashboard-blue hover:text-primary-foreground";
 
@@ -95,7 +95,7 @@ function DashboardPage() {
           if (!cancelled) setActivityLoading(false);
         });
       // Real private balance from decrypted unspent shielded notes (read).
-      void loadPrivateBalances(user)
+      void loadAppBalances(user)
         .then((balances) => {
           if (cancelled || !balances) return;
           setUsdcBalance(balances.usdc);
@@ -135,7 +135,7 @@ function DashboardPage() {
       }
       const [txs, balances] = await Promise.all([
         loadUserTransactions(user.id).catch(() => []),
-        loadPrivateBalances(user).catch(() => null),
+        loadAppBalances(user).catch(() => null),
       ]);
       setAllTxs(txs);
       if (balances) {

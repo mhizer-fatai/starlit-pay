@@ -49,11 +49,11 @@ import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
 import { TOKENS, isStellarAddress } from "@/lib/stellar";
 import {
   formatGrouped,
-  loadPrivateBalances,
   loadUserTransactions,
   recentStarlitRecipients,
   type ActivityItem,
 } from "@/lib/wallet";
+import { loadAppBalances, PartialPaymentError, sendZkPayment, zkPoolEnabled } from "@/lib/privateWallet";
 import { useSidebar } from "@/lib/sidebar";
 
 function SlideToConfirm({ label, onComplete }: { label: string; onComplete: () => void }) {
@@ -272,7 +272,7 @@ function SendPage() {
   async function refreshAssetBalances(user: SessionUser) {
     setBalancesRefreshing(true);
     try {
-      const balances = await loadPrivateBalances(user);
+      const balances = await loadAppBalances(user);
       if (balances) setAssetBalances({ USDC: balances.usdc, XLM: balances.xlm });
     } finally {
       setBalancesRefreshing(false);
@@ -366,6 +366,61 @@ function SendPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [confirmOpen]);
 
+  // Real-proof pool: the proof is made on this device and Starlit's payer pays the fee.
+  async function submitZkPayment(me: SessionUser, rawTarget: string, amt: number) {
+    const external = mode === "external";
+    if (external && !isStellarAddress(rawTarget)) {
+      throw new Error("Enter a valid Stellar address (G… account or C… smart wallet)");
+    }
+    const recipient = external ? rawTarget : rawTarget.replace(/^@/, "");
+    const shortAddress = `${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)}`;
+    try {
+      const { hashes, fees } = await sendZkPayment(
+        {
+          asset: asset as "XLM" | "USDC",
+          amount: amount.trim(),
+          to: external ? { kind: "address", address: recipient } : { kind: "user", username: recipient },
+        },
+        setMessage
+      );
+      const hash = hashes.at(-1);
+      const record = JSON.stringify({
+        to: external ? recipient : `@${recipient}`,
+        amount: amt,
+        asset,
+        type: external ? "withdraw" : "send",
+        hash,
+        at: new Date().toISOString(),
+      });
+      await postTransaction({ user_id: me.id, encrypted_payload: btoa(record) }).catch((err) =>
+        console.error("Failed to record payment:", err)
+      );
+      if (linkCommitment) {
+        await claimPaymentLink(linkCommitment, hash).catch((err) => console.error("Failed to mark payment link as claimed:", err));
+      }
+      const feeNote = fees > 0 ? ` (privacy fee ${fees} ${asset})` : "";
+      setMessage(external ? `Withdrew ${amt} ${asset} to ${shortAddress}${feeNote}.` : `Sent ${amt} ${asset} to @${recipient} privately${feeNote}.`);
+      setReceipt({
+        key: `${external ? "withdraw" : "send"}-${hash || Date.now()}`,
+        direction: "out",
+        amount: amt,
+        asset,
+        party: external ? shortAddress : recipient,
+        date: Date.now(),
+        reference: hash || recipient,
+        referenceLabel: external ? "Withdrawal Tx" : "Transaction Hash",
+        hash,
+      });
+      setUsername("");
+      setAmount("");
+    } catch (err) {
+      // Part of a multi-step payment already left: the balance must reflect it.
+      if (err instanceof PartialPaymentError) void refreshAssetBalances(me).catch(() => {});
+      throw err;
+    }
+    void refreshAssetBalances(me).catch(() => {});
+  }
+
   // Shares the note lock with background re-shielding, so both never spend the same note.
   function submitPayment() {
     return withNoteLock(submitPaymentUnlocked);
@@ -380,6 +435,11 @@ function SendPage() {
       const rawTarget = username.trim();
       const amt = Number(amount);
       if (!Number.isFinite(amt) || amt <= 0) throw new Error("Enter an amount greater than 0");
+
+      if (zkPoolEnabled()) {
+        await submitZkPayment(me, rawTarget, amt);
+        return;
+      }
 
       if (mode === "external") {
         if (!isStellarAddress(rawTarget)) {

@@ -1,0 +1,131 @@
+// The app's private balance and payments on the real-proof pools (SPP).
+// Turned on with VITE_PRIVATE_POOL=spp; until existing balances are moved
+// over (phase 5), the app keeps using the older pool.
+
+import { getUnlockedKeys, type SessionUser } from "@/lib/auth";
+import { loadPrivateBalances, type PrivateBalances } from "@/lib/wallet";
+import { openPrivateSession, recipientKeys, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
+
+export const zkPoolEnabled = () => import.meta.env.VITE_PRIVATE_POOL === "spp";
+
+const DECIMALS = 7; // XLM and USDC on Stellar
+const UNIT = 10n ** BigInt(DECIMALS);
+
+/** "1.5" → 15000000n. Throws on more than 7 decimals or anything that isn't a positive amount. */
+export function toBaseUnits(amount: string): bigint {
+  const trimmed = amount.trim();
+  const match = /^(\d+)(?:\.(\d{1,7}))?$/.exec(trimmed);
+  if (!match) throw new Error("Enter an amount with at most 7 decimal places.");
+  const value = BigInt(match[1]) * UNIT + BigInt((match[2] ?? "").padEnd(DECIMALS, "0"));
+  if (value <= 0n) throw new Error("Enter an amount greater than 0.");
+  return value;
+}
+
+export const fromBaseUnits = (value: bigint) => Number(value) / Number(UNIT);
+
+function ownerSecret(): string {
+  const secret = getUnlockedKeys()?.stellar.secretKey;
+  if (!secret) throw new Error("Unlock your wallet first.");
+  return secret;
+}
+
+export interface ZkBalances {
+  xlm: number;
+  usdc: number;
+}
+
+/** Private balances, after catching up with the chain. Null when the wallet is locked. */
+export async function loadZkBalances(options?: SessionOptions): Promise<ZkBalances | null> {
+  const secret = getUnlockedKeys()?.stellar.secretKey;
+  if (!secret) return null;
+  const session = await openPrivateSession(secret, options);
+  await session.sync();
+  const [xlm, usdc] = await Promise.all((["XLM", "USDC"] as PoolAsset[]).map(async (asset) => (await session.pool(asset)).balance()));
+  return { xlm: fromBaseUnits(xlm), usdc: fromBaseUnits(usdc) };
+}
+
+/**
+ * The balances the app shows, from whichever pool is in use. On the new pool,
+ * notes aren't listed yet: they don't say who sent them, so the user's own
+ * change would look like money received.
+ */
+export async function loadAppBalances(user: SessionUser): Promise<PrivateBalances | null> {
+  if (!zkPoolEnabled()) return loadPrivateBalances(user);
+  const balances = await loadZkBalances();
+  return balances && { ...balances, notes: [] };
+}
+
+export type Recipient = { kind: "user"; username: string } | { kind: "address"; address: string };
+
+export interface ZkPaymentResult {
+  hashes: string[];
+  /** Pool fees paid, in token units (one per on-chain step). */
+  fees: number;
+}
+
+export class PartialPaymentError extends Error {
+  constructor(
+    message: string,
+    readonly hashes: string[]
+  ) {
+    super(message);
+  }
+}
+
+const PROGRESS_EVENT = "stellar-private-payments:tx-progress";
+const STAGES: Record<string, string> = {
+  prove: "Securing your payment",
+  sync_wait: "Catching up with the network",
+  simulate: "Checking the payment",
+  sign: "Authorizing",
+  submit: "Sending",
+};
+
+/** Plain-language progress for the SDK's stages ("Securing your payment (step 1 of 2)…"). */
+export function progressMessage(detail: { stage: string; current?: number; total?: number }): string {
+  const label = STAGES[detail.stage] ?? "Working";
+  const step = detail.total && detail.total > 1 ? ` (step ${detail.current} of ${detail.total})` : "";
+  return `${label}${step}…`;
+}
+
+/**
+ * Pays a Starlit user privately, or withdraws to a public Stellar address.
+ * The proof is made on this device; Starlit's payer pays the network fee.
+ * The caller confirms the payment (passkey/PIN) first: the payer requires it.
+ */
+export async function sendZkPayment(
+  { asset, amount, to }: { asset: PoolAsset; amount: string; to: Recipient },
+  onProgress: (message: string) => void = () => {},
+  options?: SessionOptions
+): Promise<ZkPaymentResult> {
+  const value = toBaseUnits(amount);
+  onProgress("Getting ready…");
+  const session = await openPrivateSession(ownerSecret(), options);
+  await session.sync();
+  const pool = await session.pool(asset);
+
+  const [balance, maxSpend] = await Promise.all([pool.balance(), pool.maxSpend()]);
+  if (value > maxSpend) {
+    throw new Error(
+      balance === 0n
+        ? `You have no private ${asset} yet.`
+        : `You can send at most ${fromBaseUnits(maxSpend)} ${asset} (your balance is ${fromBaseUnits(balance)}, less the privacy fee).`
+    );
+  }
+  const keys = to.kind === "user" ? await recipientKeys(to.username) : null;
+  const estimate = await pool.estimate(value);
+
+  const listener = (event: Event) => onProgress(progressMessage((event as CustomEvent).detail));
+  window.addEventListener(PROGRESS_EVENT, listener);
+  try {
+    const result = keys ? await pool.transferToKeys(keys.noteKey, keys.encryptionKey, value) : await pool.withdraw(value, (to as { address: string }).address);
+    const hashes = [...result.hashes];
+    if (result.status === "ok") return { hashes, fees: fromBaseUnits(BigInt(estimate.fees)) };
+    if (hashes.length) {
+      throw new PartialPaymentError(`Only part of the payment went through (${hashes.length} step${hashes.length > 1 ? "s" : ""}). Check your balance, then send the rest.`, hashes);
+    }
+    throw new Error(result.message || "The payment didn't go through. Nothing was sent.");
+  } finally {
+    window.removeEventListener(PROGRESS_EVENT, listener);
+  }
+}

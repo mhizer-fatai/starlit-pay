@@ -21,6 +21,7 @@ import {
 import { closeVault, type OpenedVault, type VaultSecrets } from "@/lib/vault";
 import { authApi, getEmailProof } from "@/lib/vault/client";
 import { startAutoReshield, stopAutoReshield } from "@/lib/reshield";
+import { closePrivateSession } from "@/lib/privatePool";
 
 export { sha256 };
 
@@ -125,6 +126,8 @@ export function markUnlocked(keys: DerivedKeys, email?: string) {
 
 export function lockSession() {
   stopAutoReshield();
+  // Closes the private-pool database so its decrypted notes leave memory.
+  void closePrivateSession();
   unlockedKeys = null;
   unlockedThisLoad = false;
   closeVault(vaultSecrets);
