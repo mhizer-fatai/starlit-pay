@@ -101,7 +101,7 @@ jobs:
           echo "spp_commit=$SPP_COMMIT" > "$out/BUILD_INFO.txt"
           echo "circuits=$CIRCUITS_TAG" >> "$out/BUILD_INFO.txt"
           (cd "$GITHUB_WORKSPACE/starlit/.github/spp-patches" && sha256sum *.patch | sed 's/^/patch=/') >> "$out/BUILD_INFO.txt"
-          (cd "$out" && find . -type f | sort | xargs sha256sum > SHA256SUMS)
+          (cd "$out" && find . -type f ! -name SHA256SUMS | sort | xargs sha256sum > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS)
           du -sh "$out"/dist/* "$out"/dist/circuits/* || true
 
       - uses: actions/upload-artifact@v4

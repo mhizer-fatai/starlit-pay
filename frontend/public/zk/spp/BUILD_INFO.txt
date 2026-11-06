@@ -1,2 +1,3 @@
 spp_commit=b37c5b8ae1c8d33a8ab0cc427756a734bfec19c0
 circuits=circuits-v0.7
+patch=6a36e9421d4323d58ecb9d63a975c05249f5559ac6beb5eaeb1172c1875920cd  0001-prover-timeout.patch
