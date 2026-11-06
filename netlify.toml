@@ -13,6 +13,11 @@
   VITE_BACKEND_URL = "https://api.starlitpay.xyz"
   VITE_TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
 
+# The "staging" branch (staging.starlitpay.xyz): the real-ZK private pools on,
+# for testing before they are switched on for everyone.
+[context.staging.environment]
+  VITE_PRIVATE_POOL = "spp"
+
 # Configure redirects so SPA routing loads index.html for all sub-paths
 [[redirects]]
   from = "/*"
