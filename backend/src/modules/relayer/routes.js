@@ -12,7 +12,7 @@ export function createRelayerRouter({ service, monitor, paymentLimiter, checkLim
       requirePaymentApproval,
       validateBody(schema),
       asyncHandler(async (req, res) => {
-        const { hash, ledger } = await run(req.body);
+        const { hash, ledger } = await run(req.body, req.user);
         res.status(200).json({ success: true, hash, ledger });
       })
     );

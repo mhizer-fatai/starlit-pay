@@ -23,6 +23,8 @@ export async function withdrawFromPool(input: {
   onStatus?: (message: string) => void;
   /** Set when the recipient is the user's own public wallet. */
   transfer?: Transfer;
+  /** Leave it out of history (moving to the new pool: the deposit gets the record). */
+  unrecorded?: boolean;
 }): Promise<string> {
   const { user, asset, amount, recipient, transfer } = input;
   const onStatus = input.onStatus ?? (() => undefined);
@@ -113,6 +115,7 @@ export async function withdrawFromPool(input: {
       console.error("Failed to mark note as spent:", err)
     );
   }
+  if (input.unrecorded) return result.hash;
   const record = JSON.stringify({
     to: recipient,
     amount,

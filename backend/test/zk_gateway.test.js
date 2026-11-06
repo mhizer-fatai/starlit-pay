@@ -110,3 +110,34 @@ test("a failed deposit opens the credit again straight away", async () => {
   const [credit] = await s.service.list("u1");
   assert.deepEqual(credit, { id, amount: "2.5000000", asset: "XLM", status: "credited", receivedAt: "2026-11-06T10:00:00Z" });
 });
+
+import { createMigrationCredits } from "../src/modules/zk_gateway/migration.js";
+
+test("old-pool withdrawals to the gateway become the user's credit, once", async () => {
+  const recorded = [];
+  const repository = {
+    async recordCredit(row) {
+      if (recorded.some((r) => r.tx_hash === row.tx_hash)) return false;
+      recorded.push(row);
+      return true;
+    },
+  };
+  const errors = [];
+  const logger = { info() {}, warn() {}, error: (m) => errors.push(m) };
+  let enabled = true;
+  const record = createMigrationCredits({ repository, gatewayAddress: "GGATEWAY", tokens: { XLM: "CXLM", USDC: "CUSDC" }, enabled: () => enabled, logger });
+
+  await record({ recipient: "GGATEWAY", token: "CXLM", amount: 2.3456789, hash: "h1", userId: "u1" });
+  await record({ recipient: "GGATEWAY", token: "CXLM", amount: 2.3456789, hash: "h1", userId: "u1" });
+  assert.deepEqual(recorded, [{ tx_hash: "h1", op_index: 0, memo: "migration", amount: "2.3456789", asset: "XLM", user_id: "u1" }]);
+
+  await record({ recipient: "GSOMEONE", token: "CXLM", amount: 1, hash: "h2", userId: "u1" }); // an ordinary withdrawal
+  enabled = false;
+  await record({ recipient: "GGATEWAY", token: "CUSDC", amount: 1, hash: "h3", userId: "u1" }); // older pool still in use
+  assert.equal(recorded.length, 1);
+
+  enabled = true;
+  await record({ recipient: "GGATEWAY", token: "CUSDC", amount: 1, hash: "h4" }); // no user: needs a person
+  assert.equal(recorded.length, 1);
+  assert.equal(errors.length, 1);
+});

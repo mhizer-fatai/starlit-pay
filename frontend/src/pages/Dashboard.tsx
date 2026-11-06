@@ -34,7 +34,9 @@ import {
   type ActivityItem,
   type BalanceNote,
 } from "@/lib/wallet";
-import { completeArrivals, loadAppBalances, loadArrivals, zkPoolEnabled, type Arrivals } from "@/lib/privateWallet";
+import { completeArrivals, loadAppBalances, loadArrivals, MIN_DEPOSIT, zkPoolEnabled, type Arrivals } from "@/lib/privateWallet";
+import { confirmPaymentWithPasskey, friendlyAuthError } from "@/lib/passkeyAccount";
+import { loadOldBalance, moveOldBalance, type OldBalance } from "@/lib/zkMigration";
 
 const formatAmount = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 7 });
 
@@ -75,10 +77,27 @@ function DashboardPage() {
     .filter(Boolean)
     .join(" and ");
 
+  // Older pool's balance, moving to the real-ZK pools (phase 5).
+  const [oldBalance, setOldBalance] = useState<OldBalance>({ xlm: 0, usdc: 0 });
+  const [moveNeedsConfirm, setMoveNeedsConfirm] = useState(false);
+  const [moveError, setMoveError] = useState("");
+  const oldLabel = [oldBalance.xlm > 0 && `${formatAmount(oldBalance.xlm)} XLM`, oldBalance.usdc > 0 && `${formatAmount(oldBalance.usdc)} USDC`]
+    .filter(Boolean)
+    .join(" and ");
+
   // Stable (state setters only), so the page-load effect can depend on it.
   const completePendingArrivals = useCallback(async (user: SessionUser) => {
     if (!zkPoolEnabled()) return;
     try {
+      // Old notes first: moving them creates arrivals, completed just below.
+      const old = await loadOldBalance(user).catch(() => null);
+      if (old) setOldBalance(old);
+      if (old && (old.xlm >= MIN_DEPOSIT || old.usdc >= MIN_DEPOSIT)) {
+        const result = await moveOldBalance(user, setArrivalStatus);
+        setMoveNeedsConfirm("needsConfirmation" in result);
+        setOldBalance(await loadOldBalance(user));
+      }
+
       const pending = await loadArrivals();
       setArrivals(pending);
       if (!pending.xlm && !pending.usdc) return;
@@ -96,6 +115,19 @@ function DashboardPage() {
       setArrivalStatus("");
     }
   }, []);
+
+  async function confirmMove() {
+    setMoveError("");
+    try {
+      await confirmPaymentWithPasskey();
+    } catch (err) {
+      setMoveError(friendlyAuthError(err));
+      return;
+    }
+    setMoveNeedsConfirm(false);
+    const user = await getUser();
+    if (user) await completePendingArrivals(user);
+  }
 
   const usdcUsd = usdcBalance * prices.USDC;
   const xlmUsd = prices.XLM === null ? null : xlmBalance * prices.XLM;
@@ -311,6 +343,20 @@ function DashboardPage() {
                 <AssetRow asset="USDC" amount={usdcBalance} price={prices.USDC} hidden={balanceHidden} loading={balancesLoading} />
                 <AssetRow asset="XLM" amount={xlmBalance} price={prices.XLM} hidden={balanceHidden} loading={balancesLoading} />
               </div>
+              {oldLabel && (
+                <div className="wallet-caption" role="status">
+                  {balanceHidden ? "Your old private balance" : `${oldLabel} in your old private balance`} is moving to the new private pool
+                  {moveNeedsConfirm && (
+                    <>
+                      {". "}
+                      <Button type="button" variant="secondary" size="sm" onClick={() => void confirmMove()}>
+                        Confirm with passkey to move it
+                      </Button>
+                    </>
+                  )}
+                  {moveError && <span> {moveError}</span>}
+                </div>
+              )}
               {arrivingLabel && (
                 <p className="wallet-caption" role="status">
                   {balanceHidden ? "A payment is arriving" : `${arrivingLabel} arriving`}

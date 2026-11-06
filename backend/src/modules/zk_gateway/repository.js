@@ -19,6 +19,14 @@ export function createZkGatewayRepository(supabase) {
       return data;
     },
 
+    /** A credit not from a payment op (an old-pool withdrawal). False if already recorded. */
+    async recordCredit(row) {
+      const { error } = await deposits().insert([{ ...row, status: "credited", attempts: 1, created_at: stamp(), updated_at: stamp() }]);
+      if (error?.code === "23505") return false;
+      if (error) throw error;
+      return true;
+    },
+
     async getCredit(txHash, opIndex) {
       const { data, error } = await deposits().select("*").eq("tx_hash", txHash).eq("op_index", opIndex).maybeSingle();
       if (error) throw error;

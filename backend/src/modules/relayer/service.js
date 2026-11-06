@@ -44,7 +44,7 @@ export function createRelayerService({ invoke, isAddressBlocked, misconfigured =
       );
     },
 
-    async withdraw(body) {
+    async withdraw(body, user) {
       await screen(body.recipient);
       logger.info("Relayer submitting withdrawal with change...");
       const result = await submit(
@@ -62,7 +62,12 @@ export function createRelayerService({ invoke, isAddressBlocked, misconfigured =
         ],
         "Could not submit the withdrawal. Please try again."
       );
-      onWithdrawn();
+      // After the money moved: a bookkeeping failure here must not look like a failed withdrawal.
+      try {
+        await onWithdrawn({ recipient: body.recipient, token: body.token, amount: body.amount, hash: result.hash, userId: user?.id });
+      } catch (err) {
+        logger.error("After-withdrawal step failed:", err);
+      }
       return result;
     },
   };

@@ -1,5 +1,5 @@
 import rateLimit from "express-rate-limit";
-import { rpc, relayerKeypair, NETWORK_PASSPHRASE } from "../../config.js";
+import { rpc, relayerKeypair, NETWORK_PASSPHRASE, supabase, GATEWAY_ADDRESS } from "../../config.js";
 import { isAddressBlocked } from "../../asp_service.js";
 import { authLayer } from "../../auth_layer/mount.js";
 import { createPaymentApproval } from "../../payment_approval.js";
@@ -9,6 +9,10 @@ import { logger } from "../../http/logger.js";
 import { createPoolInvoker } from "./chain.js";
 import { createRelayerService } from "./service.js";
 import { createRelayerRouter } from "./routes.js";
+import { TOKEN_CONTRACTS } from "../../tokens.js";
+import { zkGatewayEnabled } from "../../zk_pools.js";
+import { createMigrationCredits } from "../zk_gateway/migration.js";
+import { createZkGatewayRepository } from "../zk_gateway/repository.js";
 
 const contractId = process.env.SHIELDED_POOL_CONTRACT_ID;
 const misconfigured = !/^C[A-Z2-7]{55}$/.test(contractId ?? "")
@@ -16,6 +20,15 @@ const misconfigured = !/^C[A-Z2-7]{55}$/.test(contractId ?? "")
   : !relayerKeypair
     ? "Relayer not initialized on the server."
     : null;
+
+// Old-pool withdrawals to the gateway: a user moving to the real-ZK pools.
+const recordMigration = createMigrationCredits({
+  repository: createZkGatewayRepository(supabase),
+  gatewayAddress: GATEWAY_ADDRESS,
+  tokens: TOKEN_CONTRACTS,
+  enabled: zkGatewayEnabled,
+  logger,
+});
 
 const service = createRelayerService({
   invoke: misconfigured
@@ -30,7 +43,10 @@ const service = createRelayerService({
       }),
   isAddressBlocked,
   misconfigured,
-  onWithdrawn: () => performRelayerGasCheck().catch(() => {}),
+  onWithdrawn: async (withdrawal) => {
+    performRelayerGasCheck().catch(() => {});
+    await recordMigration(withdrawal);
+  },
   logger,
 });
 
