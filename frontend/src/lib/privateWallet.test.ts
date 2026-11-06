@@ -15,10 +15,16 @@ const pool = {
   estimate: vi.fn(),
   transferToKeys: vi.fn(),
   withdraw: vi.fn(),
+  notes: vi.fn(),
 };
-vi.mock("@/lib/wallet", () => ({ loadPrivateBalances: vi.fn() }));
+vi.mock("@/lib/wallet", async (original) => ({ ...(await original<object>()), loadPrivateBalances: vi.fn() }));
+vi.mock("@/lib/zkHistory", () => ({
+  createdLeavesOrNone: async () => [7, 8],
+  ledgerTime: async (ledger: number) => ledger * 1000,
+  leafKey: (asset: string, leaf: number) => `${asset}:${leaf}`,
+}));
 vi.mock("@/lib/backend", () => ({ fetchZkDeposits: vi.fn(), signZkDeposit: vi.fn() }));
-vi.mock("@/lib/auth", () => ({ getUnlockedKeys: () => ({ stellar: { secretKey: "S-test" } }) }));
+vi.mock("@/lib/auth", () => ({ getUnlockedKeys: () => ({ stellar: { secretKey: "S-test" } }), getUser: async () => ({ id: "u1" }) }));
 vi.mock("@/lib/privatePool", () => ({
   openPrivateSession: async () => ({
     sync: async () => undefined,
@@ -32,7 +38,7 @@ vi.mock("@/lib/privatePool", () => ({
   recipientKeys: async (username: string) => ({ username, noteKey: "0xnote", encryptionKey: "0xenc" }),
 }));
 
-const { completeArrivals, fromBaseUnits, loadArrivals, PartialPaymentError, progressMessage, sendZkPayment, toBaseUnits } = await import("@/lib/privateWallet");
+const { completeArrivals, fromBaseUnits, loadArrivals, loadZkNotes, PartialPaymentError, progressMessage, sendZkPayment, toBaseUnits } = await import("@/lib/privateWallet");
 
 describe("amounts", () => {
   test("converts to 7-decimal base units exactly", () => {
@@ -65,7 +71,7 @@ describe("sendZkPayment", () => {
   test("pays a user to their verified keys", async () => {
     const result = await sendZkPayment({ asset: "XLM", amount: "0.2", to: { kind: "user", username: "bob" } });
     expect(pool.transferToKeys).toHaveBeenCalledWith("0xnote", "0xenc", 2_000_000n);
-    expect(result).toEqual({ hashes: ["h1"], fees: 0.01 });
+    expect(result).toEqual({ hashes: ["h1"], fees: 0.01, leaves: [7, 8] });
   });
 
   test("withdraws to a public address", async () => {
@@ -140,5 +146,35 @@ describe("arrivals", () => {
     expect(completeArrivals(() => {}, { fetchCredits })).toBe(first);
     expect(await first).toBe(0);
     expect(freed).toBe(1);
+  });
+});
+
+describe("history on the real-ZK pools", () => {
+  const record = (payload: object) => ({ id: "r", user_id: "u1", encrypted_payload: btoa(JSON.stringify(payload)), created_at: "2026-11-07T00:00:00Z" });
+  const note = (leafIndex: number, amount: string, spent = false) => ({ id: `n${leafIndex}`, leafIndex, amount, createdAtLedger: 100 + leafIndex, spent });
+
+  test("own change is marked as the user's, completed arrivals as deposits, the rest as received", async () => {
+    pool.notes.mockImplementation(async () => [note(3, "2000000"), note(7, "4900000", true), note(18, "4900000")]);
+    const txs = [
+      record({ to: "@bob", amount: 0.2, asset: "XLM", type: "send", leaves: [6, 7] }),
+      record({ amount: 0.49, asset: "XLM", type: "arrival", leaves: [18, 19] }),
+    ];
+    const notes = await loadZkNotes({ id: "u1", username: "alice" } as never, undefined, txs as never);
+    const xlm = notes.filter((n) => n.asset === "XLM");
+    expect(xlm.map((n) => [n.commitment, n.sender, n.amount, n.spent])).toEqual([
+      ["n3", undefined, 0.2, false], // someone paid alice
+      ["n7", "alice", 0.49, true], // her change: the feed leaves it out
+      ["n18", "deposit", 0.49, false], // a gateway arrival she completed
+    ]);
+    expect(xlm[0].createdAt).toBe(103_000);
+  });
+
+  test("a completed arrival is recorded with the notes it created", async () => {
+    pool.fee.mockResolvedValue(100_000n);
+    pool.deposit.mockResolvedValue({ status: "ok", hashes: ["d1"] });
+    const record = vi.fn(async () => undefined);
+    const fetchCredits = async () => ({ gateway: "G", deposits: [{ id: "a:0", amount: "0.5000000", asset: "XLM", status: "credited" }] }) as never;
+    await completeArrivals(() => {}, { fetchCredits, signDeposit: vi.fn(), record });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ type: "arrival", amount: 0.49, asset: "XLM", hash: "d1", leaves: [7, 8] }));
   });
 });

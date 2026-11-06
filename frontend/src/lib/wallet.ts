@@ -99,6 +99,10 @@ export interface DecodedTx {
   at?: string;
   /** Set on moves between the user's own private and public balances. */
   transfer?: Transfer;
+  /** "send", "withdraw", "deposit" (public to private), or "arrival" (a gateway payment this device deposited). */
+  type?: string;
+  /** Real-ZK pools: tree positions of the notes this transaction created (change, deposits). */
+  leaves?: number[];
 }
 
 export type Transfer = "to-public" | "to-private";
@@ -115,6 +119,8 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
       hash?: unknown;
       at?: unknown;
       transfer?: unknown;
+      type?: unknown;
+      leaves?: unknown;
     };
     if (obj && typeof obj === "object") {
       return {
@@ -126,6 +132,8 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
         hash: typeof obj.hash === "string" ? obj.hash : undefined,
         at: typeof obj.at === "string" ? obj.at : undefined,
         transfer: obj.transfer === "to-public" || obj.transfer === "to-private" ? obj.transfer : undefined,
+        type: typeof obj.type === "string" ? obj.type : undefined,
+        leaves: Array.isArray(obj.leaves) && obj.leaves.every((n) => Number.isInteger(n)) ? (obj.leaves as number[]) : undefined,
       };
     }
   } catch {
@@ -264,6 +272,8 @@ export function buildActivityFeed(
   for (const tx of txs) {
     const decoded = tx.encrypted_payload ? decodeTransactionPayload(tx.encrypted_payload) : null;
     if (decoded?.amount === undefined || !decoded.asset) continue;
+    // A completed gateway arrival shows once, as its "Deposit" note.
+    if (decoded.type === "arrival") continue;
     const transfer: Transfer | undefined =
       decoded.transfer ?? (ownWalletAddress && decoded.to === ownWalletAddress ? "to-public" : undefined);
     items.push({

@@ -2,9 +2,10 @@
 // Turned on with VITE_PRIVATE_POOL=spp; until existing balances are moved
 // over (phase 5), the app keeps using the older pool.
 
-import { getUnlockedKeys, type SessionUser } from "@/lib/auth";
-import { fetchZkDeposits, signZkDeposit } from "@/lib/backend";
-import { loadPrivateBalances, type PrivateBalances } from "@/lib/wallet";
+import { getUnlockedKeys, getUser, type SessionUser } from "@/lib/auth";
+import { fetchZkDeposits, postTransaction, signZkDeposit, type BackendTransaction } from "@/lib/backend";
+import { decodeTransactionPayload, loadPrivateBalances, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
+import { createdLeavesOrNone, ledgerTime, leafKey } from "@/lib/zkHistory";
 import { openPrivateSession, recipientKeys, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
 
 export const zkPoolEnabled = () => import.meta.env.VITE_PRIVATE_POOL === "spp";
@@ -45,15 +46,50 @@ export async function loadZkBalances(options?: SessionOptions): Promise<ZkBalanc
   return { xlm: fromBaseUnits(xlm), usdc: fromBaseUnits(usdc) };
 }
 
-/**
- * The balances the app shows, from whichever pool is in use. On the new pool,
- * notes aren't listed yet: they don't say who sent them, so the user's own
- * change would look like money received.
- */
-export async function loadAppBalances(user: SessionUser): Promise<PrivateBalances | null> {
+/** The balances and notes the app shows, from whichever pool is in use. */
+export async function loadAppBalances(user: SessionUser, options?: SessionOptions): Promise<PrivateBalances | null> {
   if (!zkPoolEnabled()) return loadPrivateBalances(user);
-  const balances = await loadZkBalances();
-  return balances && { ...balances, notes: [] };
+  const balances = await loadZkBalances(options);
+  if (!balances) return null;
+  const notes = await loadZkNotes(user, options).catch((err) => {
+    console.warn("Could not load private-payment history:", err);
+    return [];
+  });
+  return { ...balances, notes };
+}
+
+/**
+ * The user's notes in the real-ZK pools, for activity. A note at a position
+ * one of their own recorded transactions created is change (marked as theirs,
+ * so the feed leaves it out) or a deposit; any other note was sent to them.
+ * Pool notes don't say who sent them, so those show as "Received".
+ */
+export async function loadZkNotes(user: SessionUser, options?: SessionOptions, txs?: BackendTransaction[]): Promise<BalanceNote[]> {
+  const records = txs ?? (await loadUserTransactions(user.id));
+  const own = new Map<string, "change" | "deposit">();
+  for (const record of records) {
+    const decoded = record.encrypted_payload ? decodeTransactionPayload(record.encrypted_payload) : null;
+    if (!decoded?.leaves || !decoded.asset) continue;
+    for (const leaf of decoded.leaves) own.set(leafKey(decoded.asset, leaf), decoded.type === "arrival" ? "deposit" : "change");
+  }
+
+  const session = await openPrivateSession(ownerSecret(), options);
+  const notes: BalanceNote[] = [];
+  for (const asset of ["XLM", "USDC"] as PoolAsset[]) {
+    for (const note of await (await session.pool(asset)).notes()) {
+      const kind = own.get(leafKey(asset, note.leafIndex));
+      notes.push({
+        commitment: note.id,
+        amount: fromBaseUnits(BigInt(note.amount)),
+        asset,
+        createdAt: await ledgerTime(note.createdAtLedger).catch(() => 0),
+        sender: kind === "deposit" ? "deposit" : kind === "change" ? user.username : undefined,
+        ledger: note.createdAtLedger,
+        spent: note.spent,
+      });
+    }
+  }
+  return notes;
 }
 
 /** The pools' smallest deposit: a gateway payment below it can't be added to a private balance. */
@@ -76,6 +112,8 @@ export interface ZkPaymentResult {
   hashes: string[];
   /** Pool fees paid, in token units (one per on-chain step). */
   fees: number;
+  /** Tree positions of the notes the payment created (record them: see loadZkNotes). */
+  leaves: number[];
 }
 
 export class PartialPaymentError extends Error {
@@ -134,7 +172,7 @@ export async function sendZkPayment(
     keys ? pool.transferToKeys(keys.noteKey, keys.encryptionKey, value) : pool.withdraw(value, (to as { address: string }).address)
   );
   const hashes = [...result.hashes];
-  if (result.status === "ok") return { hashes, fees: fromBaseUnits(BigInt(estimate.fees)) };
+  if (result.status === "ok") return { hashes, fees: fromBaseUnits(BigInt(estimate.fees)), leaves: await createdLeavesOrNone(hashes) };
   if (hashes.length) {
     throw new PartialPaymentError(`Only part of the payment went through (${hashes.length} step${hashes.length > 1 ? "s" : ""}). Check your balance, then send the rest.`, hashes);
   }
@@ -164,7 +202,14 @@ export interface Arrivals {
 interface ArrivalDeps {
   fetchCredits?: typeof fetchZkDeposits;
   signDeposit?: typeof signZkDeposit;
+  /** Keeps the completed deposit in the user's history (the notes it created). */
+  record?: (entry: { type: "arrival"; amount: number; asset: string; hash?: string; leaves: number[]; at: string }) => Promise<unknown>;
   options?: SessionOptions;
+}
+
+async function recordForUser(entry: object) {
+  const me = await getUser();
+  if (me) await postTransaction({ user_id: me.id, encrypted_payload: btoa(JSON.stringify(entry)) });
 }
 
 /** Totals received but not yet in the private balance. */
@@ -187,7 +232,10 @@ export function completeArrivals(onProgress: (message: string) => void = () => {
   return completing;
 }
 
-async function runArrivals(onProgress: (message: string) => void, { fetchCredits = fetchZkDeposits, signDeposit = signZkDeposit, options }: ArrivalDeps) {
+async function runArrivals(
+  onProgress: (message: string) => void,
+  { fetchCredits = fetchZkDeposits, signDeposit = signZkDeposit, record = recordForUser, options }: ArrivalDeps
+) {
   const { gateway, deposits } = await fetchCredits();
   const ready = deposits.filter((d) => d.status === "credited");
   if (!ready.length) return 0;
@@ -204,8 +252,18 @@ async function runArrivals(onProgress: (message: string) => void, { fetchCredits
       if (amount <= 0n) continue;
       onProgress(`Adding ${credit.amount.replace(/\.?0+$/, "")} ${credit.asset} to your private balance…`);
       const result = await withProgress(onProgress, () => pool.deposit(amount));
-      if (result.status === "ok") completed++;
-      else console.warn(`Arrival ${credit.id} not completed: ${result.message ?? result.status}`);
+      if (result.status === "ok") {
+        completed++;
+        const hashes = [...result.hashes];
+        await record({
+          type: "arrival",
+          amount: fromBaseUnits(amount),
+          asset: credit.asset,
+          hash: hashes.at(-1),
+          leaves: await createdLeavesOrNone(hashes),
+          at: new Date().toISOString(),
+        }).catch((err) => console.warn("Could not record the deposit:", err));
+      } else console.warn(`Arrival ${credit.id} not completed: ${result.message ?? result.status}`);
     } catch (err) {
       // Left as a credit: the next open tries again.
       console.warn(`Arrival ${credit.id} not completed:`, err);

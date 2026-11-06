@@ -375,7 +375,7 @@ function SendPage() {
     const recipient = external ? rawTarget : rawTarget.replace(/^@/, "");
     const shortAddress = `${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)}`;
     try {
-      const { hashes, fees } = await sendZkPayment(
+      const { hashes, fees, leaves } = await sendZkPayment(
         {
           asset: asset as "XLM" | "USDC",
           amount: amount.trim(),
@@ -390,6 +390,8 @@ function SendPage() {
         asset,
         type: external ? "withdraw" : "send",
         hash,
+        // The notes this created (change): lets history tell them from payments received.
+        leaves,
         at: new Date().toISOString(),
       });
       await postTransaction({ user_id: me.id, encrypted_payload: btoa(record) }).catch((err) =>
