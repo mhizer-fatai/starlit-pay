@@ -6,6 +6,7 @@ import { getUnlockedKeys, getUser, type SessionUser } from "@/lib/auth";
 import { fetchZkDeposits, postTransaction, signZkDeposit, type BackendTransaction, type ZkCredit } from "@/lib/backend";
 import { decodeTransactionPayload, loadPrivateBalances, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
 import { createdLeavesOrNone, ledgerTime, leafKey } from "@/lib/zkHistory";
+import { writeCachedBalance } from "@/lib/balanceCache";
 import { openPrivateSession, recipientKeys, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
 
 export const zkPoolEnabled = () => import.meta.env.VITE_PRIVATE_POOL === "spp";
@@ -51,6 +52,7 @@ export async function loadAppBalances(user: SessionUser, options?: SessionOption
   if (!zkPoolEnabled()) return loadPrivateBalances(user);
   const balances = await loadZkBalances(options);
   if (!balances) return null;
+  void writeCachedBalance(user.id, balances);
   const notes = await loadZkNotes(user, options).catch((err) => {
     console.warn("Could not load private-payment history:", err);
     return [];

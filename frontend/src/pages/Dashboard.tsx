@@ -37,6 +37,7 @@ import {
 import { completeArrivals, loadAppBalances, loadArrivals, zkPoolEnabled, type Arrivals } from "@/lib/privateWallet";
 import { confirmPaymentWithPasskey, friendlyAuthError } from "@/lib/passkeyAccount";
 import { loadOldBalance, moveOldBalance, type OldBalance } from "@/lib/zkMigration";
+import { readCachedBalance } from "@/lib/balanceCache";
 
 const formatAmount = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 7 });
 
@@ -163,9 +164,19 @@ function DashboardPage() {
         .finally(() => {
           if (!cancelled) setActivityLoading(false);
         });
+      // The last balance seen on this device first, while the pools sync.
+      let fresh = false;
+      void readCachedBalance(user.id).then((cached) => {
+        if (cancelled || fresh || !cached) return;
+        setUsdcBalance(cached.usdc);
+        setXlmBalance(cached.xlm);
+        setBalancesLoading(false);
+        setSyncing(true);
+      });
       // Real private balance from decrypted unspent shielded notes (read).
       void loadAppBalances(user)
         .then((balances) => {
+          fresh = true;
           if (cancelled || !balances) return;
           setUsdcBalance(balances.usdc);
           setXlmBalance(balances.xlm);
@@ -173,8 +184,10 @@ function DashboardPage() {
         })
         .catch(() => {})
         .finally(() => {
+          fresh = true;
           if (cancelled) return;
           setBalancesLoading(false);
+          setSyncing(false);
           // After the balance: an arrival takes ~40 s to prove and shouldn't hold it up.
           void completePendingArrivals(user);
         });
