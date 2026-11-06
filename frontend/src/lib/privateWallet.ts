@@ -56,6 +56,20 @@ export async function loadAppBalances(user: SessionUser): Promise<PrivateBalance
   return balances && { ...balances, notes: [] };
 }
 
+/** The pools' smallest deposit: a gateway payment below it can't be added to a private balance. */
+export const MIN_DEPOSIT = 0.1;
+/** The pools' fee on every private transaction, deposits included. */
+export const POOL_FEE = 0.01;
+
+/**
+ * Opens the private session, which publishes the user's signed keys so others
+ * can pay them by username. Resolves with whether that worked.
+ */
+export async function ensureReceivable(options?: SessionOptions): Promise<boolean> {
+  const session = await openPrivateSession(ownerSecret(), options);
+  return session.keysPublished;
+}
+
 export type Recipient = { kind: "user"; username: string } | { kind: "address"; address: string };
 
 export interface ZkPaymentResult {

@@ -29,3 +29,15 @@ test("each wallet gets its own database folder, in the shape the SDK accepts", a
   expect(await storageDirectory(bob.publicKey())).toBe(a);
   expect(await storageDirectory(StellarSdk.Keypair.random().publicKey())).not.toBe(a);
 });
+
+test("says plainly when a recipient isn't set up for private payments, or doesn't exist", async () => {
+  const { BackendError } = await import("@/lib/backend");
+  const notReady = async () => {
+    throw new BackendError(404, "This user can't receive private payments yet.");
+  };
+  await expect(recipientKeys("bob", notReady)).rejects.toThrow("@bob can't receive private payments yet");
+  const missing = async () => {
+    throw new BackendError(404, "User not found");
+  };
+  await expect(recipientKeys("nobody", missing)).rejects.toThrow("No Starlit user named @nobody");
+});

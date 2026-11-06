@@ -8,7 +8,7 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 
-import { BACKEND_URL, getZkPayer, lookupZkKeys, publishZkKeys, signWithZkPayer, type ZkKeys } from "@/lib/backend";
+import { BACKEND_URL, BackendError, getZkPayer, lookupZkKeys, publishZkKeys, signWithZkPayer, type ZkKeys } from "@/lib/backend";
 import { createOwnerSigner, createZkSigner, deriveZkStorageKey, signZkKeys, zkKeysSignedBy } from "@/lib/zkSigner";
 import type * as Spp from "../../public/zk/spp/js/types/index";
 
@@ -56,6 +56,8 @@ export async function storageDirectory(ownerAddress: string): Promise<string> {
 export interface PrivateSession {
   owner: string;
   account: Spp.Account;
+  /** Others can pay this user by username (their signed keys are published). */
+  keysPublished: boolean;
   /** Catches up with the pools now (background sync keeps going on its own). */
   sync(): Promise<void>;
   pool(asset: PoolAsset): Promise<Spp.PrivatePool>;
@@ -139,8 +141,12 @@ export function openPrivateSession(stellarSecretKey: string, options: SessionOpt
 
     // Publish the public keys, signed by the wallet, so others can pay this user.
     // Not fatal: paying and receiving by keys still works without it.
-    publish(signZkKeys(owner, published.notePublicKey, published.encryptionPublicKey)).catch((err) =>
-      console.warn("Could not publish private-payment keys:", err)
+    const keysPublished = await publish(signZkKeys(owner, published.notePublicKey, published.encryptionPublicKey)).then(
+      () => true,
+      (err) => {
+        console.warn("Could not publish private-payment keys:", err);
+        return false;
+      }
     );
 
     const payerAddress = await payer.address();
@@ -153,6 +159,7 @@ export function openPrivateSession(stellarSecretKey: string, options: SessionOpt
     return {
       owner: owner.publicKey(),
       account,
+      keysPublished,
       sync: () => client.sync(),
       pool(asset: PoolAsset) {
         let pool = pools.get(asset);
@@ -198,7 +205,19 @@ export class RecipientKeysError extends Error {}
  * signature here in the app: a server that swapped them would be caught.
  */
 export async function recipientKeys(username: string, lookup = lookupZkKeys) {
-  const { keys } = await lookup(username);
+  let keys;
+  try {
+    ({ keys } = await lookup(username));
+  } catch (err) {
+    if (err instanceof BackendError && err.status === 404) {
+      throw new RecipientKeysError(
+        /yet/.test(err.message)
+          ? `@${username} can't receive private payments yet. They'll be able to once they next open Starlit Pay.`
+          : `No Starlit user named @${username}.`
+      );
+    }
+    throw err;
+  }
   if (!zkKeysSignedBy(keys.stellarAddress, keys)) {
     throw new RecipientKeysError(`Couldn't verify @${keys.username}'s private keys, so nothing was sent.`);
   }

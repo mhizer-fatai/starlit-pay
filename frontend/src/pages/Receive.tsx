@@ -9,6 +9,7 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { getUser, type SessionUser } from "@/lib/auth";
 import { fetchGatewayAddress, notifyGatewayDeposit } from "@/lib/backend";
+import { completeArrivals, ensureReceivable, MIN_DEPOSIT, POOL_FEE, zkPoolEnabled } from "@/lib/privateWallet";
 import { useSidebar } from "@/lib/sidebar";
 import {
   DEPOSIT_GATEWAY_ADDRESS,
@@ -55,6 +56,7 @@ function ReceivePage() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletMessage, setWalletMessage] = useState("");
   const [gatewayAddress, setGatewayAddress] = useState(GATEWAY_FALLBACK);
+  const [privateReady, setPrivateReady] = useState<"checking" | "ready" | "failed" | null>(null);
 
   useEffect(() => {
     document.title = "Receive — Starlit Pay";
@@ -67,6 +69,13 @@ function ReceivePage() {
       }
       setUser(current);
       setChecking(false);
+      // Publishes this user's signed keys, so others can pay them by username.
+      if (zkPoolEnabled()) {
+        setPrivateReady("checking");
+        void ensureReceivable()
+          .then((ready) => !cancelled && setPrivateReady(ready ? "ready" : "failed"))
+          .catch(() => !cancelled && setPrivateReady("failed"));
+      }
     });
     void fetchGatewayAddress()
       .then((res) => {
@@ -91,6 +100,23 @@ function ReceivePage() {
     amount: depositAmount ? parseFloat(depositAmount) : undefined,
   });
 
+  // Real-ZK pools: the gateway records the payment as this user's credit, then
+  // this device proves the deposit into their private balance.
+  async function finishPrivateDeposit(hash: string, amt: number) {
+    setWalletMessage("Payment received by Starlit. Adding it to your private balance…");
+    try {
+      await notifyGatewayDeposit(hash);
+    } catch {
+      // The gateway also finds it on its own within a minute.
+    }
+    const completed = await completeArrivals(setWalletMessage).catch(() => 0);
+    setWalletMessage(
+      completed
+        ? `${amt} ${selectedAsset} is now in your private balance (less the ${POOL_FEE} ${selectedAsset} privacy fee).`
+        : `${amt} ${selectedAsset} received. It will be added to your private balance next time you open your Dashboard.`
+    );
+  }
+
   async function handleBrowserWalletDeposit() {
     if (!user?.deposit_memo) {
       setWalletMessage("User deposit memo is missing.");
@@ -99,6 +125,10 @@ function ReceivePage() {
     const amt = parseFloat(depositAmount);
     if (!amt || isNaN(amt) || amt <= 0) {
       setWalletMessage("Please enter an amount greater than 0 to deposit.");
+      return;
+    }
+    if (zkPoolEnabled() && amt < MIN_DEPOSIT) {
+      setWalletMessage(`The smallest deposit is ${MIN_DEPOSIT} ${selectedAsset}.`);
       return;
     }
 
@@ -126,6 +156,11 @@ function ReceivePage() {
       const hash = await submitSignedXdr(signedXdr);
 
       setWalletMessage(`Deposit submitted! Shielding funds into private balance for tx ${hash.slice(0, 8)}...`);
+      if (zkPoolEnabled()) {
+        await finishPrivateDeposit(hash, amt);
+        setDepositAmount("");
+        return;
+      }
       try {
         const result = await notifyGatewayDeposit(hash);
         // processed is false while the background gateway is still shielding it.
@@ -166,6 +201,13 @@ function ReceivePage() {
                   <code>{username ? `@${username}` : "—"}</code>
                   {username && <CopyButton value={`@${username}`} label="Copy Username" />}
                 </div>
+                {privateReady && (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {privateReady === "checking" && "Setting up private payments…"}
+                    {privateReady === "ready" && "Ready: anyone on Starlit can pay you privately by username."}
+                    {privateReady === "failed" && "Couldn't finish setting up private payments. Reload this page to try again."}
+                  </p>
+                )}
 
                 <p className="receive-label">Starlit Deposit Address (Gateway)</p>
                 <div className="receive-row">
@@ -225,6 +267,7 @@ function ReceivePage() {
                 <p className="receive-disclaimer mt-4">
                   <b>IMPORTANT:</b> You must include this 6-digit Memo ID when sending deposits.
                   Deposits sent without a Memo cannot be routed to your account.
+                  {zkPoolEnabled() && ` The smallest deposit is ${MIN_DEPOSIT}, and a ${POOL_FEE} privacy fee applies.`}
                 </p>
               </section>
 
