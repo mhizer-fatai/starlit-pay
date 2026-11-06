@@ -3,6 +3,7 @@
 // over (phase 5), the app keeps using the older pool.
 
 import { getUnlockedKeys, type SessionUser } from "@/lib/auth";
+import { fetchZkDeposits, signZkDeposit } from "@/lib/backend";
 import { loadPrivateBalances, type PrivateBalances } from "@/lib/wallet";
 import { openPrivateSession, recipientKeys, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
 
@@ -115,17 +116,88 @@ export async function sendZkPayment(
   const keys = to.kind === "user" ? await recipientKeys(to.username) : null;
   const estimate = await pool.estimate(value);
 
+  const result = await withProgress(onProgress, () =>
+    keys ? pool.transferToKeys(keys.noteKey, keys.encryptionKey, value) : pool.withdraw(value, (to as { address: string }).address)
+  );
+  const hashes = [...result.hashes];
+  if (result.status === "ok") return { hashes, fees: fromBaseUnits(BigInt(estimate.fees)) };
+  if (hashes.length) {
+    throw new PartialPaymentError(`Only part of the payment went through (${hashes.length} step${hashes.length > 1 ? "s" : ""}). Check your balance, then send the rest.`, hashes);
+  }
+  throw new Error(result.message || "The payment didn't go through. Nothing was sent.");
+}
+
+/** Forwards the SDK's progress events while `run` is in flight. */
+async function withProgress<T>(onProgress: (message: string) => void, run: () => Promise<T>): Promise<T> {
   const listener = (event: Event) => onProgress(progressMessage((event as CustomEvent).detail));
   window.addEventListener(PROGRESS_EVENT, listener);
   try {
-    const result = keys ? await pool.transferToKeys(keys.noteKey, keys.encryptionKey, value) : await pool.withdraw(value, (to as { address: string }).address);
-    const hashes = [...result.hashes];
-    if (result.status === "ok") return { hashes, fees: fromBaseUnits(BigInt(estimate.fees)) };
-    if (hashes.length) {
-      throw new PartialPaymentError(`Only part of the payment went through (${hashes.length} step${hashes.length > 1 ? "s" : ""}). Check your balance, then send the rest.`, hashes);
-    }
-    throw new Error(result.message || "The payment didn't go through. Nothing was sent.");
+    return await run();
   } finally {
     window.removeEventListener(PROGRESS_EVENT, listener);
   }
+}
+
+// --- Arrivals: payments the gateway received for this user (faucet, or any
+// wallet paying their deposit memo). This device proves each deposit and the
+// gateway signs it as the depositor, so the user's wallet never appears on-chain.
+
+export interface Arrivals {
+  xlm: number;
+  usdc: number;
+}
+
+interface ArrivalDeps {
+  fetchCredits?: typeof fetchZkDeposits;
+  signDeposit?: typeof signZkDeposit;
+  options?: SessionOptions;
+}
+
+/** Totals received but not yet in the private balance. */
+export async function loadArrivals({ fetchCredits = fetchZkDeposits }: ArrivalDeps = {}): Promise<Arrivals> {
+  const { deposits } = await fetchCredits();
+  const total = (asset: string) => deposits.filter((d) => d.asset === asset).reduce((sum, d) => sum + Number(d.amount), 0);
+  return { xlm: total("XLM"), usdc: total("USDC") };
+}
+
+let completing: Promise<number> | null = null;
+
+/**
+ * Deposits every arrival into the private balance (about 40 s each), less the
+ * pool fee. Resolves with how many completed; one run at a time.
+ */
+export function completeArrivals(onProgress: (message: string) => void = () => {}, deps: ArrivalDeps = {}): Promise<number> {
+  completing ??= runArrivals(onProgress, deps).finally(() => {
+    completing = null;
+  });
+  return completing;
+}
+
+async function runArrivals(onProgress: (message: string) => void, { fetchCredits = fetchZkDeposits, signDeposit = signZkDeposit, options }: ArrivalDeps) {
+  const { gateway, deposits } = await fetchCredits();
+  const ready = deposits.filter((d) => d.status === "credited");
+  if (!ready.length) return 0;
+  const session = await openPrivateSession(ownerSecret(), options);
+  await session.sync();
+
+  let completed = 0;
+  for (const credit of ready) {
+    const signer = { address: async () => gateway, sign: (xdr: string) => signDeposit(credit.id, xdr) };
+    const { pool, free } = await session.poolSignedBy(credit.asset, signer);
+    try {
+      // The pool adds its fee on top, so this pulls exactly the amount received.
+      const amount = toBaseUnits(credit.amount) - (await pool.fee());
+      if (amount <= 0n) continue;
+      onProgress(`Adding ${credit.amount.replace(/\.?0+$/, "")} ${credit.asset} to your private balance…`);
+      const result = await withProgress(onProgress, () => pool.deposit(amount));
+      if (result.status === "ok") completed++;
+      else console.warn(`Arrival ${credit.id} not completed: ${result.message ?? result.status}`);
+    } catch (err) {
+      // Left as a credit: the next open tries again.
+      console.warn(`Arrival ${credit.id} not completed:`, err);
+    } finally {
+      free();
+    }
+  }
+  return completed;
 }

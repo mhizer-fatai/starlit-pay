@@ -19,7 +19,7 @@ function paymentRecord({ amounts = ["50"], memo = "7", memoType = "id", destinat
   return { hash: tx.hash().toString("hex"), envelope_xdr: tx.toXDR(), memo, memo_type: memo === null ? "none" : memoType, paging_token: `pt-${seq}` };
 }
 
-function setup({ outcomes = [], blocked = false } = {}) {
+function setup({ outcomes = [], blocked = false, zkCredits = null } = {}) {
   let clock = Date.parse("2026-11-03T12:00:00Z");
   const rows = new Map();
   const notes = new Map();
@@ -86,6 +86,7 @@ function setup({ outcomes = [], blocked = false } = {}) {
     poolContract: "CPOOL",
     networkPassphrase: PASSPHRASE,
     logger: silent,
+    zkCredits,
     now: () => clock,
   });
 
@@ -245,4 +246,30 @@ test("without a saved position the daemon waits instead of replaying history", a
   await tick();
   assert.equal(calls, 0);
   assert.equal(saved.gateway, null);
+});
+
+const ZK = { minDeposit: 1_000_000n, maxDeposit: 500_000_000_000n };
+
+test("real-ZK pools: a payment becomes the user's credit once, and nothing is deposited here", async () => {
+  const s = setup({ zkCredits: ZK });
+  const record = paymentRecord({ amounts: ["2.5"] });
+  const first = await s.processor.processTransaction(record);
+  assert.equal(first.operations[0].credited, true);
+  assert.equal((await s.processor.processTransaction(record)).operations[0].reason, "already_processed");
+  const [row] = s.rows.values();
+  assert.equal(row.status, "credited");
+  assert.equal(row.user_id, "u1");
+  assert.equal(row.amount, "2.5000000");
+  assert.equal(s.deposits.length, 0);
+  assert.equal(s.notes.size, 0);
+});
+
+test("real-ZK pools: blocked senders and amounts outside the pool's limits are set aside, never credited", async () => {
+  const blocked = setup({ zkCredits: ZK, blocked: true });
+  await blocked.processor.processTransaction(paymentRecord());
+  assert.equal([...blocked.rows.values()][0].status, "needs_review");
+
+  const tiny = setup({ zkCredits: ZK });
+  await tiny.processor.processTransaction(paymentRecord({ amounts: ["0.05"] }));
+  assert.equal([...tiny.rows.values()][0].status, "needs_review");
 });

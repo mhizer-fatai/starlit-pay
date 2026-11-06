@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { poolAssetCode, TOKEN_CONTRACTS as TOKENS } from "../../tokens.js";
+import { toStroops } from "../zk_payer/pool_tx.js";
 
 // Turns a payment to the gateway address into a private note in the pool.
 //
@@ -25,6 +26,8 @@ export function createDepositProcessor({
   poolContract,
   networkPassphrase,
   logger,
+  // { minDeposit, maxDeposit } in stroops: credit payments for the real-ZK pools instead of depositing.
+  zkCredits = null,
   now = Date.now,
 }) {
   // An attempt is stale once its pool transaction can no longer land.
@@ -39,7 +42,7 @@ export function createDepositProcessor({
 
   /** Decides whether this process may (re)try a payment someone already recorded. */
   async function mayRetry(key, row) {
-    if (row.status === "done" || row.status === "legacy") return { skip: "already_processed" };
+    if (["done", "legacy", "credited", "claiming"].includes(row.status)) return { skip: "already_processed" };
     if (row.status === "needs_review") return { skip: "needs_review" };
     const age = now() - Date.parse(row.updated_at);
     if (row.status !== "failed" && age < staleMs) return { skip: "in_progress" };
@@ -68,6 +71,7 @@ export function createDepositProcessor({
     const key = { txHash: txRecord.hash, opIndex };
     const amount = parseFloat(op.amount);
     const asset = poolAssetCode(op.asset);
+    if (zkCredits) return creditPayment({ key, op, asset, amount, user, source, memo });
 
     const noteSecret = crypto.createHmac("sha256", gatewaySecret).update(txRecord.hash).digest("hex");
     const commitment = await calculateCommitment(amount, user.public_encryption_key, TOKENS[asset], noteSecret);
@@ -118,6 +122,31 @@ export function createDepositProcessor({
     await repository.deleteNote(commitment).catch(() => undefined);
     await repository.update(key, { status: "failed", last_error: message.slice(0, 500) });
     throw new Error(`Gateway deposit failed: ${message}`);
+  }
+
+  /**
+   * Real-ZK pools: the payment becomes the user's credit, recorded exactly
+   * once; their browser proves the deposit later and the gateway signs it
+   * (see zk_gateway). Nothing is deposited here.
+   */
+  async function creditPayment({ key, op, asset, amount, user, source, memo }) {
+    if (!(await repository.claim(key, { memo: String(memo), amount: op.amount, asset, user_id: user.id }))) {
+      const decision = await mayRetry(key, await repository.get(key));
+      if (decision.skip) return { processed: false, reason: decision.skip };
+    }
+    if (await isAddressBlocked(source)) {
+      logger.warn(`[ASP COMPLIANCE BLOCK] Deposit from ${source} rejected for @${user.username}.`);
+      await setAside(key, "sender blocked by screening");
+      return { processed: false, reason: "sanctioned_address" };
+    }
+    const stroops = toStroops(op.amount);
+    if (stroops < zkCredits.minDeposit || stroops > zkCredits.maxDeposit) {
+      await setAside(key, `amount ${op.amount} ${asset} is outside the pool's deposit limits`);
+      return { processed: false, reason: "outside_deposit_limits" };
+    }
+    await repository.update(key, { status: "credited", user_id: user.id, last_error: null });
+    logger.info(`Gateway credited ${amount} ${asset} to @${user.username} (memo ${memo}); their device completes the deposit`);
+    return { processed: true, credited: true, amount, asset };
   }
 
   /** Processes every payment to the gateway in one Horizon transaction record. */

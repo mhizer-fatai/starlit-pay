@@ -329,6 +329,18 @@ export const publishZkKeys = (keys: ZkKeys) =>
 export const lookupZkKeys = (username: string) =>
   req<{ keys: ZkKeys & { username: string; stellarAddress: string } }>(`/api/zk/keys/${encodeURIComponent(username)}`);
 
+/** A payment the gateway received for this user that their device still has to deposit privately. */
+export interface ZkCredit {
+  id: string;
+  amount: string;
+  asset: "XLM" | "USDC";
+  status: "credited" | "claiming";
+  receivedAt: string;
+}
+export const fetchZkDeposits = () => req<{ gateway: string; deposits: ZkCredit[] }>("/api/zk/deposits");
+export const signZkDeposit = (id: string, xdr: string) =>
+  req<{ signedTxXdr: string }>("/api/zk/deposits/sign", { method: "POST", body: JSON.stringify({ id, xdr }) });
+
 export const relayerHealth = () => req<{ status: string; address: string; balanceXlm: number }>("/api/relayer/health");
 export const fetchGatewayAddress = () => req<{ address: string }>("/api/gateway/address");
 export const notifyGatewayDeposit = (txHash: string) =>

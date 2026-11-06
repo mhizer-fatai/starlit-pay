@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import {
@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AppTopbar } from "@/components/AppTopbar";
 import { DashboardSidebar } from "@/components/DashboardSidebar";
-import { getUser, signOut } from "@/lib/auth";
+import { getUser, signOut, type SessionUser } from "@/lib/auth";
 import { fetchStats, ownWalletAddress, type BackendTransaction } from "@/lib/backend";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
@@ -34,7 +34,9 @@ import {
   type ActivityItem,
   type BalanceNote,
 } from "@/lib/wallet";
-import { loadAppBalances } from "@/lib/privateWallet";
+import { completeArrivals, loadAppBalances, loadArrivals, zkPoolEnabled, type Arrivals } from "@/lib/privateWallet";
+
+const formatAmount = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 7 });
 
 const actionButtonClass = "hover:bg-dashboard-blue hover:text-primary-foreground";
 
@@ -66,6 +68,35 @@ function DashboardPage() {
   // Live prices via the backend (Stellar DEX first). XLM is null when no real
   // price is available; the total is then unknown rather than guessed.
   const prices = usePrices();
+  // Real-ZK pools: payments the gateway received that this device is adding to the balance.
+  const [arrivals, setArrivals] = useState<Arrivals>({ xlm: 0, usdc: 0 });
+  const [arrivalStatus, setArrivalStatus] = useState("");
+  const arrivingLabel = [arrivals.xlm > 0 && `${formatAmount(arrivals.xlm)} XLM`, arrivals.usdc > 0 && `${formatAmount(arrivals.usdc)} USDC`]
+    .filter(Boolean)
+    .join(" and ");
+
+  // Stable (state setters only), so the page-load effect can depend on it.
+  const completePendingArrivals = useCallback(async (user: SessionUser) => {
+    if (!zkPoolEnabled()) return;
+    try {
+      const pending = await loadArrivals();
+      setArrivals(pending);
+      if (!pending.xlm && !pending.usdc) return;
+      const completed = await completeArrivals(setArrivalStatus);
+      const balances = completed ? await loadAppBalances(user).catch(() => null) : null;
+      if (balances) {
+        setUsdcBalance(balances.usdc);
+        setXlmBalance(balances.xlm);
+        setBalanceNotes(balances.notes);
+      }
+      setArrivals(await loadArrivals());
+    } catch (err) {
+      console.warn("Could not complete arriving payments:", err);
+    } finally {
+      setArrivalStatus("");
+    }
+  }, []);
+
   const usdcUsd = usdcBalance * prices.USDC;
   const xlmUsd = prices.XLM === null ? null : xlmBalance * prices.XLM;
   const totalUsd = xlmUsd === null && xlmBalance > 0 ? null : usdcUsd + (xlmUsd ?? 0);
@@ -104,7 +135,10 @@ function DashboardPage() {
         })
         .catch(() => {})
         .finally(() => {
-          if (!cancelled) setBalancesLoading(false);
+          if (cancelled) return;
+          setBalancesLoading(false);
+          // After the balance: an arrival takes ~40 s to prove and shouldn't hold it up.
+          void completePendingArrivals(user);
         });
     });
     void fetchStats()
@@ -115,7 +149,7 @@ function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, [navigate, completePendingArrivals]);
 
   async function handleSignOut() {
     await signOut();
@@ -143,6 +177,7 @@ function DashboardPage() {
         setXlmBalance(balances.xlm);
         setBalanceNotes(balances.notes);
       }
+      void completePendingArrivals(user);
     } finally {
       setSyncing(false);
     }
@@ -276,6 +311,12 @@ function DashboardPage() {
                 <AssetRow asset="USDC" amount={usdcBalance} price={prices.USDC} hidden={balanceHidden} loading={balancesLoading} />
                 <AssetRow asset="XLM" amount={xlmBalance} price={prices.XLM} hidden={balanceHidden} loading={balancesLoading} />
               </div>
+              {arrivingLabel && (
+                <p className="wallet-caption" role="status">
+                  {balanceHidden ? "A payment is arriving" : `${arrivingLabel} arriving`}
+                  {arrivalStatus ? ` · ${arrivalStatus}` : ""}
+                </p>
+              )}
               <p className="wallet-caption">Only you can see this balance. Payments from it stay private.</p>
             </section>
 

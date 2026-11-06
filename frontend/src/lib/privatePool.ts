@@ -59,6 +59,11 @@ export interface PrivateSession {
   /** Catches up with the pools now (background sync keeps going on its own). */
   sync(): Promise<void>;
   pool(asset: PoolAsset): Promise<Spp.PrivatePool>;
+  /**
+   * The pool, with another Starlit account as the transaction's source and
+   * pool sender (the gateway, for deposits it pays in). Free it after use.
+   */
+  poolSignedBy(asset: PoolAsset, signer: Payer): Promise<{ pool: Spp.PrivatePool; free(): void }>;
   close(): Promise<void>;
 }
 
@@ -156,6 +161,19 @@ export function openPrivateSession(stellarSecretKey: string, options: SessionOpt
           pools.set(asset, pool);
         }
         return pool;
+      },
+      async poolSignedBy(asset: PoolAsset, signer: Payer) {
+        const signerAddress = await signer.address();
+        const other = await client.account(
+          { networkPassphrase, userAddress: owner.publicKey(), signerAddress },
+          createZkSigner({ owner, payerAddress: signerAddress, signWithPayer: signer.sign })
+        );
+        try {
+          return { pool: await other.pool({ poolContract: POOLS[asset] }), free: () => other.free() };
+        } catch (err) {
+          other.free();
+          throw err;
+        }
       },
       async close() {
         client.stopBackgroundSync();

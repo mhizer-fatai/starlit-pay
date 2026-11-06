@@ -10,6 +10,7 @@ import { createGatewayDaemon } from "./daemon.js";
 import { createGatewayRepository } from "./repository.js";
 import { createGatewayRouter } from "./routes.js";
 import { createDepositProcessor } from "./service.js";
+import { ZK_DEPOSIT_LIMITS, zkGatewayEnabled } from "../../zk_pools.js";
 
 const POLL_INTERVAL_MS = 15_000;
 
@@ -26,6 +27,7 @@ const processor = gatewayKeypair
       poolContract: process.env.SHIELDED_POOL_CONTRACT_ID,
       networkPassphrase: NETWORK_PASSPHRASE,
       logger,
+      zkCredits: zkGatewayEnabled() ? ZK_DEPOSIT_LIMITS : null,
     })
   : {
       processTransaction: async () => {
@@ -53,11 +55,12 @@ async function ensureGatewayTrustlines() {
 }
 
 export function startGateway() {
-  if (!gatewayKeypair || !process.env.SHIELDED_POOL_CONTRACT_ID) {
+  // The real-ZK pools' credits don't need the older pool's contract.
+  if (!gatewayKeypair || (!zkGatewayEnabled() && !process.env.SHIELDED_POOL_CONTRACT_ID)) {
     logger.info("Deposit gateway daemon skipped (GATEWAY_SECRET_KEY or SHIELDED_POOL_CONTRACT_ID not set).");
     return;
   }
-  logger.info(`Deposit gateway daemon started on address: ${gatewayKeypair.publicKey()}`);
+  logger.info(`Deposit gateway daemon started on address: ${gatewayKeypair.publicKey()}${zkGatewayEnabled() ? " (credits for the real-ZK pools)" : ""}`);
   ensureGatewayTrustlines().catch((err) => logger.error("Gateway trustline setup warning:", err));
   const tick = createGatewayDaemon({ processor, chain, state: createDaemonState(supabase), logger });
   setInterval(tick, POLL_INTERVAL_MS);
