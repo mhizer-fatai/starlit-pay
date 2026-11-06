@@ -178,3 +178,18 @@ describe("history on the real-ZK pools", () => {
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ type: "arrival", amount: 0.49, asset: "XLM", hash: "d1", leaves: [7, 8] }));
   });
 });
+
+test("credits that arrive while deposits run are picked up in the same run, each tried once", async () => {
+  pool.fee.mockResolvedValue(100_000n);
+  pool.deposit.mockResolvedValue({ status: "ok", hashes: ["d"] });
+  const credit = (id: string) => ({ id, amount: "1.0000000", asset: "XLM", status: "credited" });
+  let call = 0;
+  const fetchCredits = vi.fn(async () => {
+    call++;
+    // Round 1 sees one credit; a second appears while it is being deposited.
+    const deposits = call === 1 ? [credit("a:0")] : [credit("a:0"), credit("b:0")];
+    return { gateway: "G", deposits } as never;
+  });
+  expect(await completeArrivals(() => {}, { fetchCredits, signDeposit: vi.fn(), record: vi.fn(async () => undefined) })).toBe(2);
+  expect(pool.deposit).toHaveBeenCalledTimes(2);
+});

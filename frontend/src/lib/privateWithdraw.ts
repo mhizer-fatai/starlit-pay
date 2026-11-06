@@ -25,6 +25,8 @@ export async function withdrawFromPool(input: {
   transfer?: Transfer;
   /** Leave it out of history (moving to the new pool: the deposit gets the record). */
   unrecorded?: boolean;
+  /** Notes not to use: just spent, but the database may not say so yet. */
+  exclude?: ReadonlySet<string>;
 }): Promise<string> {
   const { user, asset, amount, recipient, transfer } = input;
   const onStatus = input.onStatus ?? (() => undefined);
@@ -37,7 +39,9 @@ export async function withdrawFromPool(input: {
 
   onStatus("Finding your private funds…");
   const { notes } = await fetchNotes(viewingKey);
-  const spendable = await withoutSpentOnChain(getSpendableNotes(notes, viewingSecret, asset));
+  const spendable = (await withoutSpentOnChain(getSpendableNotes(notes, viewingSecret, asset))).filter(
+    (note) => !input.exclude?.has(note.commitment)
+  );
   const inputs: typeof spendable = [];
   let inputSum = 0;
   for (const note of spendable) {

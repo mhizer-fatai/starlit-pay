@@ -3,7 +3,7 @@
 // over (phase 5), the app keeps using the older pool.
 
 import { getUnlockedKeys, getUser, type SessionUser } from "@/lib/auth";
-import { fetchZkDeposits, postTransaction, signZkDeposit, type BackendTransaction } from "@/lib/backend";
+import { fetchZkDeposits, postTransaction, signZkDeposit, type BackendTransaction, type ZkCredit } from "@/lib/backend";
 import { decodeTransactionPayload, loadPrivateBalances, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
 import { createdLeavesOrNone, ledgerTime, leafKey } from "@/lib/zkHistory";
 import { openPrivateSession, recipientKeys, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
@@ -236,9 +236,30 @@ async function runArrivals(
   onProgress: (message: string) => void,
   { fetchCredits = fetchZkDeposits, signDeposit = signZkDeposit, record = recordForUser, options }: ArrivalDeps
 ) {
-  const { gateway, deposits } = await fetchCredits();
-  const ready = deposits.filter((d) => d.status === "credited");
-  if (!ready.length) return 0;
+  let completed = 0;
+  const tried = new Set<string>();
+  // Credits can arrive while this runs (an old balance still moving): look
+  // again after each round, a few times, but never retry one in the same run.
+  for (let round = 0; round < MAX_ARRIVAL_ROUNDS; round++) {
+    const { gateway, deposits } = await fetchCredits();
+    const ready = deposits.filter((d) => d.status === "credited" && !tried.has(d.id));
+    if (!ready.length) break;
+    ready.forEach((d) => tried.add(d.id));
+    completed += await depositCredits(ready, gateway, onProgress, signDeposit, record, options);
+  }
+  return completed;
+}
+
+const MAX_ARRIVAL_ROUNDS = 3;
+
+async function depositCredits(
+  ready: ZkCredit[],
+  gateway: string,
+  onProgress: (message: string) => void,
+  signDeposit: typeof signZkDeposit,
+  record: NonNullable<ArrivalDeps["record"]>,
+  options?: SessionOptions
+) {
   const session = await openPrivateSession(ownerSecret(), options);
   await session.sync();
 

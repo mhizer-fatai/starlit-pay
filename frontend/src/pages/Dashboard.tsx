@@ -34,7 +34,7 @@ import {
   type ActivityItem,
   type BalanceNote,
 } from "@/lib/wallet";
-import { completeArrivals, loadAppBalances, loadArrivals, MIN_DEPOSIT, zkPoolEnabled, type Arrivals } from "@/lib/privateWallet";
+import { completeArrivals, loadAppBalances, loadArrivals, zkPoolEnabled, type Arrivals } from "@/lib/privateWallet";
 import { confirmPaymentWithPasskey, friendlyAuthError } from "@/lib/passkeyAccount";
 import { loadOldBalance, moveOldBalance, type OldBalance } from "@/lib/zkMigration";
 
@@ -90,12 +90,18 @@ function DashboardPage() {
     if (!zkPoolEnabled()) return;
     try {
       // Old notes first: moving them creates arrivals, completed just below.
-      const old = await loadOldBalance(user).catch(() => null);
-      if (old) setOldBalance(old);
-      if (old && (old.xlm >= MIN_DEPOSIT || old.usdc >= MIN_DEPOSIT)) {
-        const result = await moveOldBalance(user, setArrivalStatus);
-        setMoveNeedsConfirm("needsConfirmation" in result);
-        setOldBalance(await loadOldBalance(user));
+      // A move that stops partway must not hold up what already moved.
+      try {
+        const old = await loadOldBalance(user);
+        setOldBalance(old);
+        if (old.xlm || old.usdc) {
+          const result = await moveOldBalance(user, setArrivalStatus);
+          setMoveNeedsConfirm(Boolean(result.needsConfirmation));
+          setMoveError(result.failed ? "Part of it couldn't move just now; it will try again next time you open Starlit." : "");
+          setOldBalance(await loadOldBalance(user));
+        }
+      } catch (err) {
+        console.warn("Could not move the old balance:", err);
       }
 
       const pending = await loadArrivals();
