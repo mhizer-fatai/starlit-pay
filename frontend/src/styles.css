@@ -1182,6 +1182,22 @@
   }
 }
 
+/* Like send-error, for neutral and positive feedback (username checks). */
+@utility send-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  color: var(--color-muted-foreground);
+  font-size: 12.5px;
+  font-weight: 500;
+  & svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+}
+
 @utility send-select-trigger {
   height: 52px;
   outline: none;

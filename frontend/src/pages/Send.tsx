@@ -10,6 +10,7 @@ import {
   AtSign,
   Check,
   ChevronDown,
+  CircleCheck,
   Fingerprint,
   Hash,
   Loader2,
@@ -53,7 +54,7 @@ import {
   recentStarlitRecipients,
   type ActivityItem,
 } from "@/lib/wallet";
-import { loadAppBalances, PartialPaymentError, sendZkPayment, zkPoolEnabled } from "@/lib/privateWallet";
+import { checkRecipient, loadAppBalances, PartialPaymentError, sendZkPayment, zkPoolEnabled, type RecipientStatus } from "@/lib/privateWallet";
 import { useSidebar } from "@/lib/sidebar";
 
 function SlideToConfirm({ label, onComplete }: { label: string; onComplete: () => void }) {
@@ -141,6 +142,33 @@ function SlideToConfirm({ label, onComplete }: { label: string; onComplete: () =
   );
 }
 
+/** Under the username field: found (green check), not set up yet, or no such user. */
+function RecipientFeedback({ name, status }: { name: string; status: RecipientStatus | "checking" }) {
+  if (status === "checking") {
+    return (
+      <span className="send-hint" role="status">
+        <Loader2 className="animate-spin" /> Checking @{name}…
+      </span>
+    );
+  }
+  if (status === "ok") {
+    return (
+      <span className="send-hint" role="status" style={{ color: "#059669" }}>
+        <CircleCheck /> @{name} found
+      </span>
+    );
+  }
+  if (status === "unknown") return null;
+  return (
+    <span className="send-error" role="alert">
+      <TriangleAlert />
+      {status === "missing"
+        ? `No Starlit user named @${name}.`
+        : `@${name} can't receive private payments yet. They'll be able to once they next open Starlit Pay.`}
+    </span>
+  );
+}
+
 function SendPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -148,6 +176,8 @@ function SendPage() {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useSidebar();
   const [displayName, setDisplayName] = useState("Jane");
   const [username, setUsername] = useState("");
+  // Feedback while typing a Starlit username: does it exist, can it be paid privately?
+  const [recipientCheck, setRecipientCheck] = useState<{ name: string; status: RecipientStatus | "checking" } | null>(null);
   const [asset, setAsset] = useState("USDC");
   const [assetBalances, setAssetBalances] = useState<{ USDC: number; XLM: number }>({
     USDC: 0,
@@ -176,6 +206,26 @@ function SendPage() {
     const linkParam = params.get("link");
     if (linkParam) setLinkCommitment(linkParam);
   }, [location.search]);
+
+  // Check the username a moment after typing stops; a newer name replaces older answers.
+  useEffect(() => {
+    const name = username.trim().replace(/^@/, "");
+    if (mode !== "starlit" || !/^[A-Za-z0-9._-]{2,64}$/.test(name)) {
+      setRecipientCheck(null);
+      return;
+    }
+    let current = true;
+    const timer = window.setTimeout(() => {
+      setRecipientCheck({ name, status: "checking" });
+      void checkRecipient(name).then((status) => {
+        if (current) setRecipientCheck({ name, status });
+      });
+    }, 500);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [username, mode]);
 
 
   useEffect(() => {
@@ -780,11 +830,15 @@ function SendPage() {
                           })}
                         </div>
                       )}
-                      {errors.username && (
+                      {errors.username ? (
                         <span className="send-error" id="send-username-error" role="alert">
                           <TriangleAlert />
                           {errors.username}
                         </span>
+                      ) : (
+                        recipientCheck?.name === username.trim().replace(/^@/, "") && (
+                          <RecipientFeedback name={recipientCheck.name} status={recipientCheck.status} />
+                        )
                       )}
                     </label>
                   ) : (

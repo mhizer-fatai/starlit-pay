@@ -23,9 +23,11 @@ vi.mock("@/lib/zkHistory", () => ({
   ledgerTime: async (ledger: number) => ledger * 1000,
   leafKey: (asset: string, leaf: number) => `${asset}:${leaf}`,
 }));
-vi.mock("@/lib/backend", () => ({ fetchZkDeposits: vi.fn(), signZkDeposit: vi.fn() }));
+vi.mock("@/lib/backend", () => ({ fetchZkDeposits: vi.fn(), signZkDeposit: vi.fn(), lookupUser: vi.fn(), postTransaction: vi.fn(), BackendError: class extends Error {} }));
 vi.mock("@/lib/auth", () => ({ getUnlockedKeys: () => ({ stellar: { secretKey: "S-test" } }), getUser: async () => ({ id: "u1" }) }));
+class RecipientKeysError extends Error {}
 vi.mock("@/lib/privatePool", () => ({
+  RecipientKeysError,
   openPrivateSession: async () => ({
     sync: async () => undefined,
     pool: async () => pool,
@@ -192,4 +194,20 @@ test("credits that arrive while deposits run are picked up in the same run, each
   });
   expect(await completeArrivals(() => {}, { fetchCredits, signDeposit: vi.fn(), record: vi.fn(async () => undefined) })).toBe(2);
   expect(pool.deposit).toHaveBeenCalledTimes(2);
+});
+
+describe("checkRecipient", () => {
+  test("found, not set up yet, missing, or unknown", async () => {
+    const { RecipientKeysError } = await import("@/lib/privatePool");
+    const { checkRecipient } = await import("@/lib/privateWallet");
+    vi.stubEnv("VITE_PRIVATE_POOL", "spp");
+    const fail = (err: Error) => async () => {
+      throw err;
+    };
+    expect(await checkRecipient("@bob", { lookupKeys: async () => ({}) })).toBe("ok");
+    expect(await checkRecipient("bob", { lookupKeys: fail(new RecipientKeysError("@bob can't receive private payments yet.")) })).toBe("not-ready");
+    expect(await checkRecipient("nobody", { lookupKeys: fail(new RecipientKeysError("No Starlit user named @nobody.")) })).toBe("missing");
+    expect(await checkRecipient("bob", { lookupKeys: fail(new Error("offline")) })).toBe("unknown");
+    vi.unstubAllEnvs();
+  });
 });

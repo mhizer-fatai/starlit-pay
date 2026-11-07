@@ -3,11 +3,11 @@
 // over (phase 5), the app keeps using the older pool.
 
 import { getUnlockedKeys, getUser, type SessionUser } from "@/lib/auth";
-import { fetchZkDeposits, postTransaction, signZkDeposit, type BackendTransaction, type ZkCredit } from "@/lib/backend";
+import { BackendError, fetchZkDeposits, lookupUser, postTransaction, signZkDeposit, type BackendTransaction, type ZkCredit } from "@/lib/backend";
 import { decodeTransactionPayload, loadPrivateBalances, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
 import { createdLeavesOrNone, ledgerTime, leafKey } from "@/lib/zkHistory";
 import { writeCachedBalance } from "@/lib/balanceCache";
-import { openPrivateSession, recipientKeys, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
+import { openPrivateSession, recipientKeys, RecipientKeysError, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
 
 export const zkPoolEnabled = () => import.meta.env.VITE_PRIVATE_POOL === "spp";
 
@@ -106,6 +106,29 @@ export const POOL_FEE = 0.01;
 export async function ensureReceivable(options?: SessionOptions): Promise<boolean> {
   const session = await openPrivateSession(ownerSecret(), options);
   return session.keysPublished;
+}
+
+export type RecipientStatus = "ok" | "not-ready" | "missing" | "unknown";
+
+/**
+ * Whether a Starlit username can be paid privately, for feedback while typing:
+ * "ok", "not-ready" (exists but hasn't set up the real-ZK pools yet),
+ * "missing" (no such user), or "unknown" (couldn't check: say nothing).
+ */
+export async function checkRecipient(
+  username: string,
+  { lookupKeys = (name: string) => recipientKeys(name), lookupProfile = lookupUser }: { lookupKeys?: (name: string) => Promise<unknown>; lookupProfile?: typeof lookupUser } = {}
+): Promise<RecipientStatus> {
+  const name = username.trim().replace(/^@/, "");
+  try {
+    if (zkPoolEnabled()) await lookupKeys(name);
+    else await lookupProfile(name);
+    return "ok";
+  } catch (err) {
+    if (err instanceof RecipientKeysError) return /can't receive/.test(err.message) ? "not-ready" : "missing";
+    if (err instanceof BackendError && err.status === 404) return "missing";
+    return "unknown";
+  }
 }
 
 export type Recipient = { kind: "user"; username: string } | { kind: "address"; address: string };
