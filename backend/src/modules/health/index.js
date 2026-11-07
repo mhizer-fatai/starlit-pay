@@ -10,7 +10,7 @@ import { createHealthService } from "./service.js";
 
 const backgroundJobs = process.env.BACKGROUND_JOBS !== "off";
 const state = createDaemonState(supabase);
-const INDEXER_LAG_WARN_LEDGERS = 100; // about 8 minutes
+const HISTORY_LAG_WARN_LEDGERS = 100; // about 8 minutes
 const STALLED_MS = 10 * 60 * 1000;
 
 const count = async (query) => {
@@ -44,16 +44,17 @@ const health = createHealthService({
       const deposits = () => supabase.from("gateway_deposits").select("*", { count: "exact", head: true });
       const [needsReview, stalled] = await Promise.all([
         count(deposits().eq("status", "needs_review")),
-        count(deposits().in("status", ["processing", "submitted", "failed"]).lt("updated_at", new Date(Date.now() - STALLED_MS).toISOString())),
+        count(deposits().eq("status", "processing").lt("updated_at", new Date(Date.now() - STALLED_MS).toISOString())),
       ]);
       return { status: needsReview || stalled ? "warn" : "ok", needsReview, stalled };
     },
 
-    async indexer() {
+    // The private pools' history archive, which new devices sync from.
+    async history() {
       if (!backgroundJobs) return { status: "off" };
-      const [saved, latest] = await Promise.all([state.get("indexer"), rpc.getLatestLedger()]);
+      const [saved, latest] = await Promise.all([state.get("zk_history"), rpc.getLatestLedger()]);
       const lagLedgers = saved?.nextLedger ? Math.max(0, latest.sequence - saved.nextLedger) : null;
-      return { status: lagLedgers !== null && lagLedgers <= INDEXER_LAG_WARN_LEDGERS ? "ok" : "warn", lagLedgers };
+      return { status: lagLedgers !== null && lagLedgers <= HISTORY_LAG_WARN_LEDGERS ? "ok" : "warn", lagLedgers };
     },
   },
 });

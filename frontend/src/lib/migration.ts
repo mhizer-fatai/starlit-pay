@@ -3,19 +3,15 @@
 // The old keys can be recomputed by anyone who knows the email (by trying all
 // PINs), so they cannot just be wrapped in the vault. Instead:
 //   1. create the vault with new random keys (passkey + PIN + recovery code)
-//   2. spend every old private note into a fresh note owned by the new keys
-//      (a private send-to-self through the pool; the relayer pays the fees),
-//      so the old note secrets become worthless
-//   3. point the profile at the new public keys (allowed once by the server)
-//   4. move any XLM on the old public Stellar address to the new one
+//   2. point the profile at the new public keys (allowed once by the server)
+//   3. move any XLM on the old public Stellar address to the new one
+// (Private balances from the earlier test pool were retired, not moved.)
 // Every step can be re-run: an interrupted upgrade resumes where it stopped.
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 
-import { BackendError, clearSession, fetchNotes } from "@/lib/backend";
+import { BackendError, clearSession } from "@/lib/backend";
 import { deriveKeysFromEmailAndPin, identityCommitment, type DerivedKeys } from "@/lib/keys";
-import { getSpendableNotes, type SpendableNote } from "@/lib/notes";
-import { moveNotes, signedTimestamp } from "@/lib/selfTransfer";
 import { horizon, NETWORK_PASSPHRASE } from "@/lib/stellar";
 import { unlockFromVault, type SessionUser } from "@/lib/auth";
 import { createVault, type OpenedVault } from "@/lib/vault";
@@ -24,14 +20,11 @@ import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { NoVaultError } from "@/lib/vault/flows";
 import { guessDeviceName } from "@/lib/vault/webauthn";
 
-const ASSETS = ["XLM", "USDC"] as const;
-const MAX_SWEEP_PASSES = 3;
 
 export interface MigrationResult {
   /** New recovery code to show once (a resumed upgrade issues a fresh one too). */
   recoveryCode: string | null;
   passkeyCanUnlock: boolean;
-  notesMoved: number;
   publicXlm: PublicSweepResult;
 }
 
@@ -41,36 +34,6 @@ export type PublicSweepResult =
   | { status: "skipped"; reason: string };
 
 type Status = (message: string) => void;
-
-async function loadOldNotes(oldKeys: DerivedKeys) {
-  const { timestamp, signature } = signedTimestamp(oldKeys);
-  const { notes } = await fetchNotes(oldKeys.viewing.publicKey, timestamp, signature);
-  return notes;
-}
-
-/** Spends old notes (two at a time) into single fresh notes owned by the new keys. */
-async function sweepNotes(oldKeys: DerivedKeys, newKeys: DerivedKeys, username: string, status: Status): Promise<number> {
-  let moved = 0;
-  for (let pass = 0; pass < MAX_SWEEP_PASSES; pass++) {
-    const all = await loadOldNotes(oldKeys);
-    let movedThisPass = 0;
-
-    for (const asset of ASSETS) {
-      const notes = getSpendableNotes(all, oldKeys.viewing.secretKey, asset);
-      while (notes.length > 0) {
-        const pair = notes.splice(0, 2) as [SpendableNote] | [SpendableNote, SpendableNote];
-        const done = moved + movedThisPass + 1;
-        status(`Moving your ${asset} (${done} of ${done + Math.ceil(notes.length / 2)})…`);
-        await moveNotes({ notes: pair, asset, from: oldKeys, to: newKeys, username });
-        movedThisPass += 1;
-      }
-    }
-
-    moved += movedThisPass;
-    if (movedThisPass === 0) break;
-  }
-  return moved;
-}
 
 /** Moves XLM from the old public Stellar address to the new one (create + merge). */
 async function sweepPublicXlm(oldKeys: DerivedKeys, newKeys: DerivedKeys, status: Status): Promise<PublicSweepResult> {
@@ -181,14 +144,6 @@ export async function migrateLegacyAccount(input: {
   }
   const newKeys = opened.keys;
 
-  // Only sweep while the profile still points at the old keys (the note API
-  // finds notes through the profile).
-  let notesMoved = 0;
-  if (input.user.public_encryption_key === oldKeys.viewing.publicKey) {
-    status("Moving your private balance…");
-    notesMoved = await sweepNotes(oldKeys, newKeys, input.user.username, status);
-  }
-
   status("Switching your account to the new keys…");
   await ensureFreshSession();
   let user: SessionUser = input.user;
@@ -216,7 +171,7 @@ export async function migrateLegacyAccount(input: {
   // Drop the old session (legacy token and plaintext keys in localStorage).
   clearSession();
   unlockFromVault(opened, user);
-  return { recoveryCode, passkeyCanUnlock, notesMoved, publicXlm };
+  return { recoveryCode, passkeyCanUnlock, publicXlm };
 }
 
 /** True when an unlocked vault belongs to an account whose upgrade did not finish. */

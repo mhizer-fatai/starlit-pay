@@ -2,8 +2,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { createSerialQueue } from "../src/relayer_account.js";
-import { createRelayerService } from "../src/modules/relayer/service.js";
-import { createNotesService, verifyRequestSignature } from "../src/modules/notes/service.js";
 import { createCaptchaVerifier, createFaucetService, DRIP, FAUCET_COOLDOWN_MS } from "../src/modules/faucet/service.js";
 import { createStatsService } from "../src/modules/stats/service.js";
 import { ComplianceUnavailableError } from "../src/compliance.js";
@@ -28,112 +26,6 @@ test("relayer transactions take turns, even when one fails", async () => {
   const results = await Promise.allSettled([run(task("a", 20)), run(task("b", 5, true)), run(task("c", 1))]);
   assert.deepEqual(order, ["start a", "end a", "start b", "end b", "start c", "end c"]);
   assert.deepEqual(results.map((r) => r.status), ["fulfilled", "rejected", "fulfilled"]);
-});
-
-// --- relayer service ---
-
-const withdrawBody = { proof: hex, nullifier_1: hex, nullifier_2: hex, recipient: StellarSdk.Keypair.random().publicKey(), token: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC", amount: 2.5, root: hex, change_commitment: hex, encrypted_change_note: "00" };
-
-function relayer({ blocked = false, screenError = null, invokeError = null, misconfigured = null } = {}) {
-  const calls = [];
-  const service = createRelayerService({
-    invoke: async (method, args) => {
-      calls.push({ method, args });
-      if (invokeError) throw invokeError;
-      return { hash: "h1", ledger: 7 };
-    },
-    isAddressBlocked: async (address, opts) => {
-      assert.equal(opts.failClosed, true);
-      if (screenError) throw screenError;
-      return blocked;
-    },
-    misconfigured,
-    logger: silent,
-  });
-  return { service, calls };
-}
-
-test("a withdrawal passes nine contract arguments, amount in stroops", async () => {
-  const { service, calls } = relayer();
-  assert.deepEqual(await service.withdraw(withdrawBody), { hash: "h1", ledger: 7 });
-  assert.equal(calls[0].method, "withdraw");
-  assert.equal(calls[0].args.length, 9);
-  assert.equal(StellarSdk.scValToNative(calls[0].args[5]), 25_000_000n);
-});
-
-test("a blocked recipient is refused before anything is submitted", async () => {
-  const { service, calls } = relayer({ blocked: true });
-  await assert.rejects(service.withdraw(withdrawBody), { status: 403 });
-  assert.equal(calls.length, 0);
-});
-
-test("when screening can't answer, the withdrawal is refused (fail closed)", async () => {
-  const { service, calls } = relayer({ screenError: new ComplianceUnavailableError("G", new Error("rpc down")) });
-  await assert.rejects(service.withdraw(withdrawBody), { status: 503, code: "compliance_unavailable" });
-  assert.equal(calls.length, 0);
-});
-
-test("chain errors reach the client as a plain message", async () => {
-  const { service } = relayer({ invokeError: new Error("Simulation failed: HostError secret detail") });
-  await assert.rejects(service.transfer({ proof: hex, nullifier_1: hex, nullifier_2: hex, output_commitment_1: hex, encrypted_note_1: "00", output_commitment_2: hex, encrypted_note_2: "00", root: hex }), (err) => {
-    assert.equal(err.status, 500);
-    assert.equal(err.message, "Could not submit the payment. Please try again.");
-    return true;
-  });
-});
-
-test("a misconfigured relayer says so without touching the chain", async () => {
-  const { service, calls } = relayer({ misconfigured: "Relayer not initialized on the server." });
-  await assert.rejects(service.withdraw(withdrawBody), { status: 500, message: "Relayer not initialized on the server." });
-  assert.equal(calls.length, 0);
-});
-
-// --- notes ---
-
-const owner = StellarSdk.Keypair.random();
-function notes() {
-  const store = new Map([[hex, { recipient_viewing_key: "vk", status: "unspent" }]]);
-  const user = { id: "u1", stellar_address: owner.publicKey(), public_encryption_key: "vk" };
-  const service = createNotesService({
-    repository: {
-      findUserByViewingKey: async (vk) => (vk === "vk" ? user : null),
-      listNotes: async () => [...store.values()],
-      insertNote: async (n) => n,
-      findNote: async (c) => store.get(c) ?? null,
-      markSpent: async (c) => (store.get(c).status = "spent"),
-    },
-    logger: silent,
-  });
-  return { service, store };
-}
-const signed = () => {
-  const timestamp = String(Date.now());
-  return { timestamp, signature: owner.sign(Buffer.from(timestamp)).toString("hex") };
-};
-
-test("only the owner reads notes: by session or by signature", async () => {
-  const { service } = notes();
-  assert.equal((await service.list("vk", "u1", {})).length, 1);
-  assert.equal((await service.list("vk", null, signed())).length, 1);
-  await assert.rejects(service.list("vk", "someone-else", {}), { status: 401 });
-  await assert.rejects(service.list("vk", null, {}), { status: 401 });
-  const stranger = StellarSdk.Keypair.random();
-  const ts = String(Date.now());
-  await assert.rejects(service.list("vk", null, { timestamp: ts, signature: stranger.sign(Buffer.from(ts)).toString("hex") }), { status: 401 });
-});
-
-test("only the owner marks a note spent", async () => {
-  const { service, store } = notes();
-  await assert.rejects(service.markSpent(hex, "someone-else", {}), { status: 401 });
-  assert.equal(store.get(hex).status, "unspent");
-  assert.deepEqual(await service.markSpent(hex, "u1", {}), { success: true });
-  assert.equal((await service.markSpent(hex, "u1", {})).message, "Note already marked as spent.");
-});
-
-test("a request signature expires after a minute", () => {
-  const { timestamp, signature } = signed();
-  assert.equal(verifyRequestSignature(timestamp, signature, owner.publicKey()), true);
-  assert.equal(verifyRequestSignature(timestamp, signature, owner.publicKey(), Date.now() + 61_000), false);
 });
 
 // --- faucet ---
@@ -216,7 +108,7 @@ test("stats never invent a balance, and are cached", async () => {
   let reads = 0;
   let clock = 0;
   const stats = createStatsService({
-    countNotes: async () => ({ total: 10, spent: 4 }),
+    countNotes: async () => ({ notes: 10, transactions: 5 }),
     readPoolBalances: async () => {
       reads++;
       throw new Error("rpc down");
@@ -227,6 +119,7 @@ test("stats never invent a balance, and are cached", async () => {
   const first = await stats.get();
   assert.equal(first.tvlFormatted, null);
   assert.equal(first.notesCommitted, 10);
+  assert.equal(first.zkProofsVerified, 5);
   await stats.get();
   assert.equal(reads, 1);
   clock += 61_000;

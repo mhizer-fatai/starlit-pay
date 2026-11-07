@@ -1,5 +1,7 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 
+import deployment from "./spp/deployment.testnet.json";
+
 export const HORIZON_URL = "https://horizon-testnet.stellar.org";
 export const RPC_URL = "https://soroban-testnet.stellar.org";
 export const NETWORK_PASSPHRASE = StellarSdk.Networks.TESTNET;
@@ -12,13 +14,10 @@ export function isStellarAddress(value: string): boolean {
 export const horizon = new StellarSdk.Horizon.Server(HORIZON_URL);
 export const rpc = new StellarSdk.rpc.Server(RPC_URL);
 
-export const SHIELDED_POOL_CONTRACT_ID = "CAHSOWD7JVCRO4U73MGXRET7DRJDM3K2CFS5EGYARWDEGACHWSR6ZEZM";
-export const DEPOSIT_GATEWAY_ADDRESS = "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
+// Starlit's private pools (real ZK), one per asset.
+const PRIVATE_POOL_IDS = deployment.pools.map((pool) => pool.poolContractId);
 
-export const TOKENS: Record<string, string> = {
-  XLM: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
-  USDC: "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
-};
+export const DEPOSIT_GATEWAY_ADDRESS = "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
 
 export const CLASSIC_TOKENS: Record<string, string> = {
   USDC: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
@@ -150,75 +149,36 @@ export function generateSep0007Uri(params: {
 
 const txHashCache = new Map<string, string>();
 
-/** Resolves the on-chain Soroban transaction hash for a shielded note commitment. */
-export async function findTxHashForCommitment(
-  commitment: string,
-  ledger?: number
-): Promise<string | null> {
-  if (!commitment) return null;
-  const cleanCommitment = commitment.toLowerCase().trim();
-  if (txHashCache.has(cleanCommitment)) {
-    return txHashCache.get(cleanCommitment)!;
-  }
-
+/**
+ * The transaction that created a private-pool note, found from the note's
+ * commitment (the SDK's `0x` note id) among the pools' events at its ledger.
+ */
+export async function findTxHashForCommitment(commitment: string, ledger?: number): Promise<string | null> {
+  if (!commitment || !ledger || !Number.isFinite(ledger)) return null;
+  let wanted: bigint;
   try {
-    let startLedger: number;
-    let endLedger: number | undefined;
-
-    if (ledger && Number.isFinite(ledger) && ledger > 0) {
-      startLedger = ledger;
-      endLedger = ledger + 1;
-    } else {
-      const latest = await rpc.getLatestLedger();
-      startLedger = Math.max(1, latest.sequence - 300);
-    }
-
-    const filter: StellarSdk.rpc.Server.GetEventsRequest = {
-      startLedger,
-      filters: [
-        {
-          type: "contract",
-          contractIds: [SHIELDED_POOL_CONTRACT_ID],
-        },
-      ],
+    wanted = BigInt(commitment.trim());
+  } catch {
+    return null;
+  }
+  const cached = txHashCache.get(commitment);
+  if (cached) return cached;
+  try {
+    const res = await rpc.getEvents({
+      startLedger: ledger,
+      endLedger: ledger + 1,
+      filters: [{ type: "contract", contractIds: PRIVATE_POOL_IDS }],
       limit: 100,
-    };
-    if (endLedger) {
-      filter.endLedger = endLedger;
-    }
-
-    const res = await rpc.getEvents(filter);
-    if (!res.events || res.events.length === 0) return null;
-
-    for (const e of res.events) {
-      try {
-        const valArray = StellarSdk.scValToNative(e.value);
-        if (Array.isArray(valArray)) {
-          for (const item of valArray) {
-            let hex = "";
-            if (Buffer.isBuffer(item) || item instanceof Uint8Array) {
-              hex = Buffer.from(item).toString("hex").toLowerCase();
-            } else if (typeof item === "string") {
-              hex = item.toLowerCase();
-            }
-            if (hex === cleanCommitment && e.txHash) {
-              txHashCache.set(cleanCommitment, e.txHash);
-              return e.txHash;
-            }
-          }
-        }
-      } catch {
-        // continue
+    });
+    for (const e of res.events ?? []) {
+      if (StellarSdk.scValToNative(e.topic[0]) !== "new_commitment_event") continue;
+      if (BigInt(StellarSdk.scValToNative(e.topic[1])) === wanted && e.txHash) {
+        txHashCache.set(commitment, e.txHash);
+        return e.txHash;
       }
-    }
-
-    if (endLedger && res.events.length === 1 && res.events[0].txHash) {
-      txHashCache.set(cleanCommitment, res.events[0].txHash);
-      return res.events[0].txHash;
     }
   } catch (err) {
     console.warn("findTxHashForCommitment query error:", err);
   }
   return null;
 }
-

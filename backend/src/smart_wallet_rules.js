@@ -11,8 +11,7 @@ import { decodeCredentialPublicKey } from "@simplewebauthn/server/helpers";
 //                 exactly one signer: an ES256 passkey this user registered with
 //                 us, and no policies (one wallet per user)
 //   transfer      XLM or USDC transfer() whose `from` is the user's own wallet
-//   pool-deposit  shielded pool deposit() of XLM or USDC whose depositor is the
-//                 user's own wallet (moving public funds into the private balance)
+//                 (to the gateway: moving public funds into the private balance)
 //   wallet-admin  any call on the user's own wallet (e.g. add the backup signer);
 //                 only the wallet's own signers can authorise it
 //
@@ -132,26 +131,16 @@ function checkInvoke(func, auth, ctx) {
   if (target === ctx.walletAddress) return { kind: "wallet-admin", fn };
 
   if (ctx.tokens.includes(target) && fn === "transfer") {
-    const from = Address.fromScVal(call.args()[0]).toString();
-    if (from !== ctx.walletAddress) throw new RelayRuleError("Transfers must come from your own smart wallet.");
-    return { kind: "transfer", token: target };
-  }
-
-  if (ctx.poolContract && target === ctx.poolContract && fn === "deposit") {
-    const [depositor, token] = call.args();
-    if (!depositor || Address.fromScVal(depositor).toString() !== ctx.walletAddress) {
-      throw new RelayRuleError("Deposits must come from your own smart wallet.");
-    }
-    const tokenId = Address.fromScVal(token).toString();
-    if (!ctx.tokens.includes(tokenId)) throw new RelayRuleError("This action is not sponsored.");
-    return { kind: "pool-deposit", token: tokenId };
+    const [from, to, amount] = call.args();
+    if (Address.fromScVal(from).toString() !== ctx.walletAddress) throw new RelayRuleError("Transfers must come from your own smart wallet.");
+    return { kind: "transfer", token: target, to: Address.fromScVal(to).toString(), amount: BigInt(StellarSdk.scValToNative(amount)) };
   }
   throw new RelayRuleError("This action is not sponsored.");
 }
 
 /**
  * ctx: { walletAddress|null, passkeys: [{id, credentialId, rawPublicKey|null}], deployer,
- *        accountWasmHash, webauthnVerifier, tokens: [SAC ids], poolContract, networkPassphrase }
+ *        accountWasmHash, webauthnVerifier, tokens: [SAC ids], networkPassphrase }
  */
 export function checkRelayRequest(payload, ctx) {
   const { func, auth } = decode(payload);

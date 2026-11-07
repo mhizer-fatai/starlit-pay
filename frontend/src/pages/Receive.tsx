@@ -9,7 +9,7 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { getUser, type SessionUser } from "@/lib/auth";
 import { fetchGatewayAddress, notifyGatewayDeposit } from "@/lib/backend";
-import { completeArrivals, ensureReceivable, MIN_DEPOSIT, POOL_FEE, zkPoolEnabled } from "@/lib/privateWallet";
+import { completeArrivals, ensureReceivable, MIN_DEPOSIT, POOL_FEE } from "@/lib/privateWallet";
 import { useSidebar } from "@/lib/sidebar";
 import {
   DEPOSIT_GATEWAY_ADDRESS,
@@ -70,12 +70,10 @@ function ReceivePage() {
       setUser(current);
       setChecking(false);
       // Publishes this user's signed keys, so others can pay them by username.
-      if (zkPoolEnabled()) {
-        setPrivateReady("checking");
-        void ensureReceivable()
-          .then((ready) => !cancelled && setPrivateReady(ready ? "ready" : "failed"))
-          .catch(() => !cancelled && setPrivateReady("failed"));
-      }
+      setPrivateReady("checking");
+      void ensureReceivable()
+        .then((ready) => !cancelled && setPrivateReady(ready ? "ready" : "failed"))
+        .catch(() => !cancelled && setPrivateReady("failed"));
     });
     void fetchGatewayAddress()
       .then((res) => {
@@ -127,7 +125,7 @@ function ReceivePage() {
       setWalletMessage("Please enter an amount greater than 0 to deposit.");
       return;
     }
-    if (zkPoolEnabled() && amt < MIN_DEPOSIT) {
+    if (amt < MIN_DEPOSIT) {
       setWalletMessage(`The smallest deposit is ${MIN_DEPOSIT} ${selectedAsset}.`);
       return;
     }
@@ -156,22 +154,7 @@ function ReceivePage() {
       const hash = await submitSignedXdr(signedXdr);
 
       setWalletMessage(`Deposit submitted! Shielding funds into private balance for tx ${hash.slice(0, 8)}...`);
-      if (zkPoolEnabled()) {
-        await finishPrivateDeposit(hash, amt);
-        setDepositAmount("");
-        return;
-      }
-      try {
-        const result = await notifyGatewayDeposit(hash);
-        // processed is false while the background gateway is still shielding it.
-        setWalletMessage(
-          result.processed || result.operations?.some((op) => op.reason === "already_processed")
-            ? `Deposit of ${amt} ${selectedAsset} confirmed and shielded into your private balance!`
-            : `Deposit of ${amt} ${selectedAsset} received. Shielding it into your private balance (about 15 seconds)…`,
-        );
-      } catch {
-        setWalletMessage(`Deposit of ${amt} ${selectedAsset} submitted! Tx: ${hash.slice(0, 8)}... (Auto-shielding in ~15s)`);
-      }
+      await finishPrivateDeposit(hash, amt);
       setDepositAmount("");
     } catch (err: unknown) {
       setWalletMessage(err instanceof Error ? err.message : "Deposit failed.");
@@ -267,7 +250,7 @@ function ReceivePage() {
                 <p className="receive-disclaimer mt-4">
                   <b>IMPORTANT:</b> You must include this 6-digit Memo ID when sending deposits.
                   Deposits sent without a Memo cannot be routed to your account.
-                  {zkPoolEnabled() && ` The smallest deposit is ${MIN_DEPOSIT}, and a ${POOL_FEE} privacy fee applies.`}
+                  {` The smallest deposit is ${MIN_DEPOSIT}, and a ${POOL_FEE} privacy fee applies.`}
                 </p>
               </section>
 

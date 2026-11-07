@@ -5,7 +5,6 @@ import { createUsersService } from "../src/modules/users/service.js";
 import { createUsersRouter } from "../src/modules/users/routes.js";
 import { createSettingsService, DEFAULT_SETTINGS } from "../src/modules/settings/service.js";
 import { createPriceService } from "../src/modules/prices/service.js";
-import { createPoolRootService } from "../src/modules/pool/service.js";
 import { createRelayTokens } from "../src/modules/smart_wallet/relay_token.js";
 import { createSmartWalletService } from "../src/modules/smart_wallet/service.js";
 import { createSmartWalletRouter } from "../src/modules/smart_wallet/routes.js";
@@ -151,18 +150,6 @@ test("prices: never invented, cached, one refresh at a time", async () => {
 });
 
 // --- pool root ---
-
-test("pool root: the newest root the pool accepts, cached", async () => {
-  let checks = 0;
-  const service = createPoolRootService({
-    recentRoots: async () => ["nothex", hex("1"), hex("1"), hex("2")],
-    isRootValid: async (root) => (checks++, root === hex("2")),
-  });
-  assert.equal(await service.current(), hex("2"));
-  assert.equal(checks, 2);
-  await service.current();
-  assert.equal(checks, 2);
-});
 
 // --- smart wallet relay ---
 

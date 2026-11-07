@@ -1,15 +1,12 @@
-// The app's private balance and payments on the real-proof pools (SPP).
-// Turned on with VITE_PRIVATE_POOL=spp; until existing balances are moved
-// over (phase 5), the app keeps using the older pool.
+// The app's private balance and payments: Starlit's private pools, with real
+// zero-knowledge proofs made on this device (Nethermind's SPP).
 
 import { getUnlockedKeys, getUser, type SessionUser } from "@/lib/auth";
-import { BackendError, fetchZkDeposits, lookupUser, postTransaction, signZkDeposit, type BackendTransaction, type ZkCredit } from "@/lib/backend";
-import { decodeTransactionPayload, loadPrivateBalances, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
+import { BackendError, fetchZkDeposits, postTransaction, signZkDeposit, type BackendTransaction, type ZkCredit } from "@/lib/backend";
+import { decodeTransactionPayload, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
 import { createdLeavesOrNone, ledgerTime, leafKey } from "@/lib/zkHistory";
 import { writeCachedBalance } from "@/lib/balanceCache";
 import { openPrivateSession, recipientKeys, RecipientKeysError, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
-
-export const zkPoolEnabled = () => import.meta.env.VITE_PRIVATE_POOL === "spp";
 
 const DECIMALS = 7; // XLM and USDC on Stellar
 const UNIT = 10n ** BigInt(DECIMALS);
@@ -47,9 +44,8 @@ export async function loadZkBalances(options?: SessionOptions): Promise<ZkBalanc
   return { xlm: fromBaseUnits(xlm), usdc: fromBaseUnits(usdc) };
 }
 
-/** The balances and notes the app shows, from whichever pool is in use. */
+/** The balances and notes the app shows. Null when the wallet is locked. */
 export async function loadAppBalances(user: SessionUser, options?: SessionOptions): Promise<PrivateBalances | null> {
-  if (!zkPoolEnabled()) return loadPrivateBalances(user);
   const balances = await loadZkBalances(options);
   if (!balances) return null;
   void writeCachedBalance(user.id, balances);
@@ -112,17 +108,16 @@ export type RecipientStatus = "ok" | "not-ready" | "missing" | "unknown";
 
 /**
  * Whether a Starlit username can be paid privately, for feedback while typing:
- * "ok", "not-ready" (exists but hasn't set up the real-ZK pools yet),
- * "missing" (no such user), or "unknown" (couldn't check: say nothing).
+ * "ok", "not-ready" (exists but hasn't opened Starlit since private keys
+ * were introduced), "missing" (no such user), or "unknown" (couldn't check: say nothing).
  */
 export async function checkRecipient(
   username: string,
-  { lookupKeys = (name: string) => recipientKeys(name), lookupProfile = lookupUser }: { lookupKeys?: (name: string) => Promise<unknown>; lookupProfile?: typeof lookupUser } = {}
+  { lookupKeys = (name: string) => recipientKeys(name) }: { lookupKeys?: (name: string) => Promise<unknown> } = {}
 ): Promise<RecipientStatus> {
   const name = username.trim().replace(/^@/, "");
   try {
-    if (zkPoolEnabled()) await lookupKeys(name);
-    else await lookupProfile(name);
+    await lookupKeys(name);
     return "ok";
   } catch (err) {
     if (err instanceof RecipientKeysError) return /can't receive/.test(err.message) ? "not-ready" : "missing";

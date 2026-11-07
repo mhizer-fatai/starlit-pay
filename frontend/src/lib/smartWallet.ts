@@ -401,44 +401,34 @@ export async function sendFromSmartWallet(token: WalletToken, recipient: string,
 }
 
 /**
- * Deposits from the smart wallet into the shielded pool (public -> private).
- * The wallet authorises pool.deposit (and the token transfer inside it) with
- * its passkey; the commitment/note were created for the user beforehand.
+ * Sends the smart wallet's public funds to Starlit's gateway (public ->
+ * private). The relay that submits it credits the user, and their device then
+ * deposits the credit into the private pools. With `useRecoveryKey`, the
+ * vault's backup key signs instead of the wallet passkey (lost passkey).
  */
-export async function depositFromSmartWallet(
+export async function sendToGatewayFromSmartWallet(
   token: WalletToken,
   amount: number,
-  commitmentHex: string,
-  encryptedNoteHex: string,
+  gateway: string,
   options: { useRecoveryKey?: boolean } = {}
 ): Promise<string> {
   const info = await loadSmartWallet();
   if (!info.address) throw new Error("Create your public wallet first.");
   if (!(amount > 0)) throw new Error("Enter an amount greater than 0.");
-  const func = depositFunction(info, token, amount, commitmentHex, encryptedNoteHex);
-  if (options.useRecoveryKey) return submitWithRecoveryKey(info, func);
+  if (!options.useRecoveryKey) return sendFromSmartWallet(token, gateway, amount);
 
-  const { kit, signing } = await connectedKit(info);
-  const tx = await assembleCall(info, info.config.poolContract, "deposit", func);
-  const result = await kit.signAndSubmit(tx, signing);
-  if (!result.success) throw failure(result, "The transfer could not be completed.");
-  return result.hash ?? "";
-}
-
-function depositFunction(info: SmartWalletInfo, token: WalletToken, amount: number, commitmentHex: string, encryptedNoteHex: string) {
-  return StellarSdk.xdr.HostFunction.hostFunctionTypeInvokeContract(
+  const func = StellarSdk.xdr.HostFunction.hostFunctionTypeInvokeContract(
     new StellarSdk.xdr.InvokeContractArgs({
-      contractAddress: StellarSdk.Address.fromString(info.config.poolContract).toScAddress(),
-      functionName: "deposit",
+      contractAddress: StellarSdk.Address.fromString(tokenContract(info, token)).toScAddress(),
+      functionName: "transfer",
       args: [
-        StellarSdk.Address.fromString(info.address!).toScVal(),
-        StellarSdk.Address.fromString(tokenContract(info, token)).toScVal(),
+        StellarSdk.Address.fromString(info.address).toScVal(),
+        StellarSdk.Address.fromString(gateway).toScVal(),
         StellarSdk.nativeToScVal(BigInt(Math.round(amount * 1e7)), { type: "i128" }),
-        StellarSdk.nativeToScVal(Buffer.from(commitmentHex, "hex"), { type: "bytes" }),
-        StellarSdk.nativeToScVal(Buffer.from(encryptedNoteHex, "hex"), { type: "bytes" }),
       ],
     })
   );
+  return submitWithRecoveryKey(info, func);
 }
 
 /** Number of authorised calls in an auth entry (the root call plus every nested one). */

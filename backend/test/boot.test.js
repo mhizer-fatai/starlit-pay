@@ -33,9 +33,9 @@ test("the whole server starts and answers", async (t) => {
   assert.equal((await fetch(`${base}/api/nothing`)).status, 404);
   const post = (p) => fetch(base + p, { method: "POST", headers: { "content-type": "application/json", "x-requested-with": "starlit" }, body: "{}" });
   // Each module is mounted (a missing one would answer 404).
-  assert.equal((await post("/api/notes")).status, 401);
   assert.equal((await post("/api/faucet/fund")).status, 401);
-  assert.equal((await post("/api/relayer/withdraw")).status, 401);
+  assert.equal((await post("/api/relayer/withdraw")).status, 404, "the older pool is gone");
+  assert.equal((await post("/api/notes")).status, 404);
   assert.equal((await post("/api/gateway/deposit")).status, 400);
   assert.equal((await fetch(`${base}/api/relayer/daemon/status`)).status, 200);
   // Health answers (down here: the database is a placeholder); metrics stay hidden without a token.

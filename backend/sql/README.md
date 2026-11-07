@@ -4,7 +4,7 @@ Run these in the Supabase SQL editor. Every file is safe to re-run. On a new
 database, run them in this order:
 
 1. `schema.sql`: users and payment links
-2. `schema_notes.sql`: shielded notes
+2. `schema_notes.sql`: notes of the earlier test pool (retired; skip it on a new database)
 3. `schema_auth.sql`, then `schema_auth_v2.sql`: passkey sign-in and the key vault
 4. `schema_settings.sql`: user settings
 5. `schema_smart_wallet.sql`: public smart wallets

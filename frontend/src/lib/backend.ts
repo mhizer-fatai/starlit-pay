@@ -222,36 +222,6 @@ export const claimPaymentLink = (commitment: string, txHash?: string) =>
     body: JSON.stringify({ txHash }),
   });
 
-// --- Shielded notes (read + write) ---
-export interface ShieldedNote {
-  commitment: string;
-  encrypted_note?: string;
-  recipient_viewing_key?: string;
-  status?: string;
-  root?: string;
-  ledger?: number;
-  created_at?: string;
-}
-export const fetchNotes = (viewingKey: string, timestamp?: string, signature?: string, opts: { includeSpent?: boolean } = {}) => {
-  const params = new URLSearchParams();
-  if (timestamp && signature) {
-    params.set("timestamp", timestamp);
-    params.set("signature", signature);
-  }
-  // History only: spent notes are never spendable or counted in balances.
-  if (opts.includeSpent) params.set("include", "spent");
-  const qs = params.toString();
-  const query = qs ? `?${qs}` : "";
-  return req<{ notes: ShieldedNote[] }>(`/api/notes/${encodeURIComponent(viewingKey)}${query}`);
-};
-
-export const postNote = (body: { commitment: string; encrypted_note: string; recipient_viewing_key: string }) =>
-  req<{ note: ShieldedNote }>("/api/notes", { method: "POST", body: JSON.stringify(body) });
-
-export const spendNote = (body: { commitment: string; timestamp?: string; signature?: string }) =>
-  req<{ success: boolean }>("/api/notes/spend", { method: "POST", body: JSON.stringify(body) });
-
-
 // --- Faucet (read + write) ---
 export const faucetStatus = (viewingKey: string) =>
   req<{ canClaim: boolean; remainingMs: number; nextClaimAt?: string }>(
@@ -306,7 +276,6 @@ export interface SmartWalletInfo {
     deployer: string;
     usdcSac: string;
     xlmSac: string;
-    poolContract: string;
     networkPassphrase: string;
   };
 }
@@ -328,9 +297,6 @@ export const postSmartWalletBirth = (txHash: string) =>
 /** Short-lived token for the sponsored relayer (smart-account-kit cannot send cookies). */
 export const getSmartWalletRelayToken = () =>
   req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" });
-
-/** A Merkle root the shielded pool currently accepts (checked on-chain by the backend). */
-export const getPoolRoot = () => req<{ root: string }>("/api/pool/root");
 
 // --- Private pool with real proofs (SPP): the backend pays for transfers and withdrawals ---
 export const getZkPayer = () => req<{ address: string }>("/api/zk/payer");
@@ -386,38 +352,4 @@ export const complianceCheck = (address: string) =>
     `/api/compliance/check/${encodeURIComponent(address)}`,
   );
 
-export interface RelayerTransferPayload {
-  proof: string;
-  nullifier_1: string;
-  nullifier_2: string;
-  output_commitment_1: string;
-  encrypted_note_1: string;
-  output_commitment_2: string;
-  encrypted_note_2: string;
-  root: string;
-}
-
-export const submitRelayerTransfer = (body: RelayerTransferPayload) =>
-  req<{ success: boolean; hash: string; ledger?: number }>(
-    "/api/relayer/transfer",
-    { method: "POST", body: JSON.stringify(body) },
-  );
-
-export interface RelayerWithdrawPayload {
-  proof: string;
-  nullifier_1: string;
-  nullifier_2: string;
-  recipient: string;
-  token: string;
-  amount: number;
-  root: string;
-  change_commitment: string;
-  encrypted_change_note: string;
-}
-
-export const submitRelayerWithdraw = (body: RelayerWithdrawPayload) =>
-  req<{ success: boolean; hash: string; ledger?: number }>(
-    "/api/relayer/withdraw",
-    { method: "POST", body: JSON.stringify(body) },
-  );
 

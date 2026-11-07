@@ -10,8 +10,7 @@ import { PageTransition } from "@/components/PageTransition";
 import { Input } from "@/components/ui/input";
 import { getUser, type SessionUser } from "@/lib/auth";
 import { faucetFund, faucetStatus } from "@/lib/backend";
-import { loadPrivateBalances } from "@/lib/wallet";
-import { completeArrivals, loadArrivals, POOL_FEE, zkPoolEnabled } from "@/lib/privateWallet";
+import { completeArrivals, loadArrivals, POOL_FEE } from "@/lib/privateWallet";
 import { useSidebar } from "@/lib/sidebar";
 
 const COOLDOWN_SECONDS = 24 * 60 * 60;
@@ -132,42 +131,7 @@ function FaucetPage() {
     const claimLabel = DRIP_LABEL;
     setClaiming(true);
     try {
-      if (zkPoolEnabled()) {
-        await claimIntoPrivatePools(me, claimLabel);
-        startCooldown();
-        return;
-      }
-      // Snapshot balances so we can detect the credit landing (old behavior).
-      const snapshot = await loadPrivateBalances(me).catch(() => null);
-      const initUsdc = snapshot?.usdc ?? 0;
-      const initXlm = snapshot?.xlm ?? 0;
-
-      setStatus(`Sending funds… Auto-shielding ${claimLabel} to your account.`);
-      await faucetFund({
-        viewingKey: me.public_encryption_key,
-        depositMemo: me.deposit_memo || undefined,
-        captchaToken,
-      });
-
-      // Poll for the private-balance credit (gateway shields async, ~2s cadence).
-      setStatus("Encrypting note and waiting for private balance credit…");
-      let credited = false;
-      for (let attempt = 0; attempt < 22 && !credited; attempt++) {
-        await new Promise((resolve) => window.setTimeout(resolve, 2000));
-        try {
-          const balances = await loadPrivateBalances(me);
-          if (balances && (balances.usdc > initUsdc || balances.xlm > initXlm)) {
-            credited = true;
-          }
-        } catch {
-          /* keep polling */
-        }
-      }
-      setStatus(
-        credited
-          ? `Funds received! +${claimLabel} credited to your private balance.`
-          : `Funds processed! +${claimLabel} sent — balances update after sync.`,
-      );
+      await claimIntoPrivatePools(me, claimLabel);
       startCooldown();
     } catch (e) {
       // Cooldown rejections (429): re-sync the countdown from the backend.

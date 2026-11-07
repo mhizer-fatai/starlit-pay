@@ -455,17 +455,13 @@ function AuthPage() {
       const result = await migrateLegacyAccount({ user, pin: input.pin, opened: input.opened, onStatus: setStatus });
       setUpgradePin("");
       setPendingUpgrade(null);
-      const moved =
-        result.notesMoved > 0
-          ? ` ${result.notesMoved} private payment${result.notesMoved === 1 ? "" : "s"} moved to your new keys.`
-          : "";
       const xlm =
         result.publicXlm.status === "moved"
           ? ` ${Number(result.publicXlm.amount).toFixed(2)} XLM moved from your old address.`
           : result.publicXlm.status === "skipped"
             ? ` Note: ${result.publicXlm.reason}`
             : "";
-      setUpgradeNote(`Upgrade complete.${moved}${xlm}`);
+      setUpgradeNote(`Upgrade complete.${xlm}`);
       if (result.recoveryCode) {
         setRecoveryCode(result.recoveryCode);
         setPasskeyCanUnlock(result.passkeyCanUnlock);

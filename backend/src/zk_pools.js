@@ -7,6 +7,3 @@ export const ZK_POOLS = {
 
 // The pools' deposit limits (set at deployment), in stroops.
 export const ZK_DEPOSIT_LIMITS = { minDeposit: 1_000_000n, maxDeposit: 500_000_000_000n };
-
-/** Gateway payments become credits the user's device deposits (instead of the older pool's deposits). */
-export const zkGatewayEnabled = () => process.env.ZK_GATEWAY === "credit";

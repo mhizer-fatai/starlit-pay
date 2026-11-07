@@ -52,7 +52,7 @@ export function createGatewayRepository(supabase) {
     async listRetryable(staleBefore, maxAttempts) {
       const { data, error } = await deposits()
         .select("tx_hash")
-        .in("status", ["processing", "submitted", "failed"])
+        .eq("status", "processing")
         .lt("updated_at", staleBefore)
         .lt("attempts", maxAttempts + 1)
         .limit(20);
@@ -60,20 +60,5 @@ export function createGatewayRepository(supabase) {
       return [...new Set(data.map((row) => row.tx_hash))];
     },
 
-    async noteExists(commitment) {
-      const { data, error } = await supabase.from("shielded_notes").select("commitment").eq("commitment", commitment).maybeSingle();
-      if (error) throw error;
-      return Boolean(data);
-    },
-
-    async insertNote(note) {
-      const { error } = await supabase.from("shielded_notes").insert([{ ...note, status: "unspent" }]);
-      if (error) throw error;
-    },
-
-    async deleteNote(commitment) {
-      const { error } = await supabase.from("shielded_notes").delete().eq("commitment", commitment);
-      if (error) throw error;
-    },
   };
 }

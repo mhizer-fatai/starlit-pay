@@ -27,34 +27,18 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { ReceiptModal } from "@/components/ReceiptModal";
 import { Input } from "@/components/ui/input";
-import { getSpendingKey, getUser, getViewingSecret, isVaultMode, signAuthRequest, type SessionUser } from "@/lib/auth";
+import { getUser, isVaultMode, type SessionUser } from "@/lib/auth";
 import { isValidPin } from "@/lib/keys";
 import { confirmPaymentWithPasskey, confirmPaymentWithPin, friendlyAuthError } from "@/lib/passkeyAccount";
-import { selfNoteSecret } from "@/lib/ownedNotes";
-import { withdrawFromPool } from "@/lib/privateWithdraw";
-import { withNoteLock } from "@/lib/reshield";
-import {
-  getSmartWallet,
-  lookupUser,
-  postNote,
-  postTransaction,
-  fetchNotes,
-  spendNote,
-  claimPaymentLink,
-  submitRelayerTransfer,
-} from "@/lib/backend";
-import { getSpendableNotes, spendRootFor } from "@/lib/notes";
-import { withoutSpentOnChain } from "@/lib/spentNotes";
-import { bytesToHex, encryptNote } from "@/lib/crypto";
-import { calculateCommitment, generateShieldedPaymentProof } from "@/lib/zk";
-import { TOKENS, isStellarAddress } from "@/lib/stellar";
+import { claimPaymentLink, getSmartWallet, postTransaction } from "@/lib/backend";
+import { isStellarAddress } from "@/lib/stellar";
 import {
   formatGrouped,
   loadUserTransactions,
   recentStarlitRecipients,
   type ActivityItem,
 } from "@/lib/wallet";
-import { checkRecipient, loadAppBalances, PartialPaymentError, sendZkPayment, zkPoolEnabled, type RecipientStatus } from "@/lib/privateWallet";
+import { checkRecipient, loadAppBalances, PartialPaymentError, sendZkPayment, type RecipientStatus } from "@/lib/privateWallet";
 import { useSidebar } from "@/lib/sidebar";
 
 function SlideToConfirm({ label, onComplete }: { label: string; onComplete: () => void }) {
@@ -483,264 +467,15 @@ function SendPage() {
     void refreshAssetBalances(me).catch(() => {});
   }
 
-  // Shares the note lock with background re-shielding, so both never spend the same note.
-  function submitPayment() {
-    return withNoteLock(submitPaymentUnlocked);
-  }
-
-  async function submitPaymentUnlocked() {
+  async function submitPayment() {
     setBusy(true);
-    setMessage("Initializing transaction...");
+    setMessage("Getting ready…");
     try {
       const me = await getUser();
       if (!me) throw new Error("Sign in first.");
-      const rawTarget = username.trim();
       const amt = Number(amount);
       if (!Number.isFinite(amt) || amt <= 0) throw new Error("Enter an amount greater than 0");
-
-      if (zkPoolEnabled()) {
-        await submitZkPayment(me, rawTarget, amt);
-        return;
-      }
-
-      if (mode === "external") {
-        if (!isStellarAddress(rawTarget)) {
-          throw new Error("Enter a valid Stellar address (G… account or C… smart wallet)");
-        }
-        const hash = await withdrawFromPool({
-          user: me,
-          asset: asset as "XLM" | "USDC",
-          amount: amt,
-          recipient: rawTarget,
-          onStatus: setMessage,
-        });
-        if (linkCommitment) {
-          try {
-            await claimPaymentLink(linkCommitment, hash);
-          } catch (claimErr) {
-            console.error("Failed to mark payment link as claimed:", claimErr);
-          }
-        }
-        setMessage(`Withdrawal of ${amt} ${asset} to ${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)} completed! Tx: ${hash ? hash.slice(0, 8) + '...' : 'confirmed'}`);
-        setReceipt({
-          key: `withdraw-${hash || Date.now()}`,
-          direction: "out",
-          amount: amt,
-          asset,
-          party: `${rawTarget.slice(0, 4)}...${rawTarget.slice(-4)}`,
-          date: Date.now(),
-          reference: hash || rawTarget,
-          referenceLabel: "Withdrawal Tx",
-          hash,
-        });
-        void refreshAssetBalances(me).catch(() => {});
-        setUsername("");
-        setAmount("");
-        return;
-      }
-
-      const viewingSecret = getViewingSecret(me.email);
-      if (!viewingSecret) {
-        throw new Error("Wallet is locked. Please unlock your wallet on the Dashboard first.");
-      }
-
-      const tokenAddress = TOKENS[asset];
-      if (!tokenAddress) throw new Error(`Unsupported asset: ${asset}`);
-
-      // 1. Fetch user's current private notes
-      setMessage("Fetching your shielded notes...");
-      const notesRes = await fetchNotes(me.public_encryption_key || "");
-      const spendableNotes = await withoutSpentOnChain(getSpendableNotes(notesRes.notes, viewingSecret, asset));
-
-      const totalAvailable = spendableNotes.reduce((acc, n) => acc + n.amount, 0);
-      if (totalAvailable < amt) {
-        throw new Error(
-          `Insufficient private balance. Required: ${amt} ${asset}, Available: ${totalAvailable.toFixed(2)} ${asset}`
-        );
-      }
-
-      // 2. Select input notes to cover the amount
-      let remaining = amt;
-      const inputNotes: typeof spendableNotes = [];
-      let inputSum = 0;
-
-      for (const note of spendableNotes) {
-        inputNotes.push(note);
-        inputSum += note.amount;
-        remaining -= note.amount;
-        if (inputNotes.length === 2 || remaining <= 0.0001) break;
-      }
-
-      if (inputSum < amt) {
-        throw new Error("Unable to compose notes to cover exact payment. Try cashing out in smaller increments.");
-      }
-
-      const input1 = inputNotes[0];
-      const input2 = inputNotes[1] || null;
-      const spendAmount = amt;
-      const changeAmount = inputSum - spendAmount;
-      const spendRoot = await spendRootFor(input1);
-
-      // Dummy note setup if only 1 input note is used
-      let secret2Hex = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-      let commitment2Hex = await calculateCommitment(0, me.public_encryption_key || "", tokenAddress, secret2Hex);
-
-      if (input2) {
-        secret2Hex = input2.secret;
-        commitment2Hex = input2.commitment;
-      }
-
-      // Prepare change note if any change
-      let changeCommitmentHex = "0000000000000000000000000000000000000000000000000000000000000000";
-      let changeEncryptedHex = "00";
-      if (changeAmount > 0.0001) {
-        // Change goes back to the sender, so its secret is derived from their own
-        // spending key: only they can spend it (see lib/ownedNotes).
-        const spendingKey = getSpendingKey(me.email);
-        if (!spendingKey) throw new Error("Wallet is locked. Please unlock your wallet first.");
-        const { secret: changeSecret, n: changeN } = await selfNoteSecret(spendingKey);
-        changeCommitmentHex = await calculateCommitment(changeAmount, me.public_encryption_key || "", tokenAddress, changeSecret);
-        const changeEncrypted = encryptNote(
-          changeAmount,
-          asset,
-          changeSecret,
-          me.username,
-          me.public_encryption_key || "",
-          { n: changeN }
-        );
-        changeEncryptedHex = changeEncrypted.ephemeralPublicKey + changeEncrypted.nonce + changeEncrypted.ciphertext;
-      }
-
-      // Send to a Starlit user
-      const recipient = rawTarget.replace(/^@/, "");
-      setMessage(`Connecting with @${recipient}...`);
-      const found = await lookupUser(recipient);
-      if (!found?.user?.public_encryption_key) {
-        throw new Error(`User @${recipient} has not set up their encryption keys.`);
-      }
-      const recipientViewingKey = found.user.public_encryption_key;
-      const recipientStellarAddress = found.user.stellar_address || found.user.public_encryption_key;
-
-      const recipientSecret = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
-      const recipientCommitmentHex = await calculateCommitment(
-        spendAmount,
-        recipientViewingKey,
-        tokenAddress,
-        recipientSecret
-      );
-      const recipientEncrypted = encryptNote(
-        spendAmount,
-        asset,
-        recipientSecret,
-        me.username,
-        recipientViewingKey
-      );
-      const recipientEncryptedHex =
-        recipientEncrypted.ephemeralPublicKey + recipientEncrypted.nonce + recipientEncrypted.ciphertext;
-
-      setMessage("Preparing secure payment...");
-      const zkData = await generateShieldedPaymentProof(
-        input1.secret,
-        input1.commitment,
-        secret2Hex,
-        commitment2Hex,
-        recipientStellarAddress,
-        tokenAddress,
-        spendAmount,
-        changeAmount,
-        (msg) => setMessage(msg)
-      );
-
-      setMessage("Sending payment...");
-
-      const relayerRes = await submitRelayerTransfer({
-        proof: zkData.proofHex,
-        nullifier_1: zkData.nullifier1Hex,
-        nullifier_2: zkData.nullifier2Hex,
-        output_commitment_1: recipientCommitmentHex,
-        encrypted_note_1: recipientEncryptedHex,
-        output_commitment_2: changeCommitmentHex,
-        encrypted_note_2: changeEncryptedHex,
-        root: spendRoot,
-      });
-
-      // 1. Save recipient note first
-      try {
-        await postNote({
-          commitment: recipientCommitmentHex,
-          encrypted_note: recipientEncryptedHex,
-          recipient_viewing_key: recipientViewingKey,
-        });
-      } catch (postErr) {
-        console.error("Failed to register recipient note:", postErr);
-      }
-
-      // 2. Save change note if generated
-      if (changeAmount > 0.0001) {
-        try {
-          await postNote({
-            commitment: changeCommitmentHex,
-            encrypted_note: changeEncryptedHex,
-            recipient_viewing_key: me.public_encryption_key || "",
-          });
-        } catch (postErr) {
-          console.error("Failed to register change note:", postErr);
-        }
-      }
-
-      // 3. Mark spent notes with signed authorization request
-      const timestamp = Date.now().toString();
-      const signature = me?.email ? (signAuthRequest(me.email, timestamp) || undefined) : undefined;
-      const spendAuth = signature ? { timestamp, signature } : {};
-
-      try {
-        await spendNote({ commitment: input1.commitment, ...spendAuth });
-      } catch (spendErr) {
-        console.error("Failed to mark input1 as spent in DB:", spendErr);
-      }
-
-      if (input2) {
-        try {
-          await spendNote({ commitment: input2.commitment, ...spendAuth });
-        } catch (spendErr) {
-          console.error("Failed to mark input2 as spent in DB:", spendErr);
-        }
-      }
-
-      // Save transaction history
-      const payload = JSON.stringify({
-        to: `@${recipient}`,
-        amount: spendAmount,
-        asset,
-        type: "send",
-        hash: relayerRes.hash,
-        at: new Date().toISOString(),
-      });
-      await postTransaction({ user_id: me.id, encrypted_payload: btoa(payload) });
-
-      if (linkCommitment) {
-        try {
-          await claimPaymentLink(linkCommitment, relayerRes.hash);
-        } catch (claimErr) {
-          console.error("Failed to mark payment link as claimed:", claimErr);
-        }
-      }
-
-      setMessage(`Sent ${spendAmount} ${asset} to @${recipient}! Tx Hash: ${relayerRes.hash ? relayerRes.hash.slice(0, 8) + '...' : 'confirmed'}`);
-      setReceipt({
-        key: `send-${recipientCommitmentHex}`,
-        direction: "out",
-        amount: spendAmount,
-        asset,
-        party: recipient,
-        date: Date.now(),
-        reference: relayerRes.hash || recipientCommitmentHex,
-        referenceLabel: relayerRes.hash ? "Transaction Hash" : "Note commitment",
-        hash: relayerRes.hash,
-      });
-      void refreshAssetBalances(me).catch(() => {});
-      setUsername("");
-      setAmount("");
+      await submitZkPayment(me, username.trim(), amt);
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Send failed — try again");
     } finally {

@@ -20,12 +20,12 @@ export function createStatsService({ countNotes, readPoolBalances, logger, now =
   return {
     async get() {
       if (cached && now() - cached.at < CACHE_MS) return cached.stats;
-      const [{ total, spent }, tvlFormatted] = await Promise.all([countNotes(), tvl()]);
+      const [{ notes, transactions }, tvlFormatted] = await Promise.all([countNotes(), tvl()]);
       const stats = {
-        transactionsCount: total + spent,
-        notesCommitted: total,
+        transactionsCount: transactions,
+        notesCommitted: notes,
         tvlFormatted,
-        zkProofsVerified: spent,
+        zkProofsVerified: transactions,
         network: "Stellar Testnet",
         status: "live",
       };

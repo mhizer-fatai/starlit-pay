@@ -34,12 +34,21 @@ import {
   type ActivityItem,
   type BalanceNote,
 } from "@/lib/wallet";
-import { completeArrivals, loadAppBalances, loadArrivals, zkPoolEnabled, type Arrivals } from "@/lib/privateWallet";
-import { confirmPaymentWithPasskey, friendlyAuthError } from "@/lib/passkeyAccount";
-import { loadOldBalance, moveOldBalance, type OldBalance } from "@/lib/zkMigration";
+import { completeArrivals, loadAppBalances, loadArrivals, type Arrivals } from "@/lib/privateWallet";
 import { readCachedBalance } from "@/lib/balanceCache";
 
 const formatAmount = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 7 });
+
+// Real zero-knowledge payments replaced the earlier test pool on this date; its balances were retired.
+const UPGRADE_DATE = "2026-11-07";
+const UPGRADE_NOTICE_KEY = "starlit_upgrade_notice_seen";
+const upgradeNoticeSeen = () => {
+  try {
+    return localStorage.getItem(UPGRADE_NOTICE_KEY) === "seen";
+  } catch {
+    return false;
+  }
+};
 
 const actionButtonClass = "hover:bg-dashboard-blue hover:text-primary-foreground";
 
@@ -78,33 +87,12 @@ function DashboardPage() {
     .filter(Boolean)
     .join(" and ");
 
-  // Older pool's balance, moving to the real-ZK pools (phase 5).
-  const [oldBalance, setOldBalance] = useState<OldBalance>({ xlm: 0, usdc: 0 });
-  const [moveNeedsConfirm, setMoveNeedsConfirm] = useState(false);
-  const [moveError, setMoveError] = useState("");
-  const oldLabel = [oldBalance.xlm > 0 && `${formatAmount(oldBalance.xlm)} XLM`, oldBalance.usdc > 0 && `${formatAmount(oldBalance.usdc)} USDC`]
-    .filter(Boolean)
-    .join(" and ");
+  // One-time notice for accounts from before real zero-knowledge payments.
+  const [showUpgradeNotice, setShowUpgradeNotice] = useState(false);
 
   // Stable (state setters only), so the page-load effect can depend on it.
   const completePendingArrivals = useCallback(async (user: SessionUser) => {
-    if (!zkPoolEnabled()) return;
     try {
-      // Old notes first: moving them creates arrivals, completed just below.
-      // A move that stops partway must not hold up what already moved.
-      try {
-        const old = await loadOldBalance(user);
-        setOldBalance(old);
-        if (old.xlm || old.usdc) {
-          const result = await moveOldBalance(user, setArrivalStatus);
-          setMoveNeedsConfirm(Boolean(result.needsConfirmation));
-          setMoveError(result.failed ? "Part of it couldn't move just now; it will try again next time you open Starlit." : "");
-          setOldBalance(await loadOldBalance(user));
-        }
-      } catch (err) {
-        console.warn("Could not move the old balance:", err);
-      }
-
       const pending = await loadArrivals();
       setArrivals(pending);
       if (!pending.xlm && !pending.usdc) return;
@@ -123,17 +111,13 @@ function DashboardPage() {
     }
   }, []);
 
-  async function confirmMove() {
-    setMoveError("");
+  function dismissUpgradeNotice() {
+    setShowUpgradeNotice(false);
     try {
-      await confirmPaymentWithPasskey();
-    } catch (err) {
-      setMoveError(friendlyAuthError(err));
-      return;
+      localStorage.setItem(UPGRADE_NOTICE_KEY, "seen");
+    } catch {
+      /* storage unavailable: it shows again next time */
     }
-    setMoveNeedsConfirm(false);
-    const user = await getUser();
-    if (user) await completePendingArrivals(user);
   }
 
   const usdcUsd = usdcBalance * prices.USDC;
@@ -159,6 +143,8 @@ function DashboardPage() {
         .then((txs) => {
           if (cancelled) return;
           setAllTxs(txs);
+          // Activity from before the switch: this user may have had an old balance.
+          if (txs.some((t) => (t.created_at ?? "") < UPGRADE_DATE) && !upgradeNoticeSeen()) setShowUpgradeNotice(true);
         })
         .catch(() => {})
         .finally(() => {
@@ -362,18 +348,13 @@ function DashboardPage() {
                 <AssetRow asset="USDC" amount={usdcBalance} price={prices.USDC} hidden={balanceHidden} loading={balancesLoading} />
                 <AssetRow asset="XLM" amount={xlmBalance} price={prices.XLM} hidden={balanceHidden} loading={balancesLoading} />
               </div>
-              {oldLabel && (
-                <div className="wallet-caption" role="status">
-                  {balanceHidden ? "Your old private balance" : `${oldLabel} in your old private balance`} is moving to the new private pool
-                  {moveNeedsConfirm && (
-                    <>
-                      {". "}
-                      <Button type="button" variant="secondary" size="sm" onClick={() => void confirmMove()}>
-                        Confirm with passkey to move it
-                      </Button>
-                    </>
-                  )}
-                  {moveError && <span> {moveError}</span>}
+              {showUpgradeNotice && (
+                <div className="wallet-caption" role="note">
+                  Starlit Pay now uses real zero-knowledge private payments. Balances from the earlier test version were retired: use the
+                  Faucet to get new test funds.{" "}
+                  <Button type="button" variant="secondary" size="sm" onClick={dismissUpgradeNotice}>
+                    Got it
+                  </Button>
                 </div>
               )}
               {arrivingLabel && (

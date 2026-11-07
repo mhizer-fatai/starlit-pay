@@ -1,17 +1,7 @@
-// Reads real wallet data from the database: decrypted unspent shielded notes
-// for balances, decoded transaction records for activity.
+// Wallet display helpers: prices, the activity feed built from the user's
+// transaction records and private-pool notes (see privateWallet), statements.
 
-import * as StellarSdk from "@stellar/stellar-sdk";
-
-import { getUnlockedKeys, type SessionUser } from "@/lib/auth";
-import {
-  fetchNotes,
-  fetchTransactions,
-  spendNote,
-  type BackendTransaction,
-} from "@/lib/backend";
-import { bytesToHex, decryptShieldedNote } from "@/lib/keys";
-import { reportSpent, spentOnChain } from "@/lib/spentNotes";
+import { fetchTransactions, type BackendTransaction } from "@/lib/backend";
 
 // Live prices come from usePrices()/fetchPrices() in lib/prices.ts. There is
 // deliberately no static fallback: an unknown price stays unknown (null).
@@ -43,50 +33,6 @@ export interface PrivateBalances {
   usdc: number;
   xlm: number;
   notes: BalanceNote[];
-}
-
-/**
- * Fetches the user's unspent shielded notes (signed request, verified against
- * the stored stellar address) and decrypts them with the viewing secret key.
- * Returns null when the wallet is locked (no PIN-derived keys in this tab).
- */
-export async function loadPrivateBalances(user: SessionUser): Promise<PrivateBalances | null> {
-  const keys = getUnlockedKeys(user.email);
-  if (!keys || !user.public_encryption_key) return null;
-  const timestamp = Date.now().toString();
-  const keypair = StellarSdk.Keypair.fromSecret(keys.stellar.secretKey);
-  const signature = bytesToHex(keypair.sign(Buffer.from(new TextEncoder().encode(timestamp))));
-  // All notes, for history; only unspent ones count towards the balance.
-  const { notes } = await fetchNotes(user.public_encryption_key, timestamp, signature, { includeSpent: true });
-
-  const readable = notes.flatMap((note) => {
-    const decrypted = note.encrypted_note ? decryptShieldedNote(note.encrypted_note, keys.viewing.secretKey) : null;
-    if (!decrypted || !Number.isFinite(decrypted.amount)) return [];
-    const asset = decrypted.asset.toUpperCase();
-    if (asset !== "USDC" && asset !== "XLM") return [];
-    return [{ note, decrypted, asset, secret: decrypted.secret || note.commitment, commitment: note.commitment }];
-  });
-  // The database can still say "unspent" for a note the pool has spent (see spentNotes.ts).
-  const marked = readable.filter(({ note }) => !note.status || note.status === "unspent");
-  const spentNow = await spentOnChain(marked);
-  reportSpent(spentNow);
-
-  const out: PrivateBalances = { usdc: 0, xlm: 0, notes: [] };
-  for (const { note, decrypted, asset } of readable) {
-    const unspent = (!note.status || note.status === "unspent") && !spentNow.has(note.commitment);
-    if (unspent && asset === "USDC") out.usdc += decrypted.amount;
-    else if (unspent) out.xlm += decrypted.amount;
-    out.notes.push({
-      commitment: note.commitment,
-      amount: decrypted.amount,
-      asset,
-      createdAt: note.created_at ? new Date(note.created_at).getTime() : Date.now(),
-      sender: decrypted.sender,
-      ledger: note.ledger,
-      spent: !unspent,
-    });
-  }
-  return out;
 }
 
 export interface DecodedTx {
@@ -145,62 +91,6 @@ export function decodeTransactionPayload(encryptedPayload: string): DecodedTx | 
 export async function loadUserTransactions(userId: string): Promise<BackendTransaction[]> {
   const res = await fetchTransactions(userId);
   return res.transactions ?? [];
-}
-
-const EPSILON = 1e-9;
-
-/** Sums unspent notes for an asset, or throws when the wallet is locked. */
-export async function spendableBalance(user: SessionUser, asset: string): Promise<number> {
-  const balances = await loadPrivateBalances(user);
-  if (!balances) throw new Error("Unlock your wallet first.");
-  const code = asset.toUpperCase();
-  return balances.notes
-    .filter((note) => note.asset === code && !note.spent)
-    .reduce((sum, note) => sum + note.amount, 0);
-}
-
-export interface SpendResult {
-  spentCommitments: string[];
-  change: number;
-}
-
-/**
- * Marks the sender's unspent notes covering `amount` as spent (signed request,
- * verified against the stored Stellar address) and returns any change owed.
- * Throws on insufficient balance — callers must check before crediting anyone.
- */
-export async function spendForPayment(
-  user: SessionUser,
-  asset: string,
-  amount: number,
-): Promise<SpendResult> {
-  const keys = getUnlockedKeys();
-  if (!keys) throw new Error("Unlock your wallet first.");
-  const balances = await loadPrivateBalances(user);
-  if (!balances) throw new Error("Unlock your wallet first.");
-  const code = asset.toUpperCase();
-  const notes = balances.notes.filter((note) => note.asset === code && !note.spent);
-  const total = notes.reduce((sum, note) => sum + note.amount, 0);
-  if (total + EPSILON < amount) {
-    throw new Error(`Insufficient ${code} balance.`);
-  }
-  const selected: typeof notes = [];
-  let covered = 0;
-  for (const note of notes) {
-    selected.push(note);
-    covered += note.amount;
-    if (covered + EPSILON >= amount) break;
-  }
-  const timestamp = Date.now().toString();
-  const keypair = StellarSdk.Keypair.fromSecret(keys.stellar.secretKey);
-  const signature = bytesToHex(keypair.sign(Buffer.from(new TextEncoder().encode(timestamp))));
-  for (const note of selected) {
-    await spendNote({ commitment: note.commitment, timestamp, signature });
-  }
-  return {
-    spentCommitments: selected.map((note) => note.commitment),
-    change: Math.max(0, covered - amount),
-  };
 }
 
 /** "1,156,908.27" style grouping with exactly 2 decimals. */

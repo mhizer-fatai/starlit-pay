@@ -8,7 +8,9 @@ import { checkRelayRequest, createdContractIds, rawP256FromCose, RelayRuleError 
 
 const RELAYS_PER_HOUR = 30;
 
-export function createSmartWalletService({ repository, chain, tokens, config, logger, now = Date.now }) {
+// Transfers to the gateway move public funds into the private balance:
+// `gateway` = { address, minStroops, onTransfer(details) } records the credit.
+export function createSmartWalletService({ repository, chain, tokens, config, gateway = null, logger, now = Date.now }) {
   const recentRelays = new Map();
 
   function withinRateLimit(userId) {
@@ -33,7 +35,6 @@ export function createSmartWalletService({ repository, chain, tokens, config, lo
       accountWasmHash: config.accountWasmHash,
       webauthnVerifier: config.webauthnVerifier,
       tokens: [config.xlmSac, config.usdcSac],
-      poolContract: config.poolContract,
       networkPassphrase: config.networkPassphrase,
     };
   }
@@ -90,7 +91,18 @@ export function createSmartWalletService({ repository, chain, tokens, config, lo
         throw err;
       }
 
+      const toGateway = checked.kind === "transfer" && gateway && checked.to === gateway.address;
+      if (toGateway && checked.amount < gateway.minStroops) {
+        throw new HttpError(400, "The smallest amount to move into your private balance is 0.1.", "BELOW_MINIMUM");
+      }
+
       const { hash, ledger } = await chain.sponsor(checked);
+      if (toGateway) {
+        // The money moved: a bookkeeping failure must not look like a failed transfer.
+        await gateway.onTransfer({ to: checked.to, token: checked.token, amount: checked.amount, hash, userId }).catch((err) =>
+          logger.error("Gateway transfer not credited; credit it by hand", { hash, userId, error: err.message })
+        );
+      }
       if (checked.kind === "deploy") {
         await repository.setWalletAddress(userId, checked.contractId, new Date(now()).toISOString());
         await repository.setBirth(userId, { txHash: hash, ledger }, checked.contractId);

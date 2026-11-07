@@ -1,5 +1,8 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
-import { rpc, NETWORK_PASSPHRASE, relayerKeypair, supabase } from "../../config.js";
+import { rpc, NETWORK_PASSPHRASE, relayerKeypair, supabase, GATEWAY_ADDRESS } from "../../config.js";
+import { ZK_DEPOSIT_LIMITS } from "../../zk_pools.js";
+import { createDirectCredits } from "../zk_gateway/direct_credits.js";
+import { createZkGatewayRepository } from "../zk_gateway/repository.js";
 import { requireAuth } from "../../http/auth.js";
 import { logger } from "../../http/logger.js";
 import { withRelayerAccount } from "../../relayer_account.js";
@@ -17,7 +20,6 @@ const config = {
   deployer: process.env.SMART_ACCOUNT_DEPLOYER || "GAAH4OT36RRCCAGKARGPN2HLHT2NOBVFHO4GUHA6CF7UKQ4MMV24WQ4N",
   usdcSac: process.env.USDC_SAC_CONTRACT_ID || "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
   xlmSac: StellarSdk.Asset.native().contractId(NETWORK_PASSPHRASE),
-  poolContract: process.env.SHIELDED_POOL_CONTRACT_ID || "CAHSOWD7JVCRO4U73MGXRET7DRJDM3K2CFS5EGYARWDEGACHWSR6ZEZM",
   networkPassphrase: NETWORK_PASSPHRASE,
 };
 
@@ -27,6 +29,17 @@ export const smartWalletRouter = createSmartWalletRouter({
     chain: createSponsorChain({ rpc, relayerKeypair, networkPassphrase: NETWORK_PASSPHRASE, queue: withRelayerAccount }),
     tokens: createRelayTokens(process.env.AUTH_SESSION_SECRET),
     config,
+    // Public funds sent to the gateway become the user's private-balance credit.
+    gateway: {
+      address: GATEWAY_ADDRESS,
+      minStroops: ZK_DEPOSIT_LIMITS.minDeposit,
+      onTransfer: createDirectCredits({
+        repository: createZkGatewayRepository(supabase),
+        gatewayAddress: GATEWAY_ADDRESS,
+        tokens: { XLM: config.xlmSac, USDC: config.usdcSac },
+        logger,
+      }),
+    },
     logger,
   }),
   requireAuth,

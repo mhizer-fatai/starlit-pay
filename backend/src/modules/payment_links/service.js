@@ -2,10 +2,9 @@ import { HttpError } from "../../http/errors.js";
 
 const LINK_LIFETIME_MS = 30 * 60 * 1000;
 const CLOCK_SKEW_MS = 60 * 1000;
-const POOL_SPEND_FUNCTIONS = new Set(["transfer", "withdraw"]);
 const TX_HASH = /^[0-9a-f]{64}$/i;
 
-export function createPaymentLinksService({ repository, readTransaction, gatewayAddress, relayerAddress, poolContract, now = Date.now }) {
+export function createPaymentLinksService({ repository, readTransaction, gatewayAddress, payerAddress, pools, now = Date.now }) {
   const isExpired = (link) => now() - new Date(link.created_at).getTime() > LINK_LIFETIME_MS;
 
   /** A wallet payment to the gateway, carrying the link owner's memo, for the right asset and amount. */
@@ -16,11 +15,11 @@ export function createPaymentLinksService({ repository, readTransaction, gateway
       (p) => p.destination === gatewayAddress && p.asset === link.asset && p.amount + 1e-7 >= Number(link.amount)
     );
 
-  /** A private payment by a signed-in user. Its amount and recipient are private, so only its origin can be checked. */
+  /** A private payment by a signed-in user (paid for by Starlit's payer). Its amount and recipient are private, so only its origin can be checked. */
   const paysLinkPrivately = (tx, actor) =>
     Boolean(actor) &&
-    tx.source === relayerAddress &&
-    tx.contractCalls.some((c) => c.contract === poolContract && POOL_SPEND_FUNCTIONS.has(c.fn));
+    tx.source === payerAddress &&
+    tx.contractCalls.some((c) => pools.includes(c.contract) && c.fn === "transact");
 
   return {
     async create(actor, { creator_id: creatorId, amount, asset, commitment, description } = {}) {

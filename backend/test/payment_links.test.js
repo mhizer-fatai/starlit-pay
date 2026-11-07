@@ -22,7 +22,7 @@ const walletPayment = (over = {}) => ({
   contractCalls: [],
   ...over,
 });
-const relayerPayment = (fn = "transfer", over = {}) => ({
+const relayerPayment = (fn = "transact", over = {}) => ({
   successful: true,
   source: RELAYER,
   memo: null,
@@ -57,8 +57,8 @@ describe("payment links", () => {
       repository,
       readTransaction: async () => chainTx,
       gatewayAddress: GATEWAY,
-      relayerAddress: RELAYER,
-      poolContract: POOL,
+      payerAddress: RELAYER,
+      pools: [POOL],
       now: () => NOW,
     });
     http = await serve(({ requireAuth, currentUser }) => createPaymentLinksRouter({ service, requireAuth, currentUser }));
@@ -122,7 +122,7 @@ describe("payment links", () => {
   });
 
   test("a signed-in user's private payment claims the link", async () => {
-    chainTx = relayerPayment("withdraw");
+    chainTx = relayerPayment();
     const res = await claim({ txHash: HASH }, "bob");
     assert.equal(res.status, 200);
     assert.equal(link.status, "claimed");
@@ -133,7 +133,7 @@ describe("payment links", () => {
     refused(await claim({ txHash: HASH }));
     chainTx = relayerPayment("bump");
     refused(await claim({ txHash: HASH }, "bob"));
-    chainTx = relayerPayment("transfer", { source: "GSOMEONEELSE" });
+    chainTx = relayerPayment("transact", { source: "GSOMEONEELSE" });
     refused(await claim({ txHash: HASH }, "bob"));
   });
 

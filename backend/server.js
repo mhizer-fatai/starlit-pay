@@ -9,22 +9,18 @@ import { settingsRouter } from "./src/modules/settings/index.js";
 import { complianceRouter } from "./src/modules/compliance/index.js";
 import { relayerRouter } from "./src/modules/relayer/index.js";
 import { paymentLinksRouter } from "./src/modules/payment_links/index.js";
-import { notesRouter } from "./src/modules/notes/index.js";
 import { faucetRouter } from "./src/modules/faucet/index.js";
 import { statsRouter } from "./src/modules/stats/index.js";
 import { healthRouter } from "./src/modules/health/index.js";
 import { pricesRouter } from "./src/modules/prices/index.js";
 import { transactionsRouter } from "./src/modules/transactions/index.js";
-import { poolRouter } from "./src/modules/pool/index.js";
 import { smartWalletRouter } from "./src/modules/smart_wallet/index.js";
 import { zkPayerRouter } from "./src/modules/zk_payer/index.js";
 import { zkKeysRouter } from "./src/modules/zk_keys/index.js";
 import { startZkHistory, zkHistoryRouter } from "./src/modules/zk_history/index.js";
 import { zkGatewayRouter } from "./src/modules/zk_gateway/index.js";
 import { gatewayRouter, startGateway } from "./src/modules/gateway/index.js";
-import { startIndexer } from "./src/indexer.js";
 import { startRelayerMonitor } from "./src/relayer_monitor.js";
-import { startTtlKeeper } from "./src/ttl_keeper.js";
 import { errorMiddleware, notFound } from "./src/http/errors.js";
 import { logger } from "./src/http/logger.js";
 
@@ -36,13 +32,11 @@ for (const router of [
   complianceRouter,
   relayerRouter,
   paymentLinksRouter,
-  notesRouter,
   faucetRouter,
   statsRouter,
   healthRouter,
   pricesRouter,
   transactionsRouter,
-  poolRouter,
   smartWalletRouter,
   zkPayerRouter,
   zkKeysRouter,
@@ -57,11 +51,9 @@ for (const router of [
 // shares production's database and wallets, so deposits are never processed twice.
 startRelayerMonitor();
 if (process.env.BACKGROUND_JOBS === "off") {
-  logger.info("Background jobs disabled (BACKGROUND_JOBS=off): indexer, gateway, TTL keeper and ZK history not started.");
+  logger.info("Background jobs disabled (BACKGROUND_JOBS=off): gateway and ZK history not started.");
 } else {
-  startIndexer();
   startGateway();
-  startTtlKeeper();
   startZkHistory();
 }
 
