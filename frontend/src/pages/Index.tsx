@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -8,19 +8,8 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { Button } from "@/components/ui/button";
+import { fetchStats } from "@/lib/backend";
 import { container } from "@/lib/utils";
-import dashboardMockup from "@/assets/dashboard-mockup-reference.webp";
-
-function DashboardPreview() {
-  return (
-    <img
-      src={dashboardMockup}
-      alt="Dashboard showing revenue, customer, transaction, and product metrics"
-      className="dashboard-fade relative z-10 ml-[3%] -mt-2 block w-[135%] min-w-[1200px] max-w-[2400px] select-none lg:-mt-4"
-      draggable={false}
-    />
-  );
-}
 
 function StatCard({
   figure,
@@ -91,29 +80,34 @@ function FeatureCard({ title, image }: { title: string; image: string }) {
   );
 }
 
-const stats: { figure: string; title: string; caption: string; variant?: "light" | "primary" }[] = [
-  {
-    figure: "99",
-    title: "Transactions Processed",
-    caption: "Stellar Testnet",
-  },
-  {
-    figure: "1,113 USDC & 8,658 XLM",
-    title: "Total Value Locked (TVL)",
-    caption: "Soroban Vault Balance",
-    variant: "primary",
-  },
-  {
-    figure: "82",
-    title: "Notes Committed",
-    caption: "Soroban Merkle Pool",
-  },
-  {
-    figure: "Testnet",
-    title: "Preview Network",
-    caption: "Not audited · No real funds",
-  },
-];
+type Stats = Awaited<ReturnType<typeof fetchStats>>;
+
+function statCards(live: Stats | null): { figure: string; title: string; caption: string; variant?: "light" | "primary" }[] {
+  const count = (n: number | undefined) => (typeof n === "number" ? n.toLocaleString("en-US") : "…");
+  return [
+    {
+      figure: count(live?.zkProofsVerified),
+      title: "Zero-Knowledge Proofs Verified",
+      caption: "On chain · Stellar Testnet",
+    },
+    {
+      figure: live?.tvlFormatted ?? "…",
+      title: "Total Value Locked (TVL)",
+      caption: "Private pools · XLM & USDC",
+      variant: "primary",
+    },
+    {
+      figure: count(live?.notesCommitted),
+      title: "Notes Committed",
+      caption: "Private pool Merkle trees",
+    },
+    {
+      figure: "Testnet",
+      title: "Preview Network",
+      caption: "Not audited · No real funds",
+    },
+  ];
+}
 
 const steps = [
   {
@@ -124,7 +118,7 @@ const steps = [
   {
     title: "Smart Proof Verification",
     description:
-      "Starlit is building zero-knowledge proofs that confirm you have enough money for a payment without sharing your balance, history, or keys. During the testnet preview, payments are submitted by the Starlit relayer while on-chain verification is completed.",
+      "Your device creates a zero-knowledge proof that you have enough money for the payment. Stellar verifies it on chain without ever seeing your balance, your history, or your keys.",
   },
   {
     title: "Private Asset Vaults",
@@ -134,7 +128,7 @@ const steps = [
   {
     title: "Zero Gas Fee Settlement",
     description:
-      "Your encrypted payment is sent directly to the Stellar network through our gasless gateway. Transactions complete in 3 to 5 seconds with zero network gas fees paid by you.",
+      "Starlit submits your private payment to the Stellar network and pays the network fee for you, so you never need to hold XLM for gas.",
   },
   {
     title: "Direct & Private Delivery",
@@ -144,7 +138,7 @@ const steps = [
   {
     title: "Optional Tax & Audit Keys",
     description:
-      "You remain in complete control. Easily generate read-only access keys for tax filing or accountant audits without ever exposing your main spending password or wallet.",
+      "Coming soon: share a read-only viewing key with your accountant or auditor for tax filing, without ever exposing your spending keys or wallet.",
   },
 ];
 
@@ -172,6 +166,20 @@ const features: { title: string; image: string }[] = [
 ];
 
 function Index() {
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchStats()
+      .then((s) => {
+        if (!cancelled) setStats(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     document.title = "Starlit Pay - Send and Receive Payments with Absolute Privacy.";
     document.documentElement.classList.remove("dark");
@@ -210,13 +218,9 @@ function Index() {
       </div>
 
       <ScrollReveal>
-        <DashboardPreview />
-      </ScrollReveal>
-
-      <ScrollReveal>
         <section id="ecosystem" className={`${container} py-20 lg:py-24`}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {stats.map((stat) => (
+            {statCards(stats).map((stat) => (
               <StatCard key={stat.title} {...stat} />
             ))}
           </div>
@@ -226,9 +230,9 @@ function Index() {
       <ScrollReveal>
         <section id="how-it-works" className={`${container} py-20 lg:py-24`}>
           <SectionHeader title="How Privacy Works">
-            Starlit Pay is designed to use client-side zero-knowledge cryptography to protect your
-            transaction amounts, recipient identities, and wallet balances on Stellar. On-chain proof
-            verification is in development during the testnet preview.
+            Starlit Pay protects your transaction amounts, recipient identities, and balances with
+            zero-knowledge proofs, made on your device and verified on chain by Stellar. It runs on
+            testnet and has not been audited yet.
           </SectionHeader>
 
           <div className="mt-14 hidden lg:block">

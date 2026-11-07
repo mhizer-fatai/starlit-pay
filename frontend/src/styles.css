@@ -386,11 +386,6 @@
     0 30px 70px oklch(0.5 0.09 248 / 16%);
 }
 
-@utility dashboard-fade {
-  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 95%);
-  mask-image: linear-gradient(to bottom, black 60%, transparent 95%);
-}
-
 @utility stat-wash {
   background: linear-gradient(
     135deg,

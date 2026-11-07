@@ -254,6 +254,7 @@ export const fetchStats = () =>
     transactionsCount: number;
     notesCommitted: number;
     tvlFormatted: string;
+    zkProofsVerified: number;
     network: string;
     status: string;
   }>("/api/stats");
