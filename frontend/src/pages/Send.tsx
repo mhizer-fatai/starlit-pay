@@ -416,6 +416,16 @@ function SendPage() {
     return () => document.removeEventListener("keydown", onKey);
   }, [confirmOpen]);
 
+  // Leaving mid-payment would stop the proof: let the browser ask first.
+  useEffect(() => {
+    if (!busy) return;
+    function onLeave(event: BeforeUnloadEvent) {
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", onLeave);
+    return () => window.removeEventListener("beforeunload", onLeave);
+  }, [busy]);
+
   // Real-proof pool: the proof is made on this device and Starlit's payer pays the fee.
   async function submitZkPayment(me: SessionUser, rawTarget: string, amt: number) {
     const external = mode === "external";
@@ -984,7 +994,7 @@ function SendPage() {
                   )}
                 </div>
 
-                {message && (
+                {message && !busy && (
                   <p className="text-center text-xs text-muted-foreground" role="status">
                     {message}
                   </p>
@@ -1005,6 +1015,27 @@ function SendPage() {
                 </Button>
               </form>
             </section>
+
+            {busy && (
+              <div className="send-modal" role="presentation">
+                <div
+                  className="send-modal-card send-progress"
+                  role="alertdialog"
+                  aria-modal="true"
+                  aria-labelledby="send-progress-title"
+                  aria-describedby="send-progress-step"
+                >
+                  <Loader2 className="animate-spin" aria-hidden="true" />
+                  <h3 className="modal-title" id="send-progress-title">
+                    Transaction in progress
+                  </h3>
+                  <p id="send-progress-step" role="status">
+                    {message || "Getting ready…"}
+                  </p>
+                  <p className="send-progress-note">Please keep this page open. A private payment takes about a minute.</p>
+                </div>
+              </div>
+            )}
 
             {confirmOpen && (
               <div
