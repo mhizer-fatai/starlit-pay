@@ -422,6 +422,16 @@
   );
 }
 
+/* Back to the landing page from any step of sign-in. */
+@utility auth-back {
+  position: absolute;
+  top: 20px;
+  left: 16px;
+  z-index: 1;
+  gap: 6px;
+  color: var(--color-foreground);
+}
+
 @utility auth-shell {
   width: 100%;
   min-height: 100%;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Fingerprint, KeyRound, LifeBuoy, Lock, ShieldCheck, User } from "lucide-react";
+import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Lock, ShieldCheck, User } from "lucide-react";
 
 import { RecoveryCodePanel } from "@/components/RecoveryCodePanel";
 import { Button } from "@/components/ui/button";
@@ -586,6 +586,10 @@ function AuthPage() {
     <main className="auth-stage">
       <div className="auth-shell">
         <section className="auth-panel">
+          <Button type="button" variant="ghost" className="auth-back" onClick={() => navigate("/")}>
+            <ArrowLeft aria-hidden="true" />
+            Home
+          </Button>
           <div className="auth-form-wrap">
             {(phase === "google" || phase === "checking") && (
               <>
