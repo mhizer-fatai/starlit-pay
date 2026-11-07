@@ -16,11 +16,11 @@ import { Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
 import { useSidebar } from "@/lib/sidebar";
 import { getUser } from "@/lib/auth";
-import { ownWalletAddress } from "@/lib/backend";
+import { BackendError, ownWalletAddress } from "@/lib/backend";
+import { loadAppBalances } from "@/lib/privateWallet";
 import {
   activityTitle,
   buildActivityFeed,
-  loadPrivateBalances,
   loadUserTransactions,
   type ActivityItem,
 } from "@/lib/wallet";
@@ -38,6 +38,7 @@ function TransactionsPage() {
   const [selected, setSelected] = useState<ActivityItem | null>(null);
   const [userName, setUserName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<"" | "expired" | "failed">("");
   const totalPages = Math.max(1, Math.ceil(feed.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const start = (safePage - 1) * PAGE_SIZE;
@@ -57,14 +58,21 @@ function TransactionsPage() {
       setEmail(user.email);
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setUserName(name);
-      // Merge outgoing records with incoming shielded notes (same feed as
-      // the dashboard's Recent Activity).
-      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user), ownWalletAddress()])
+      // Merge outgoing records with incoming notes (same feed as the
+      // dashboard's Recent Activity). Each part loads on its own: only the
+      // records are essential, and a failure must say so, not look empty.
+      void Promise.allSettled([loadUserTransactions(user.id), loadAppBalances(user), ownWalletAddress()])
         .then(([txs, balances, wallet]) => {
           if (cancelled) return;
-          setFeed(buildActivityFeed(balances?.notes ?? [], txs, user.username, wallet));
+          if (txs.status === "rejected") {
+            const expired = txs.reason instanceof BackendError && txs.reason.status === 401;
+            setLoadError(expired ? "expired" : "failed");
+            return;
+          }
+          setLoadError("");
+          const notes = balances.status === "fulfilled" ? (balances.value?.notes ?? []) : [];
+          setFeed(buildActivityFeed(notes, txs.value, user.username, wallet.status === "fulfilled" ? wallet.value : null));
         })
-        .catch(() => {})
         .finally(() => {
           if (!cancelled) setLoading(false);
         });
@@ -177,7 +185,21 @@ function TransactionsPage() {
                 </tbody>
               </table>
               </div>
-              {!loading && pageItems.length === 0 && (
+              {!loading && loadError === "expired" && (
+                <p className="text-sm text-muted-foreground" style={{ padding: 12 }} role="alert">
+                  Your session has expired.{" "}
+                  <button type="button" className="underline" onClick={() => navigate("/auth")}>
+                    Sign in again
+                  </button>{" "}
+                  to see your transactions.
+                </p>
+              )}
+              {!loading && loadError === "failed" && (
+                <p className="text-sm text-muted-foreground" style={{ padding: 12 }} role="alert">
+                  Couldn't load your transactions. Check your connection and reload the page.
+                </p>
+              )}
+              {!loading && !loadError && pageItems.length === 0 && (
                 <p className="text-sm text-muted-foreground" style={{ padding: 12 }}>No transactions yet.</p>
               )}
               <div className="transactions-footer">

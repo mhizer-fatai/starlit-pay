@@ -4,9 +4,9 @@ import { Bell, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getUser } from "@/lib/auth";
 import { ownWalletAddress } from "@/lib/backend";
+import { loadAppBalances } from "@/lib/privateWallet";
 import {
   buildActivityFeed,
-  loadPrivateBalances,
   loadUserTransactions,
   partyLabel,
   type ActivityItem,
@@ -185,11 +185,13 @@ export function NotificationBell() {
     void getUser().then((user) => {
       if (cancelled || !user) return;
       setUserId(user.id);
-      void Promise.all([loadUserTransactions(user.id), loadPrivateBalances(user), ownWalletAddress()])
+      // Each part on its own: notes or the wallet address failing mustn't hide the rest.
+      void Promise.allSettled([loadUserTransactions(user.id), loadAppBalances(user), ownWalletAddress()])
         .then(([txs, balances, wallet]) => {
-          if (cancelled) return;
+          if (cancelled || txs.status === "rejected") return;
           const readIds = new Set(getReadIds(user.id));
-          const feed = buildActivityFeed(balances?.notes ?? [], txs, user.username, wallet).slice(0, 10);
+          const notes = balances.status === "fulfilled" ? (balances.value?.notes ?? []) : [];
+          const feed = buildActivityFeed(notes, txs.value, user.username, wallet.status === "fulfilled" ? wallet.value : null).slice(0, 10);
           setNotifications(feed.map((item) => toNotification(item, readIds.has(item.key))));
         })
         .catch(() => {});

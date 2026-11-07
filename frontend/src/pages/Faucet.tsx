@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { getUser, type SessionUser } from "@/lib/auth";
 import { faucetFund, faucetStatus } from "@/lib/backend";
 import { loadPrivateBalances } from "@/lib/wallet";
+import { completeArrivals, loadArrivals, POOL_FEE, zkPoolEnabled } from "@/lib/privateWallet";
 import { useSidebar } from "@/lib/sidebar";
 
 const COOLDOWN_SECONDS = 24 * 60 * 60;
@@ -92,6 +93,30 @@ function FaucetPage() {
     }
   }
 
+  // Real-ZK pools: the gateway records the faucet's payment as this user's
+  // credit, then this device deposits it into the private balance.
+  async function claimIntoPrivatePools(user: NonNullable<typeof me>, claimLabel: string) {
+    setStatus("Sending funds…");
+    await faucetFund({ viewingKey: user.public_encryption_key!, depositMemo: user.deposit_memo || undefined, captchaToken: captchaToken! });
+    setStatus("Funds sent to Starlit. Waiting for them to arrive…");
+    let arrived = false;
+    for (let attempt = 0; attempt < 30 && !arrived; attempt++) {
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
+      const pending = await loadArrivals().catch(() => null);
+      arrived = Boolean(pending && (pending.xlm || pending.usdc));
+    }
+    if (!arrived) {
+      setStatus(`Funds sent! +${claimLabel} will be added to your private balance on your Dashboard shortly.`);
+      return;
+    }
+    const completed = await completeArrivals(setStatus).catch(() => 0);
+    setStatus(
+      completed
+        ? `Funds received! +${claimLabel} added to your private balance (less the ${POOL_FEE} privacy fee per asset).`
+        : `Funds received. They'll be added to your private balance next time you open your Dashboard.`
+    );
+  }
+
   async function handleClaim() {
     setError("");
     setStatus("");
@@ -107,6 +132,11 @@ function FaucetPage() {
     const claimLabel = DRIP_LABEL;
     setClaiming(true);
     try {
+      if (zkPoolEnabled()) {
+        await claimIntoPrivatePools(me, claimLabel);
+        startCooldown();
+        return;
+      }
       // Snapshot balances so we can detect the credit landing (old behavior).
       const snapshot = await loadPrivateBalances(me).catch(() => null);
       const initUsdc = snapshot?.usdc ?? 0;
