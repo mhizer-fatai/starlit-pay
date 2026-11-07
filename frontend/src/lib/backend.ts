@@ -1,6 +1,8 @@
 // Typed client for the starlit-pay backend (Express :3001 / onrender).
 // Preserves every read/write the old JSX frontend used.
 
+import { refreshOnce, RETRYABLE_SESSION_CODES } from "@/lib/sessionRefresh";
+
 const DEFAULT_LOCAL = "http://localhost:3001";
 // Same site as starlitpay.xyz, so session cookies are first-party (Safari/iOS block cross-site cookies).
 const DEFAULT_REMOTE = "https://api.starlitpay.xyz";
@@ -54,15 +56,33 @@ export class BackendError extends Error {
   }
 }
 
+function refreshSessionCookie(): Promise<boolean> {
+  return refreshOnce(() =>
+    fetch(`${BACKEND_URL}/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", "X-Requested-With": "starlit" },
+      body: "{}",
+    }).then((res) => res.ok)
+  );
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // X-Requested-With is the CSRF header the backend requires when a request is
   // authenticated by the passkey session cookie (credentials: "include").
   const headers: Record<string, string> = { "Content-Type": "application/json", "X-Requested-With": "starlit" };
-  const res = await fetch(`${BACKEND_URL}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: { ...headers, ...init?.headers },
-  });
+  const send = () =>
+    fetch(`${BACKEND_URL}${path}`, {
+      ...init,
+      credentials: "include",
+      headers: { ...headers, ...init?.headers },
+    });
+  let res = await send();
+  // The 15-minute access cookie ran out: renew it (once for the whole app) and retry.
+  if (res.status === 401) {
+    const peek = (await res.clone().json().catch(() => null)) as { code?: string } | null;
+    if (RETRYABLE_SESSION_CODES.has(peek?.code ?? "") && (await refreshSessionCookie())) res = await send();
+  }
   if (!res.ok) {
     let msg = `Backend ${res.status}: ${path}`;
     try {

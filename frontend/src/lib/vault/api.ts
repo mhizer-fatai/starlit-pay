@@ -6,6 +6,7 @@
 // refresh (shared by concurrent requests) and a single retry.
 
 import type { Argon2Params } from "./crypto";
+import { refreshOnce, RETRYABLE_SESSION_CODES } from "@/lib/sessionRefresh";
 
 export const CSRF_HEADER = "X-Requested-With";
 export const CSRF_VALUE = "starlit";
@@ -129,11 +130,8 @@ interface CallOptions {
   emailProof?: string | null;
 }
 
-const RETRYABLE_SESSION_CODES = new Set(["no_session", "invalid_session"]);
-
 export function createAuthApi({ baseUrl, fetchImpl }: AuthApiOptions) {
   const doFetch = fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
-  let refreshing: Promise<boolean> | null = null;
 
   async function send(method: string, path: string, { body, emailProof }: CallOptions) {
     const headers: Record<string, string> = { [CSRF_HEADER]: CSRF_VALUE };
@@ -161,17 +159,9 @@ export function createAuthApi({ baseUrl, fetchImpl }: AuthApiOptions) {
     return json as T;
   }
 
-  /** Rotates the refresh cookie. Concurrent callers share one request. */
+  /** Rotates the refresh cookie. Concurrent callers, here or in lib/backend, share one request. */
   function refreshSession(): Promise<boolean> {
-    if (!refreshing) {
-      refreshing = send("POST", "/api/auth/refresh", {})
-        .then((res) => res.ok)
-        .catch(() => false)
-        .finally(() => {
-          refreshing = null;
-        });
-    }
-    return refreshing;
+    return refreshOnce(() => send("POST", "/api/auth/refresh", {}).then((res) => res.ok));
   }
 
   async function call<T>(method: string, path: string, options: CallOptions = {}): Promise<T> {
