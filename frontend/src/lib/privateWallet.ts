@@ -6,6 +6,7 @@ import { BackendError, fetchZkDeposits, postTransaction, signZkDeposit, type Bac
 import { decodeTransactionPayload, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
 import { createdLeavesOrNone, ledgerTime, leafKey } from "@/lib/zkHistory";
 import { writeCachedBalance } from "@/lib/balanceCache";
+import { formatTiming, startTimer, type PaymentTimer } from "@/lib/paymentTiming";
 import { openPrivateSession, recipientKeys, RecipientKeysError, type PoolAsset, type SessionOptions } from "@/lib/privatePool";
 
 const DECIMALS = 7; // XLM and USDC on Stellar
@@ -172,9 +173,13 @@ export async function sendZkPayment(
   options?: SessionOptions
 ): Promise<ZkPaymentResult> {
   const value = toBaseUnits(amount);
+  const timer = startTimer();
   onProgress("Getting ready…");
+  timer.mark("open");
   const session = await openPrivateSession(ownerSecret(), options);
+  timer.mark("sync");
   await session.sync();
+  timer.mark("prepare");
   const pool = await session.pool(asset);
 
   const [balance, maxSpend] = await Promise.all([pool.balance(), pool.maxSpend()]);
@@ -188,9 +193,12 @@ export async function sendZkPayment(
   const keys = to.kind === "user" ? await recipientKeys(to.username) : null;
   const estimate = await pool.estimate(value);
 
-  const result = await withProgress(onProgress, () =>
-    keys ? pool.transferToKeys(keys.noteKey, keys.encryptionKey, value) : pool.withdraw(value, (to as { address: string }).address)
+  const result = await withProgress(
+    onProgress,
+    () => (keys ? pool.transferToKeys(keys.noteKey, keys.encryptionKey, value) : pool.withdraw(value, (to as { address: string }).address)),
+    timer
   );
+  console.info(`[Starlit] ${keys ? "Payment" : "Withdrawal"} timing: ${formatTiming(timer.finish())}`);
   const hashes = [...result.hashes];
   if (result.status === "ok") return { hashes, fees: fromBaseUnits(BigInt(estimate.fees)), leaves: await createdLeavesOrNone(hashes) };
   if (hashes.length) {
@@ -199,9 +207,13 @@ export async function sendZkPayment(
   throw new Error(result.message || "The payment didn't go through. Nothing was sent.");
 }
 
-/** Forwards the SDK's progress events while `run` is in flight. */
-async function withProgress<T>(onProgress: (message: string) => void, run: () => Promise<T>): Promise<T> {
-  const listener = (event: Event) => onProgress(progressMessage((event as CustomEvent).detail));
+/** Forwards the SDK's progress events while `run` is in flight (and times its stages). */
+async function withProgress<T>(onProgress: (message: string) => void, run: () => Promise<T>, timer?: PaymentTimer): Promise<T> {
+  const listener = (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    timer?.stage(detail);
+    onProgress(progressMessage(detail));
+  };
   window.addEventListener(PROGRESS_EVENT, listener);
   try {
     return await run();
@@ -292,7 +304,9 @@ async function depositCredits(
       const amount = toBaseUnits(credit.amount) - (await pool.fee());
       if (amount <= 0n) continue;
       onProgress(`Adding ${credit.amount.replace(/\.?0+$/, "")} ${credit.asset} to your private balance…`);
-      const result = await withProgress(onProgress, () => pool.deposit(amount));
+      const timer = startTimer();
+      const result = await withProgress(onProgress, () => pool.deposit(amount), timer);
+      console.info(`[Starlit] Deposit timing: ${formatTiming(timer.finish())}`);
       if (result.status === "ok") {
         completed++;
         const hashes = [...result.hashes];
