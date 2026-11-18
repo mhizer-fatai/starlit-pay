@@ -18,6 +18,24 @@ import deploymentJson from "./spp/deployment.testnet.json";
 import circuitLock from "./spp/circuits.lock.json";
 
 const SDK_BASE = "/zk/spp/";
+
+/**
+ * A short tag for this set of circuit files, taken from their fingerprints.
+ * Browsers keep the circuits for a year (public/_headers), so their address
+ * carries this tag: new circuits get a new address and are fetched afresh.
+ * Netlify maps /zk/circuits/<tag>/ back to the files (public/_redirects).
+ */
+export function circuitsVersion(lock: unknown): string {
+  // FNV-1a: a stable tag is all that's needed; integrity comes from the lock.
+  let hash = 0x811c9dc5;
+  for (const char of JSON.stringify(lock)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+const CIRCUITS_BASE = `/zk/circuits/${circuitsVersion(circuitLock)}/`;
 const RPC_URL = (import.meta.env.VITE_STELLAR_RPC_URL as string | undefined) || "https://soroban-testnet.stellar.org";
 
 const deployment = deploymentJson as Spp.ContractConfigInput & { networkPassphrase: string };
@@ -123,7 +141,7 @@ export function openPrivateSession(stellarSecretKey: string, options: SessionOpt
       bootnodeUrl: historyUrl,
       storage,
       contractConfig: deployment,
-      circuitsBaseUrl: new URL(`${SDK_BASE}dist/circuits/`, window.location.origin).href,
+      circuitsBaseUrl: new URL(CIRCUITS_BASE, window.location.origin).href,
       circuitLock,
     });
     await client.backgroundSync();

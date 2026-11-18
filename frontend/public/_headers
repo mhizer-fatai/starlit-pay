@@ -1,0 +1,5 @@
+# The circuit files never change at a given address: the address carries a tag
+# from their fingerprints (circuitsVersion in src/lib/privatePool.ts), and the
+# app checks every file against those fingerprints before using it.
+/zk/circuits/*
+  Cache-Control: public, max-age=31536000, immutable

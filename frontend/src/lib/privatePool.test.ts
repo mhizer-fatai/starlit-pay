@@ -1,6 +1,6 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { describe, expect, test } from "vitest";
-import { recipientKeys, RecipientKeysError, storageDirectory } from "@/lib/privatePool";
+import { circuitsVersion, recipientKeys, RecipientKeysError, storageDirectory } from "@/lib/privatePool";
 import { signZkKeys } from "@/lib/zkSigner";
 
 const bob = StellarSdk.Keypair.random();
@@ -40,4 +40,18 @@ test("says plainly when a recipient isn't set up for private payments, or doesn'
     throw new BackendError(404, "User not found");
   };
   await expect(recipientKeys("nobody", missing)).rejects.toThrow("No Starlit user named @nobody");
+});
+
+describe("circuitsVersion", () => {
+  const lock = { version: "0.7", policy_tx_2_2_B: { r1cs: "aa", "graph.bin": "bb", "proving_key.bin": "cc" } };
+
+  test("is a stable 8-character tag", () => {
+    expect(circuitsVersion(lock)).toMatch(/^[0-9a-f]{8}$/);
+    expect(circuitsVersion(lock)).toBe(circuitsVersion(structuredClone(lock)));
+  });
+
+  test("changes when any circuit fingerprint changes", () => {
+    const changed = { ...lock, policy_tx_2_2_B: { ...lock.policy_tx_2_2_B, "proving_key.bin": "cd" } };
+    expect(circuitsVersion(changed)).not.toBe(circuitsVersion(lock));
+  });
 });

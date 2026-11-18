@@ -2,5 +2,9 @@
 https://starlit-pay.netlify.app/* https://starlitpay.xyz/:splat 301!
 http://starlit-pay.netlify.app/* https://starlitpay.xyz/:splat 301!
 
+# Circuit files under a versioned address (see circuitsVersion in
+# src/lib/privatePool.ts), so browsers can keep them for a year
+/zk/circuits/:version/* /zk/spp/dist/circuits/:splat 200
+
 # SPA client-side routing fallback
 /* /index.html 200
