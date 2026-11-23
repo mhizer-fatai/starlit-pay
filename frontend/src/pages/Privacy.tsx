@@ -79,7 +79,7 @@ const SECTIONS: PolicySection[] = [
         type: "callout",
         icon: "lock",
         title: "Private keys stay with you",
-        text: "We never collect, transmit, or store your private keys, recovery phrases, or your 6-digit payment PIN. Your PIN never leaves your device; only a one-way hash of a derived key is ever sent to our servers for verification.",
+        text: "We never collect or store your private keys in readable form, your 6-digit PIN, or your recovery code. Your keys are kept in a vault encrypted on your device, which only your passkey, PIN, or recovery code can open; we store the vault only in encrypted form. Your PIN never leaves your device: only a one-way check value is sent, so we can limit wrong attempts.",
       },
       { type: "sub", text: "Identity verification" },
       {

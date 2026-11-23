@@ -57,13 +57,13 @@ const SECTIONS: TermsSection[] = [
     blocks: [
       {
         type: "p",
-        text: "You sign in with a Google account and create a 6-digit payment PIN, which derives your wallet keys on your own device. You are responsible for everything done through your account, for keeping your PIN secret, and for the accuracy of the information you provide (one account per email address).",
+        text: "You confirm your email once with Google, then sign in with a passkey (your fingerprint, face, or device screen lock). Your wallet keys are kept in an encrypted vault that only your passkey, your 6-digit PIN, or your one-time recovery code can open; we store the vault only in encrypted form. You are responsible for everything done through your account, for keeping your devices, PIN, and recovery code safe, and for the accuracy of the information you provide (one account per email address).",
       },
       {
         type: "callout",
         icon: "shield",
-        title: "No PIN recovery",
-        text: "Your PIN is never stored anywhere and cannot be recovered or reset by us. If you lose it, your wallet cannot be unlocked — store it somewhere safe when you create your account.",
+        title: "Keep your recovery code safe",
+        text: "We cannot open your vault or reset your keys. If you lose your passkey, you can still unlock with your PIN or your recovery code — but if you lose all of them, your wallet cannot be recovered. Store your recovery code somewhere safe when you create your account.",
       },
     ],
   },
@@ -125,7 +125,7 @@ const SECTIONS: TermsSection[] = [
     blocks: [
       {
         type: "p",
-        text: "A payment moves through initiation, authorization with your keys, shielding, and blockchain confirmation. Most Stellar payments confirm within seconds, while private-balance credits land once the gateway shields them — usually within a minute.",
+        text: "A private payment is authorized with your keys, proven by a zero-knowledge proof made on your own device (this can take up to a minute), and then confirmed on the Stellar network, usually within seconds. Deposits from other wallets are recorded as credits and added to your private balance by your device the next time you open the app.",
       },
       {
         type: "p",
@@ -184,6 +184,10 @@ const SECTIONS: TermsSection[] = [
       {
         type: "p",
         text: "The Starlit Pay name, logo, interface, code, content, and documentation are owned by us or our licensors. You receive a limited, revocable, non-transferable right to use the Services for their intended purpose — nothing here transfers ownership of any intellectual property to you.",
+      },
+      {
+        type: "p",
+        text: "Starlit Pay uses open-source software that stays under its own licenses, including Nethermind's Stellar Private Payments (Apache-2.0) and the circuit library circomlib (LGPL-3.0). The license notice for the zero-knowledge circuits we serve, and their full source code, are at starlitpay.xyz/zk/spp/dist/circuits/NOTICE.txt and starlitpay.xyz/zk/spp/dist/circuits/source-bundle.tar.gz.",
       },
     ],
   },
@@ -249,7 +253,7 @@ const SECTIONS: TermsSection[] = [
     blocks: [
       {
         type: "p",
-        text: "We may suspend, restrict, or terminate your access — including holding or declining transactions — for fraud, security concerns, suspected Terms violations, sanctions exposure, or legal and regulatory requirements. On termination, pending actions may not complete; your data is handled as described in the Privacy Policy. Because your wallet keys are derived on your device, losing access to the app does not by itself destroy keys you still hold — but without them, funds cannot be moved.",
+        text: "We may suspend, restrict, or terminate your access — including holding or declining transactions — for fraud, security concerns, suspected Terms violations, sanctions exposure, or legal and regulatory requirements. On termination, pending actions may not complete; your data is handled as described in the Privacy Policy. Your funds stay in the private pools on Stellar, under your keys — but without those keys, funds cannot be moved.",
       },
     ],
   },

@@ -124,7 +124,7 @@
       <h3>B. Wallet and Cryptographic Data</h3>
       <p>Starlit Pay uses client-side cryptographic key derivation to safeguard user privacy:</p>
       <ul>
-        <li><strong>Private Keys &amp; PIN:</strong> We never collect, transmit, or store your private spending keys or your 6-digit payment PIN. All cryptographic operations occur client-side in your browser.</li>
+        <li><strong>Private Keys, PIN &amp; Recovery Code:</strong> We never collect or store your private keys in readable form, your 6-digit PIN, or your recovery code. Your keys are kept in a vault encrypted in your browser, which only your passkey, PIN, or recovery code can open; we store the vault only in encrypted form. Your PIN never leaves your device: only a one-way check value is sent, so we can limit wrong attempts. Zero-knowledge proofs are made in your browser.</li>
         <li><strong>Public Addresses &amp; Viewing Keys:</strong> We store your public Stellar deposit address, public encryption/viewing key, and encrypted transaction notes required to index incoming shielded payments.</li>
       </ul>
 

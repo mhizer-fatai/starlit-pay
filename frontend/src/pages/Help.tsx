@@ -38,19 +38,19 @@ const ARTICLES: Article[] = [
   {
     title: "How do I create an account?",
     category: "Getting Started",
-    body: "Choose Continue with Google on the sign-in page, pick your Google account, then create a 6-digit payment PIN and a username. Your wallet keys are derived on your device from your email and PIN — there is no recovery phrase to write down, but there is also no way to recover a forgotten PIN.",
+    body: "Choose Continue with Google on the sign-in page to confirm your email, then create a passkey (your fingerprint, face, or screen lock), choose a username, set a 6-digit PIN, and save your one-time recovery code. There is no recovery phrase: your passkey, PIN, or recovery code opens your wallet.",
     popular: true,
   },
   {
     title: "How do I get test tokens?",
     category: "Getting Started",
-    body: "Open the Faucet page, solve the captcha, and claim either 100 XLM or 50 USDC per visit. Funds travel through the deposit gateway and are shielded to your private balance, usually within a minute. Each claim starts a 4-hour cooldown shown as a live countdown on the Claim button.",
+    body: "Open the Faucet page and claim 10 XLM and 20 USDC of free test funds. They travel through the deposit gateway and are added to your private balance by your device. You can claim once every 24 hours; the Claim button shows a countdown until your next claim.",
     popular: true,
   },
   {
     title: "My PIN is rejected. What do I do?",
     category: "Account & Security",
-    body: "Double-check each digit — the PIN must match exactly what you created. There is no reset: the PIN is never stored anywhere, so we cannot recover or change it for you. If you are locked out, use Switch Account on the unlock screen to start over with a different login.",
+    body: "Double-check each digit — the PIN must match exactly what you created. After several wrong attempts PIN unlocking is paused for a while, to protect you. You can still unlock with your passkey or your recovery code, and then set a new PIN. We cannot see or reset your PIN for you.",
     popular: true,
   },
   {

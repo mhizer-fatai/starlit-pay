@@ -38,14 +38,14 @@ const faqs = [
 
 const moreFaqs = [
   {
-    question: "What happens if I lose my payment PIN?",
+    question: "What happens if I forget my PIN or lose my phone?",
     answer:
-      "Your PIN is never stored anywhere — not on your device and not on our servers. Without it your wallet keys cannot be recreated, so write it down somewhere safe when you create your account.",
+      "You can unlock your wallet with any of your passkey, your PIN, or your one-time recovery code, so losing one is not the end. We cannot open your vault or reset it for you, though: if you lose all three, your wallet cannot be recovered. Keep your recovery code somewhere safe.",
   },
   {
     question: "How fast are payments?",
     answer:
-      "Stellar settles in about 5 seconds. Private balance credits land once the gateway shields them, usually within a minute, and you will see them in your activity feed.",
+      "A private payment is proven on your device, which can take up to a minute, then settles on Stellar in seconds. Deposits from other wallets are added to your private balance the next time you open the app, and you will see them in your activity feed.",
   },
   {
     question: "How do I receive payments from someone?",

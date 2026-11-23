@@ -41,7 +41,7 @@ const CATEGORIES: DocCategory[] = [
       {
         title: "Creating your account",
         body: [
-          "Choose Continue with Google, pick your Google account, then create a 6-digit payment PIN and a username. Your wallet keys are derived on your device from your email and PIN — there is no recovery phrase.",
+          "Choose Continue with Google to confirm your email, create a passkey (your fingerprint, face, or screen lock), choose a username, set a 6-digit PIN, and save your one-time recovery code. Your wallet keys are kept in an encrypted vault that only your passkey, PIN, or recovery code can open — there is no recovery phrase.",
         ],
         steps: [
           "Open the sign-in page and choose Continue with Google.",
@@ -84,7 +84,7 @@ const CATEGORIES: DocCategory[] = [
       {
         title: "Depositing assets",
         body: [
-          "Open Receive to find the shared gateway address and your personal 6-digit memo. Send funds to that address with your memo attached and the gateway shields them into your private balance, usually within a minute. Deposits without your memo cannot be routed to you.",
+          "Open Receive to find the shared gateway address and your personal 6-digit memo. Send funds to that address with your memo attached: the gateway records them as your credit, and your device adds them to your private balance the next time you open the app. Deposits without your memo cannot be routed to you.",
         ],
         steps: [
           "Copy the gateway deposit address and your personal memo.",
@@ -195,9 +195,9 @@ const CATEGORIES: DocCategory[] = [
     icon: ShieldCheck,
     articles: [
       {
-        title: "How your PIN protects you",
+        title: "How your vault protects you",
         body: [
-          "Your PIN derives your wallet keys and is verified as a one-way hash — it is never stored or transmitted. Sessions expire, refreshing the tab always asks for the PIN again, and signing out wipes the session everywhere it matters on that browser.",
+          "Your wallet keys live in an encrypted vault that your passkey, PIN, or recovery code opens on your device. Your PIN is never sent or stored: your device turns it into a one-way check value, and the server locks PIN unlocking after repeated wrong attempts. Payments need a fresh confirmation, sessions expire when you are inactive, refreshing the tab asks you to unlock again, and signing out wipes the session on that browser.",
         ],
       },
       {
