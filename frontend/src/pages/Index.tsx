@@ -8,6 +8,8 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { Button } from "@/components/ui/button";
+import { FaqList } from "@/components/FaqList";
+import { PRIVATE_VIEW, PUBLIC_VIEW, TRUST } from "@/content/site";
 import { fetchStats } from "@/lib/backend";
 import { container } from "@/lib/utils";
 
@@ -82,8 +84,10 @@ function FeatureCard({ title, image }: { title: string; image: string }) {
 
 type Stats = Awaited<ReturnType<typeof fetchStats>>;
 
-function statCards(live: Stats | null): { figure: string; title: string; caption: string; variant?: "light" | "primary" }[] {
-  const count = (n: number | undefined) => (typeof n === "number" ? n.toLocaleString("en-US") : "…");
+// While loading a figure shows "…"; if the stats cannot be loaded it shows "—".
+function statCards(live: Stats | null, failed: boolean): { figure: string; title: string; caption: string; variant?: "light" | "primary" }[] {
+  const pending = failed ? "—" : "…";
+  const count = (n: number | undefined) => (typeof n === "number" ? n.toLocaleString("en-US") : pending);
   return [
     {
       figure: count(live?.zkProofsVerified),
@@ -91,7 +95,7 @@ function statCards(live: Stats | null): { figure: string; title: string; caption
       caption: "On chain · Stellar Testnet",
     },
     {
-      figure: live?.tvlFormatted ?? "…",
+      figure: live?.tvlFormatted ?? pending,
       title: "Total Value Locked (TVL)",
       caption: "Private pools · XLM & USDC",
       variant: "primary",
@@ -167,6 +171,7 @@ const features: { title: string; image: string }[] = [
 
 function Index() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [statsFailed, setStatsFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,14 +179,16 @@ function Index() {
       .then((s) => {
         if (!cancelled) setStats(s);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setStatsFailed(true);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
   useEffect(() => {
-    document.title = "Starlit Pay - Send and Receive Payments with Absolute Privacy.";
+    document.title = "Starlit Pay: the private money app for the stablecoin era";
     document.documentElement.classList.remove("dark");
   }, []);
 
@@ -196,11 +203,11 @@ function Index() {
           <ScrollReveal>
             <section className="relative z-10 max-w-[960px]">
               <h1 className="max-w-[1050px] text-[34px] font-medium leading-[1.08] tracking-normal text-foreground sm:text-[46px] lg:text-[56px]">
-                Send and Receive Payments <br /> with Absolute Privacy.
+                The private money app <br /> for the stablecoin era.
               </h1>
               <p className="mt-5 max-w-[680px] text-[14px] leading-[1.7] text-foreground/75 sm:text-[16px]">
-                Protect your financial history. Send and receive digital dollars securely on the
-                blockchain without exposing your balances or transaction records.
+                Hold dollars, pay anyone by username, and get paid, without making your finances
+                public. Private payments, made simple.
               </p>
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <Button asChild className="cta-shadow h-12 rounded px-5 text-[15px]">
@@ -220,10 +227,50 @@ function Index() {
       <ScrollReveal>
         <section id="ecosystem" className={`${container} py-20 lg:py-24`}>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {statCards(stats).map((stat) => (
+            {statCards(stats, statsFailed).map((stat) => (
               <StatCard key={stat.title} {...stat} />
             ))}
           </div>
+        </section>
+      </ScrollReveal>
+
+      <ScrollReveal>
+        <section id="about" className={`${container} py-20 lg:py-24`}>
+          <SectionHeader title="Blockchains are public. Your money shouldn't be.">
+            Stablecoins have made dollars faster, cheaper and more accessible than ever. But on most
+            blockchains every payment is public: anyone can see what you earn, what you spend and
+            what you hold. Starlit Pay gives you the simplicity of a modern payment app with the
+            privacy of zero-knowledge cryptography, with no recovery phrases, no gas fees and no
+            technical knowledge required.
+          </SectionHeader>
+          <div className="mt-10 grid gap-4 md:grid-cols-2">
+            <div className="rounded-md bg-black p-8 text-white sm:p-10">
+              <p className="text-[13px] font-semibold uppercase tracking-[0.18em] text-white/60">
+                What everyone sees today
+              </p>
+              <ul className="mt-4 grid gap-2 text-[15px] text-white/85">
+                {PUBLIC_VIEW.map((line) => (
+                  <li key={line}>→ {line}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-md border border-primary/25 bg-primary/5 p-8 sm:p-10">
+              <p className="text-[13px] font-semibold uppercase tracking-[0.18em] text-primary">
+                What Starlit Pay keeps private
+              </p>
+              <ul className="mt-4 grid gap-2 text-[15px] text-foreground/85">
+                {PRIVATE_VIEW.map((line) => (
+                  <li key={line}>→ {line}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <p className="mt-6 text-[14px] text-foreground/70">
+            We believe financial privacy is a right, and that privacy and accountability can coexist.{" "}
+            <Link to="/about" className="font-medium text-primary hover:underline">
+              More about Starlit Pay →
+            </Link>
+          </p>
         </section>
       </ScrollReveal>
 
@@ -298,6 +345,40 @@ function Index() {
               <FeatureCard key={feature.title} {...feature} />
             ))}
           </div>
+        </section>
+      </ScrollReveal>
+
+      <ScrollReveal>
+        <section id="security" className={`${container} py-20 lg:py-24`}>
+          <SectionHeader title="Built around trust, stated plainly." />
+          <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {TRUST.map((item) => (
+              <div key={item.title} className="rounded-md border border-border bg-background/40 p-6">
+                <span className="grid size-10 place-items-center rounded-full bg-primary/10 text-primary">
+                  <item.icon className="size-5" />
+                </span>
+                <p className="mt-4 text-[16px] font-semibold text-foreground">{item.title}</p>
+                <p className="mt-2 text-[14px] leading-[1.7] text-foreground/75">{item.text}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 rounded-md border border-amber-500/30 bg-amber-500/5 p-5">
+            <p className="text-[14px] font-semibold text-foreground">Live on testnet, not yet audited.</p>
+            <p className="mt-1 max-w-[760px] text-[14px] leading-[1.7] text-foreground/75">
+              Starlit Pay uses test tokens with no real-world value. An independent security audit comes
+              before mainnet.{" "}
+              <Link to="/terms#disclaimers" className="font-medium text-primary hover:underline">
+                Read the risk notice →
+              </Link>
+            </p>
+          </div>
+        </section>
+      </ScrollReveal>
+
+      <ScrollReveal>
+        <section id="faqs" className={`${container} py-20 lg:py-24`}>
+          <SectionHeader title="Frequently Asked Questions" />
+          <FaqList />
         </section>
       </ScrollReveal>
 

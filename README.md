@@ -1,6 +1,8 @@
 # Starlit Pay
 
-Starlit Pay is a privacy wallet on Stellar. Your private balance lives in
+The private money app for the stablecoin era. Starlit Pay lets people hold,
+send and receive stablecoins on Stellar with the simplicity of a modern payment
+app, while balances and payments stay private. Your private balance lives in
 private payment pools that verify real zero-knowledge proofs, built on
 Nethermind's [Stellar Private Payments](https://github.com/NethermindEth/stellar-private-payments)
 (SPP). On chain, no one can see whom you pay or how much you hold. You sign in

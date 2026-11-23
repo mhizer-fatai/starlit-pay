@@ -64,15 +64,15 @@ export function SiteHeader() {
           <a href={home("#how-it-works")} className={idleClass}>
             How It Works
           </a>
-          <a href={home("#ecosystem")} className={idleClass}>
-            Ecosystem
+          <a href={home("#about")} className={idleClass}>
+            About
           </a>
           <a href={home("#security")} className={idleClass}>
             Security
           </a>
-          <Link to="/faqs" className={onFaqs ? activeClass : idleClass}>
+          <a href={home("#faqs")} className={onFaqs ? activeClass : idleClass}>
             FAQs
-          </Link>
+          </a>
         </nav>
         <div className="flex items-center justify-self-end">
           <Button
@@ -124,11 +124,11 @@ export function SiteHeader() {
               How It Works
             </a>
             <a
-              href={home("#ecosystem")}
+              href={home("#about")}
               className="rounded px-3 py-3 transition-colors hover:bg-white/50"
               onClick={() => setMenuOpen(false)}
             >
-              Ecosystem
+              About
             </a>
             <a
               href={home("#security")}
@@ -137,13 +137,13 @@ export function SiteHeader() {
             >
               Security
             </a>
-            <Link
-              to="/faqs"
+            <a
+              href={home("#faqs")}
               className="rounded px-3 py-3 transition-colors hover:bg-white/50"
               onClick={() => setMenuOpen(false)}
             >
               FAQs
-            </Link>
+            </a>
           </div>
           <Button asChild className="cta-shadow mt-3 h-12 w-full rounded text-[15px]">
             <Link to="/auth" onClick={() => setMenuOpen(false)}>

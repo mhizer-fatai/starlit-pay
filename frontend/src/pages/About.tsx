@@ -3,13 +3,10 @@ import { Link } from "react-router-dom";
 import {
   ArrowRight,
   Eye,
-  EyeOff,
   Globe,
   Layers,
   Lock,
   ScanEye,
-  ShieldCheck,
-  Sparkles,
   Zap,
 } from "lucide-react";
 
@@ -17,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { SiteFooter } from "@/components/SiteFooter";
 import { SiteHeader } from "@/components/SiteHeader";
+import { PRIVATE_VIEW, PUBLIC_VIEW, TRUST } from "@/content/site";
 import { container } from "@/lib/utils";
 
 const BELIEFS = [
@@ -69,12 +67,12 @@ const STEPS = [
   {
     no: "01",
     title: "Create",
-    text: "Sign in with Google and choose a 6-digit PIN. Your wallet keys are derived on your device — no recovery phrase to lose.",
+    text: "Confirm your email with Google, create a passkey, and save your recovery code. Your keys live in a vault encrypted on your device — no recovery phrase to lose.",
   },
   {
     no: "02",
     title: "Fund",
-    text: "Top up from the testnet faucet or deposit to the gateway with your personal memo. Notes are encrypted to your keys.",
+    text: "Claim test funds from the faucet, or deposit from any Stellar wallet with your personal memo. Your device adds them to your private balance.",
   },
   {
     no: "03",
@@ -102,35 +100,12 @@ const CHAIN_POINTS = [
   {
     icon: Globe,
     title: "Global",
-    text: "Digital dollars move across borders and banking systems, 24/7, without intermediaries taking a cut.",
+    text: "Stablecoins move across borders and banking systems, 24/7, without intermediaries taking a cut.",
   },
   {
     icon: Lock,
     title: "Programmable",
     text: "Soroban contracts hold the pools, verify every zero-knowledge proof on chain, and reject notes that were already spent.",
-  },
-];
-
-const TRUST = [
-  {
-    icon: ShieldCheck,
-    title: "Security",
-    text: "PIN-derived keys never leave your device, sessions expire, and abuse is blocked at the faucet and API.",
-  },
-  {
-    icon: EyeOff,
-    title: "Privacy",
-    text: "We collect the minimum needed to run the service and explain every bit of it in our Privacy and Cookie Policies.",
-  },
-  {
-    icon: ScanEye,
-    title: "Transparency",
-    text: "Open cryptography, public pool accounting, and plain-language policies — verify instead of trusting.",
-  },
-  {
-    icon: Sparkles,
-    title: "Honesty",
-    text: "Testnet means test tokens, risks are stated up front, and 'Soon' means exactly that — not silently shipped.",
   },
 ];
 
@@ -161,12 +136,19 @@ function AboutPage() {
       <div className="hero-wash relative -mt-28 pt-28">
         <div className={`${container} pt-14 pb-14 lg:pt-[88px] lg:pb-16`}>
           <h1 className="mt-3 max-w-[1000px] text-[34px] font-medium leading-[1.08] text-foreground sm:text-[46px] lg:text-[60px]">
-            Money should move in private.
+            The private money app for the stablecoin era.
           </h1>
           <p className="mt-5 max-w-[680px] text-[14px] leading-[1.7] text-foreground/75 sm:text-[16px]">
-            We&apos;re building payments where your financial life stays yours — shielded balances,
-            private recipients, and hidden amounts on an open network, without key phrases or
-            complexity.
+            Stablecoins have made dollars faster, cheaper and more accessible than ever. But on most
+            blockchains, every payment is public: anyone can see what you earn, what you spend and
+            what you hold.
+          </p>
+          <p className="mt-4 max-w-[680px] text-[14px] leading-[1.7] text-foreground/75 sm:text-[16px]">
+            Starlit Pay exists to change that: a place to hold dollars, pay people and get paid with
+            the simplicity of a modern payment app and the privacy of zero-knowledge cryptography. No
+            recovery phrases, no gas fees, no technical knowledge required. We believe financial
+            privacy is a right, and that privacy and accountability can coexist, so Starlit Pay is
+            designed to work with compliance, not against it.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-3">
             <Button asChild className="cta-shadow h-12 rounded px-5 text-[15px]">
@@ -215,9 +197,9 @@ function AboutPage() {
               What everyone sees today
             </p>
             <ul className="mt-4 grid gap-2 text-[15px] text-white/85">
-              <li>→ Balances on public explorers</li>
-              <li>→ Who paid whom, and how much</li>
-              <li>→ Salary, habits, and history for sale to anyone looking</li>
+              {PUBLIC_VIEW.map((line) => (
+                <li key={line}>→ {line}</li>
+              ))}
             </ul>
           </div>
           <div className="rounded-md border border-primary/25 bg-primary/5 p-8 sm:p-10">
@@ -225,9 +207,9 @@ function AboutPage() {
               What Starlit Pay hides
             </p>
             <ul className="mt-4 grid gap-2 text-[15px] text-foreground/85">
-              <li>→ Private balances, decrypted only on your device</li>
-              <li>→ Recipients and amounts, hidden inside zero-knowledge proofs</li>
-              <li>→ One shared pool on-chain — individual payments invisible</li>
+              {PRIVATE_VIEW.map((line) => (
+                <li key={line}>→ {line}</li>
+              ))}
             </ul>
           </div>
         </div>
