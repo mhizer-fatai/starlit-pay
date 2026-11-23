@@ -7,6 +7,7 @@ bdcf45efe0d612b80fb56d1daab2c91c6014dca500f8b996aa773f8d8f9a1ff4  ./dist/circuit
 d4dc29962f760ce9ed5ddbab3619e3c0502daa02d6b8a608d77df330cff6a397  ./dist/circuits/policy_tx_2_2_B.graph.bin
 3cd79e47a124b99d3ec698dcf63938fe5bb51a05ff13b7b3d98a854336bbaa7c  ./dist/circuits/policy_tx_2_2_B.r1cs
 16721797e783b728d82276ac2a333d18a7479ded69af5241556d20e0130e4244  ./dist/circuits/policy_tx_2_2_B_proving_key.bin
+031a26d70ba7b23e1e7bb88bdd6ccf2d362ace14e2c2a9a16acadfc39267070b  ./dist/circuits/source-bundle.tar.gz
 c40ccf650d110831d359f8f262435e65917474018d67b24383cce2b244dbd9ad  ./dist/licenses/GPL-3.0.txt
 da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768  ./dist/licenses/LGPL-3.0.txt
 1610224a281c15c31a8f0d139877e029a4ff8b83f7f10fe60cce293af06bae69  ./dist/stellar_private_payments_web.d.ts

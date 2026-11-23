@@ -97,6 +97,8 @@ jobs:
           # Only the blocklist transaction circuit, its lock and notices.
           cp dist/circuits/circuits.json dist/circuits/NOTICE.txt "$out/dist/circuits/" 2>/dev/null || cp dist/circuits/circuits.json "$out/dist/circuits/"
           cp dist/circuits/policy_tx_2_2_B.* dist/circuits/policy_tx_2_2_B_proving_key.bin "$out/dist/circuits/" 2>/dev/null || true
+          # The LGPL-3.0 Corresponding Source that NOTICE.txt points to; fail the build without it.
+          cp dist/circuits/source-bundle.tar.gz "$out/dist/circuits/"
           ls dist/circuits | head -80
           echo "spp_commit=$SPP_COMMIT" > "$out/BUILD_INFO.txt"
           echo "circuits=$CIRCUITS_TAG" >> "$out/BUILD_INFO.txt"
