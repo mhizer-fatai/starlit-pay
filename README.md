@@ -46,7 +46,7 @@ pays them.
         |   against his wallet's signature)  |                            |
         |-- 2. proves it on this device      |                            |
         |   (Groth16, ~30 s on a desktop)    |                            |
-        |-- 3. asks the payer to sign ------>| checks: one pool call,     |
+        |-- 3. asks the relayer to sign ---->| checks: one pool call,     |
         |                                    | no deposit, expires soon   |
         |                                    |--- submits, pays the fee ->| verifies the proof,
         |                                    |                            | spends Alice's notes,
@@ -66,7 +66,7 @@ address never appears on chain.
 |---|---|
 | `frontend/` | React + Vite app. Passkeys, the key vault and all proving run in the browser. |
 | `frontend/public/zk/spp/` | Nethermind's SPP browser SDK, built from source by [`.github/workflows/spp-sdk.yml`](.github/workflows/spp-sdk.yml) (checksums in `SHA256SUMS`, Starlit's patches in [`.github/spp-patches/`](.github/spp-patches/)). |
-| `backend/` | Node.js + Express API: accounts and passkey sessions, the fee payer, the deposit gateway, the pools' history archive, users' private-payment keys, faucet, payment links. |
+| `backend/` | Node.js + Express API: accounts and passkey sessions, the relayer, the deposit gateway, the pools' history archive, users' private-payment keys, faucet, payment links. |
 | `backend/sql/` | Database schema for Supabase, with its [run order](backend/sql/README.md). |
 
 The pool contracts and circuits are SPP's, deployed by Starlit on testnet
@@ -80,10 +80,12 @@ request gets an ID, structured JSON logs, input validation (zod), a rate limit
 and one error handler. Payments need a fresh passkey or PIN confirmation, and
 users can only read and change their own data.
 
-- **Fee payer** (`zk_payer`): signs a browser-built transaction only if it is a
-  single `transact` call to Starlit's pools that moves no deposit, expires
-  within 10 minutes and needs no other signature; withdrawals are screened
-  against the blocklist, failing closed.
+- **Relayer** (`zk_relayer`): pays the network fees. It signs a browser-built
+  transaction only if it is a single `transact` call to Starlit's pools that
+  moves no deposit, expires within 10 minutes and needs no other signature;
+  withdrawals are screened against the blocklist, failing closed. Each payment
+  is signed on a channel account leased to that user (`channels.js`, set with
+  `CHANNEL_COUNT`), so many people can pay at once.
 - **Gateway** (`gateway`, `zk_gateway`): each incoming payment is recorded once
   and becomes the user's credit; it signs a deposit only for exactly that credit.
 - **History** (`zk_history`): archives the pools' events and serves them with
@@ -92,7 +94,7 @@ users can only read and change their own data.
 - **Keys** (`zk_keys`): users' public note and encryption keys, signed by their
   own wallet so neither a stolen session nor the server can swap them.
 
-`GET /api/health` reports the database, Stellar RPC, the fee payer's balance,
+`GET /api/health` reports the database, Stellar RPC, the relayer's balance,
 the gateway queue and the history archive's lag. `GET /api/metrics` (Prometheus
 format) is enabled by setting `METRICS_TOKEN`.
 
@@ -100,7 +102,7 @@ format) is enabled by setting `METRICS_TOKEN`.
 
 You need **Node.js 26** (see `.nvmrc`), a [Supabase](https://supabase.com)
 project with Google sign-in enabled, and testnet Stellar accounts for the
-relayer (fee payer), gateway and faucet.
+relayer, gateway and faucet.
 
 1. **Database.** In the Supabase SQL editor, run the files in `backend/sql/` in
    the [listed order](backend/sql/README.md).
@@ -166,7 +168,7 @@ See [ROADMAP.md](ROADMAP.md).
   recovery code.
 - **Only your own notes can be spent.** Every spend proves knowledge of the
   notes' secrets; the pool verifies the proof and rejects reused notes.
-- **The fee payer is not trusted with funds.** It can only sign transactions it
+- **The relayer is not trusted with funds.** It can only sign transactions it
   has checked, and the proof binds each payment's amount and recipient.
 - **Local data is encrypted.** The SDK's note database in the browser is
   encrypted with a key derived from your wallet.

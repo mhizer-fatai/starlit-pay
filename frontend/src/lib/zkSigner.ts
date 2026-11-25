@@ -2,7 +2,7 @@
 //
 // Two accounts are involved. The user's own Stellar key (from their vault)
 // owns the notes: it signs the one message the SDK turns into the user's
-// privacy keys, and nothing else. Starlit's payer account pays: it is the
+// privacy keys, and nothing else. Starlit's relayer account pays: it is the
 // transaction source and the pool's sender, so the user never needs XLM for
 // fees, and it signs on the backend, which checks the transaction first.
 
@@ -14,10 +14,10 @@ import { hkdf } from "@/lib/vault/crypto";
 export interface ZkSignerDeps {
   /** The user's Stellar key: owner of the notes. */
   owner: StellarSdk.Keypair;
-  /** Starlit's payer address (GET /api/zk/payer). */
-  payerAddress: string;
-  /** Asks the backend payer to sign (POST /api/zk/payer/sign). */
-  signWithPayer: (xdr: string) => Promise<{ signedTxXdr: string }>;
+  /** Starlit's relayer address (GET /api/zk/relayer). */
+  relayerAddress: string;
+  /** Asks the backend relayer to sign (POST /api/zk/relayer/sign). */
+  signWithRelayer: (xdr: string) => Promise<{ signedTxXdr: string }>;
 }
 
 interface SignOptions {
@@ -43,7 +43,7 @@ export function createOwnerSigner(owner: StellarSdk.Keypair) {
 
     // The owner never pays for or authorizes pool transactions.
     async signTransaction(): Promise<never> {
-      throw new Error("Pool transactions are paid by Starlit's payer.");
+      throw new Error("Pool transactions are paid by Starlit's relayer.");
     },
 
     async signAuthEntry(): Promise<never> {
@@ -52,14 +52,14 @@ export function createOwnerSigner(owner: StellarSdk.Keypair) {
   };
 }
 
-export function createZkSigner({ owner, payerAddress, signWithPayer }: ZkSignerDeps) {
+export function createZkSigner({ owner, relayerAddress, signWithRelayer }: ZkSignerDeps) {
   return {
     ...createOwnerSigner(owner),
 
     async signTransaction(xdr: string, opts?: SignOptions) {
-      if (opts?.address && opts.address !== payerAddress) throw new Error("Pool transactions are paid by Starlit's payer.");
-      const { signedTxXdr } = await signWithPayer(xdr);
-      return { signedTxXdr, signerAddress: payerAddress };
+      if (opts?.address && opts.address !== relayerAddress) throw new Error("Pool transactions are paid by Starlit's relayer.");
+      const { signedTxXdr } = await signWithRelayer(xdr);
+      return { signedTxXdr, signerAddress: relayerAddress };
     },
   };
 }

@@ -410,7 +410,7 @@ function SendPage() {
     return () => window.removeEventListener("beforeunload", onLeave);
   }, [busy]);
 
-  // Real-proof pool: the proof is made on this device and Starlit's payer pays the fee.
+  // Real-proof pool: the proof is made on this device and Starlit's relayer pays the fee.
   async function submitZkPayment(me: SessionUser, rawTarget: string, amt: number) {
     const external = mode === "external";
     if (external && !isStellarAddress(rawTarget)) {

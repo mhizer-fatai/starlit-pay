@@ -8,6 +8,7 @@ import { serve } from "./helpers/http.js";
 
 const GATEWAY = "GCDQQE7CPLIGMAH4QEB2SSIEAS5MZMFSQAYSEJYSF7P5ZLA6HOU4BWWY";
 const RELAYER = "GDZRT3OE4WEOA4AJQ3IV5S2AR7X7YXI5LFY52JA3ASDEELA6W6H32FYX";
+const CHANNEL = "GCHANNELACCOUNTOFTHERELAYER";
 const POOL = "CAHSOWD7JVCRO4U73MGXRET7DRJDM3K2CFS5EGYARWDEGACHWSR6ZEZM";
 const NOW = Date.parse("2026-11-02T12:00:00Z");
 const HASH = "a".repeat(64);
@@ -15,7 +16,7 @@ const claimUrl = "/api/payment-links/c1/claim";
 
 const walletPayment = (over = {}) => ({
   successful: true,
-  source: "GPAYER",
+  source: "GWALLET",
   memo: "147823",
   createdAt: NOW - 60_000,
   payments: [{ destination: GATEWAY, asset: "USDC", amount: 10 }],
@@ -57,7 +58,7 @@ describe("payment links", () => {
       repository,
       readTransaction: async () => chainTx,
       gatewayAddress: GATEWAY,
-      payerAddress: RELAYER,
+      senderAddresses: [RELAYER, CHANNEL],
       pools: [POOL],
       now: () => NOW,
     });
@@ -126,6 +127,12 @@ describe("payment links", () => {
     const res = await claim({ txHash: HASH }, "bob");
     assert.equal(res.status, 200);
     assert.equal(link.status, "claimed");
+  });
+
+  test("a private payment sent on one of the relayer's channels claims the link too", async () => {
+    chainTx = relayerPayment("transact", { source: CHANNEL });
+    const res = await claim({ txHash: HASH }, "bob");
+    assert.equal(res.status, 200);
   });
 
   test("relayer transactions don't claim anonymously, nor unrelated relayer activity", async () => {

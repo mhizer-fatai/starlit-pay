@@ -2,7 +2,17 @@
 // zero-knowledge proofs made on this device (Nethermind's SPP).
 
 import { getUnlockedKeys, getUser, type SessionUser } from "@/lib/auth";
-import { BackendError, fetchZkDeposits, postTransaction, signZkDeposit, type BackendTransaction, type ZkCredit } from "@/lib/backend";
+import {
+  BackendError,
+  fetchZkDeposits,
+  leaseZkChannel,
+  postTransaction,
+  releaseZkChannel,
+  signWithZkRelayer,
+  signZkDeposit,
+  type BackendTransaction,
+  type ZkCredit,
+} from "@/lib/backend";
 import { decodeTransactionPayload, loadUserTransactions, type BalanceNote, type PrivateBalances } from "@/lib/wallet";
 import { createdLeavesOrNone, ledgerTime, leafKey } from "@/lib/zkHistory";
 import { writeCachedBalance } from "@/lib/balanceCache";
@@ -164,8 +174,8 @@ export function progressMessage(detail: { stage: string; current?: number; total
 
 /**
  * Pays a Starlit user privately, or withdraws to a public Stellar address.
- * The proof is made on this device; Starlit's payer pays the network fee.
- * The caller confirms the payment (passkey/PIN) first: the payer requires it.
+ * The proof is made on this device; Starlit's relayer pays the network fee.
+ * The caller confirms the payment (passkey/PIN) first: the relayer requires it.
  */
 export async function sendZkPayment(
   { asset, amount, to }: { asset: PoolAsset; amount: string; to: Recipient },
@@ -193,11 +203,24 @@ export async function sendZkPayment(
   const keys = to.kind === "user" ? await recipientKeys(to.username) : null;
   const estimate = await pool.estimate(value);
 
-  const result = await withProgress(
-    onProgress,
-    () => (keys ? pool.transferToKeys(keys.noteKey, keys.encryptionKey, value) : pool.withdraw(value, (to as { address: string }).address)),
-    timer
-  );
+  // A channel account of our own for this payment, so it can't collide with
+  // anyone else's paying at the same moment (see backend/src/channels.js).
+  const lease = await leaseChannel();
+  const signed = lease.leaseId
+    ? await session.poolSignedBy(asset, { address: async () => lease.address, sign: (xdr) => signWithZkRelayer(xdr, lease.leaseId) })
+    : null;
+  const paying = signed?.pool ?? pool;
+  let result: Awaited<ReturnType<typeof pool.withdraw>>;
+  try {
+    result = await withProgress(
+      onProgress,
+      () => (keys ? paying.transferToKeys(keys.noteKey, keys.encryptionKey, value) : paying.withdraw(value, (to as { address: string }).address)),
+      timer
+    );
+  } finally {
+    signed?.free();
+    if (lease.leaseId) void releaseZkChannel(lease.leaseId).catch(() => undefined);
+  }
   console.info(`[Starlit] ${keys ? "Payment" : "Withdrawal"} timing: ${formatTiming(timer.finish())}`);
   const hashes = [...result.hashes];
   if (result.status === "ok") return { hashes, fees: fromBaseUnits(BigInt(estimate.fees)), leaves: await createdLeavesOrNone(hashes) };
@@ -205,6 +228,18 @@ export async function sendZkPayment(
     throw new PartialPaymentError(`Only part of the payment went through (${hashes.length} step${hashes.length > 1 ? "s" : ""}). Check your balance, then send the rest.`, hashes);
   }
   throw new Error(result.message || "The payment didn't go through. Nothing was sent.");
+}
+
+export const CHANNELS_BUSY_MESSAGE = "Lots of payments are going through right now. Please try again in a few minutes.";
+
+/** Leases a channel for one payment. When every channel is busy, the payment stops here, before anything is sent. */
+async function leaseChannel() {
+  try {
+    return await leaseZkChannel();
+  } catch (err) {
+    if (err instanceof BackendError && err.code === "CHANNELS_BUSY") throw new Error(CHANNELS_BUSY_MESSAGE);
+    throw err;
+  }
 }
 
 /** Forwards the SDK's progress events while `run` is in flight (and times its stages). */

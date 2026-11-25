@@ -8,7 +8,7 @@
 
 import * as StellarSdk from "@stellar/stellar-sdk";
 
-import { BACKEND_URL, BackendError, getZkPayer, lookupZkKeys, publishZkKeys, signWithZkPayer, type ZkKeys } from "@/lib/backend";
+import { BACKEND_URL, BackendError, getZkRelayer, lookupZkKeys, publishZkKeys, signWithZkRelayer, type ZkKeys } from "@/lib/backend";
 import { createOwnerSigner, createZkSigner, deriveZkStorageKey, signZkKeys, zkKeysSignedBy } from "@/lib/zkSigner";
 import type * as Spp from "../../public/zk/spp/js/types/index";
 
@@ -83,19 +83,19 @@ export interface PrivateSession {
    * The pool, with another Starlit account as the transaction's source and
    * pool sender (the gateway, for deposits it pays in). Free it after use.
    */
-  poolSignedBy(asset: PoolAsset, signer: Payer): Promise<{ pool: Spp.PrivatePool; free(): void }>;
+  poolSignedBy(asset: PoolAsset, signer: PoolSigner): Promise<{ pool: Spp.PrivatePool; free(): void }>;
   close(): Promise<void>;
 }
 
 let session: { owner: string; ready: Promise<PrivateSession> } | null = null;
 
-export interface Payer {
+export interface PoolSigner {
   address(): Promise<string>;
   sign(xdr: string): Promise<{ signedTxXdr: string }>;
 }
 
 export interface SessionOptions {
-  payer?: Payer;
+  relayer?: PoolSigner;
   publish?: (keys: ZkKeys) => Promise<unknown>;
   rpcUrl?: string;
   /** Starlit's archive of the pools' history (Stellar RPC keeps ~7 days). */
@@ -103,7 +103,7 @@ export interface SessionOptions {
 }
 
 const defaults: Required<SessionOptions> = {
-  payer: { address: async () => (await getZkPayer()).address, sign: signWithZkPayer },
+  relayer: { address: async () => (await getZkRelayer()).address, sign: signWithZkRelayer },
   publish: publishZkKeys,
   rpcUrl: RPC_URL,
   historyUrl: `${BACKEND_URL}/api/zk/history`,
@@ -115,7 +115,7 @@ const defaults: Required<SessionOptions> = {
  * the pools; later opens reuse it.
  */
 export function openPrivateSession(stellarSecretKey: string, options: SessionOptions = {}): Promise<PrivateSession> {
-  const { payer, publish, rpcUrl, historyUrl } = { ...defaults, ...options };
+  const { relayer, publish, rpcUrl, historyUrl } = { ...defaults, ...options };
   const owner = StellarSdk.Keypair.fromSecret(stellarSecretKey);
   if (session?.owner === owner.publicKey()) return session.ready;
   const previous = session;
@@ -147,7 +147,7 @@ export function openPrivateSession(stellarSecretKey: string, options: SessionOpt
     await client.backgroundSync();
 
     // Deriving the privacy keys needs the owner's own signature, so it runs on
-    // an owner-only account; the keys are then stored for the payer account.
+    // an owner-only account; the keys are then stored for the relayer account.
     const { networkPassphrase } = deployment;
     const ownerOnly = await client.account({ networkPassphrase, userAddress: owner.publicKey() }, createOwnerSigner(owner));
     let published: Spp.UserPublicKeys;
@@ -167,10 +167,10 @@ export function openPrivateSession(stellarSecretKey: string, options: SessionOpt
       }
     );
 
-    const payerAddress = await payer.address();
+    const relayerAddress = await relayer.address();
     const account = await client.account(
-      { networkPassphrase, userAddress: owner.publicKey(), signerAddress: payerAddress },
-      createZkSigner({ owner, payerAddress, signWithPayer: payer.sign })
+      { networkPassphrase, userAddress: owner.publicKey(), signerAddress: relayerAddress },
+      createZkSigner({ owner, relayerAddress, signWithRelayer: relayer.sign })
     );
 
     const pools = new Map<PoolAsset, Promise<Spp.PrivatePool>>();
@@ -187,11 +187,11 @@ export function openPrivateSession(stellarSecretKey: string, options: SessionOpt
         }
         return pool;
       },
-      async poolSignedBy(asset: PoolAsset, signer: Payer) {
+      async poolSignedBy(asset: PoolAsset, signer: PoolSigner) {
         const signerAddress = await signer.address();
         const other = await client.account(
           { networkPassphrase, userAddress: owner.publicKey(), signerAddress },
-          createZkSigner({ owner, payerAddress: signerAddress, signWithPayer: signer.sign })
+          createZkSigner({ owner, relayerAddress: signerAddress, signWithRelayer: signer.sign })
         );
         try {
           return { pool: await other.pool({ poolContract: POOLS[asset] }), free: () => other.free() };

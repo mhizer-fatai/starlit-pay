@@ -50,9 +50,12 @@ export function getStoredUser<T>(): T | null {
 
 export class BackendError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** The server's machine-readable reason, when it gave one (e.g. "CHANNELS_BUSY"). */
+  code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -85,13 +88,15 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let msg = `Backend ${res.status}: ${path}`;
+    let code: string | undefined;
     try {
-      const body = (await res.json()) as { error?: string; message?: string };
+      const body = (await res.json()) as { error?: string; message?: string; code?: string };
       msg = body.error || body.message || msg;
+      code = body.code;
     } catch {
       /* non-JSON */
     }
-    throw new BackendError(res.status, msg);
+    throw new BackendError(res.status, msg, code);
   }
   return res.json() as Promise<T>;
 }
@@ -302,10 +307,16 @@ export const getSmartWalletRelayToken = () =>
   req<{ token: string; expiresAt: number }>("/api/smart-wallet/relay-token", { method: "POST" });
 
 // --- Private pool with real proofs (SPP): the backend pays for transfers and withdrawals ---
-export const getZkPayer = () => req<{ address: string }>("/api/zk/payer");
-/** The payer signs only a transact call to Starlit's pools; needs a fresh passkey/PIN confirmation. */
-export const signWithZkPayer = (xdr: string) =>
-  req<{ signedTxXdr: string }>("/api/zk/payer/sign", { method: "POST", body: JSON.stringify({ xdr }) });
+export const getZkRelayer = () => req<{ address: string }>("/api/zk/relayer");
+/** The relayer signs only a transact call to Starlit's pools; needs a fresh passkey/PIN confirmation. */
+export const signWithZkRelayer = (xdr: string, leaseId: string | null = null) =>
+  req<{ signedTxXdr: string }>("/api/zk/relayer/sign", { method: "POST", body: JSON.stringify({ xdr, leaseId }) });
+
+/** A channel account for one payment, so many people can pay at once (null leaseId: the relayer itself). */
+export const leaseZkChannel = () =>
+  req<{ leaseId: string | null; address: string; expiresAt?: number }>("/api/zk/relayer/lease", { method: "POST", body: "{}" });
+export const releaseZkChannel = (leaseId: string) =>
+  req<{ released: boolean }>("/api/zk/relayer/release", { method: "POST", body: JSON.stringify({ leaseId }) });
 
 export interface ZkKeys {
   noteKey: string;

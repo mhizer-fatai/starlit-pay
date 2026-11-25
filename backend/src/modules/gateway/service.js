@@ -1,6 +1,6 @@
 import * as StellarSdk from "@stellar/stellar-sdk";
 import { poolAssetCode } from "../../tokens.js";
-import { toStroops } from "../zk_payer/pool_tx.js";
+import { toStroops } from "../zk_relayer/pool_tx.js";
 
 // Turns a payment to the gateway address (the faucet, or any wallet paying a
 // user's deposit memo) into that user's credit for the private pools. Their

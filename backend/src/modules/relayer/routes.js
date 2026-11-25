@@ -2,7 +2,7 @@ import { Router } from "express";
 import { asyncHandler } from "../../http/errors.js";
 
 // The relayer account pays network fees for private payments (as the ZK
-// payer) and smart-wallet actions. These routes report its gas balance.
+// relayer) and smart-wallet actions. These routes report its gas balance.
 export function createRelayerRouter({ monitor, checkLimiter }) {
   const router = Router();
 

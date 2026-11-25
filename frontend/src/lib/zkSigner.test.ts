@@ -4,13 +4,13 @@ import { describe, expect, test } from "vitest";
 import { createZkSigner, deriveZkStorageKey, signZkKeys, zkKeysMessage, zkKeysSignedBy } from "@/lib/zkSigner";
 
 const owner = StellarSdk.Keypair.random();
-const payer = StellarSdk.Keypair.random().publicKey();
+const relayer = StellarSdk.Keypair.random().publicKey();
 
 function signer(sent: string[] = []) {
   return createZkSigner({
     owner,
-    payerAddress: payer,
-    signWithPayer: async (xdr) => {
+    relayerAddress: relayer,
+    signWithRelayer: async (xdr) => {
       sent.push(xdr);
       return { signedTxXdr: `signed:${xdr}` };
     },
@@ -24,14 +24,14 @@ describe("createZkSigner", () => {
     expect(owner.verifyMessage("derive keys", Buffer.from(signedMessage, "base64"))).toBe(true);
   });
 
-  test("transactions go to the backend payer, never the owner key", async () => {
+  test("transactions go to the backend relayer, never the owner key", async () => {
     const sent: string[] = [];
-    expect(await signer(sent).signTransaction("AAAA", { address: payer })).toEqual({ signedTxXdr: "signed:AAAA", signerAddress: payer });
+    expect(await signer(sent).signTransaction("AAAA", { address: relayer })).toEqual({ signedTxXdr: "signed:AAAA", signerAddress: relayer });
     expect(sent).toEqual(["AAAA"]);
   });
 
   test("refuses to sign for the wrong account, and never signs auth entries", async () => {
-    await expect(signer().signMessage("x", { address: payer })).rejects.toThrow();
+    await expect(signer().signMessage("x", { address: relayer })).rejects.toThrow();
     await expect(signer().signTransaction("AAAA", { address: owner.publicKey() })).rejects.toThrow();
     await expect(signer().signAuthEntry()).rejects.toThrow();
   });
@@ -48,7 +48,7 @@ describe("published keys", () => {
   test("a sender accepts keys signed by the recipient's wallet only", () => {
     const keys = signZkKeys(owner, note, enc);
     expect(zkKeysSignedBy(owner.publicKey(), keys)).toBe(true);
-    expect(zkKeysSignedBy(payer, keys)).toBe(false);
+    expect(zkKeysSignedBy(relayer, keys)).toBe(false);
     expect(zkKeysSignedBy(owner.publicKey(), { ...keys, encryptionKey: `0x${"ee".repeat(32)}` })).toBe(false);
     expect(zkKeysSignedBy(owner.publicKey(), { ...keys, signature: "garbage" })).toBe(false);
   });

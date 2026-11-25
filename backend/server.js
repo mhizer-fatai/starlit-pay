@@ -16,7 +16,7 @@ import { healthRouter } from "./src/modules/health/index.js";
 import { pricesRouter } from "./src/modules/prices/index.js";
 import { transactionsRouter } from "./src/modules/transactions/index.js";
 import { smartWalletRouter } from "./src/modules/smart_wallet/index.js";
-import { zkPayerRouter } from "./src/modules/zk_payer/index.js";
+import { channels, topUpChannels, zkRelayerRouter } from "./src/modules/zk_relayer/index.js";
 import { zkKeysRouter } from "./src/modules/zk_keys/index.js";
 import { startZkHistory, zkHistoryRouter } from "./src/modules/zk_history/index.js";
 import { zkGatewayRouter } from "./src/modules/zk_gateway/index.js";
@@ -40,7 +40,7 @@ for (const router of [
   pricesRouter,
   transactionsRouter,
   smartWalletRouter,
-  zkPayerRouter,
+  zkRelayerRouter,
   zkKeysRouter,
   zkHistoryRouter,
   zkGatewayRouter,
@@ -57,6 +57,21 @@ if (process.env.BACKGROUND_JOBS === "off") {
 } else {
   startGateway();
   startZkHistory();
+  if (topUpChannels) {
+    // Channels pay their own fees: keep each one funded from the relayer.
+    // The first successful run (which creates any missing channels) switches them on.
+    const topUp = () =>
+      topUpChannels()
+        .then(async ({ created }) => {
+          // Newly created accounts need a ledger or two before they can send.
+          if (created) await new Promise((r) => setTimeout(r, 10_000));
+          if (!channels.isReady()) logger.info(`Channels ready: ${channels.size} payment lanes.`);
+          channels.setReady();
+        })
+        .catch((err) => logger.error("Channel top-up failed:", err));
+    void topUp();
+    setInterval(topUp, 10 * 60 * 1000).unref();
+  }
 }
 
 // Root: a short service description instead of Express's "Cannot GET /".

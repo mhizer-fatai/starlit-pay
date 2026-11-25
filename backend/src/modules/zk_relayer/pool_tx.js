@@ -2,7 +2,7 @@ import * as StellarSdk from "@stellar/stellar-sdk";
 import { HttpError } from "../../http/errors.js";
 
 // What Starlit's accounts check before signing a private-pool transaction
-// (real ZK proofs, SPP contracts) that a user's browser built: the payer for
+// (real ZK proofs, SPP contracts) that a user's browser built: the relayer for
 // transfers and withdrawals, the gateway for deposits. The proof itself is
 // checked by the pool, so the signer never needs to understand it.
 

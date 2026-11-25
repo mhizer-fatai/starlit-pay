@@ -23,7 +23,30 @@ vi.mock("@/lib/zkHistory", () => ({
   ledgerTime: async (ledger: number) => ledger * 1000,
   leafKey: (asset: string, leaf: number) => `${asset}:${leaf}`,
 }));
-vi.mock("@/lib/backend", () => ({ fetchZkDeposits: vi.fn(), signZkDeposit: vi.fn(), lookupUser: vi.fn(), postTransaction: vi.fn(), BackendError: class extends Error {} }));
+class BackendError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public code?: string
+  ) {
+    super(message);
+  }
+}
+const backend = {
+  leaseZkChannel: vi.fn(),
+  releaseZkChannel: vi.fn(),
+  signWithZkRelayer: vi.fn(),
+};
+vi.mock("@/lib/backend", () => ({
+  fetchZkDeposits: vi.fn(),
+  signZkDeposit: vi.fn(),
+  lookupUser: vi.fn(),
+  postTransaction: vi.fn(),
+  BackendError,
+  leaseZkChannel: (...args: unknown[]) => backend.leaseZkChannel(...args),
+  releaseZkChannel: (...args: unknown[]) => backend.releaseZkChannel(...args),
+  signWithZkRelayer: (...args: unknown[]) => backend.signWithZkRelayer(...args),
+}));
 vi.mock("@/lib/auth", () => ({ getUnlockedKeys: () => ({ stellar: { secretKey: "S-test" } }), getUser: async () => ({ id: "u1" }) }));
 class RecipientKeysError extends Error {}
 vi.mock("@/lib/privatePool", () => ({
@@ -68,6 +91,34 @@ describe("sendZkPayment", () => {
     pool.estimate.mockResolvedValue({ fees: "100000", txCount: 1 });
     pool.transferToKeys.mockResolvedValue({ status: "ok", hashes: ["h1"] });
     pool.withdraw.mockResolvedValue({ status: "ok", hashes: ["h2"] });
+    signedBy.length = 0;
+    freed = 0;
+    backend.leaseZkChannel.mockResolvedValue({ leaseId: null, address: "GRELAYER" });
+    backend.releaseZkChannel.mockResolvedValue({ released: true });
+    backend.signWithZkRelayer.mockResolvedValue({ signedTxXdr: "signed" });
+  });
+
+  test("with channels, the payment is signed on the leased channel, which is handed back after", async () => {
+    backend.leaseZkChannel.mockResolvedValue({ leaseId: "lease-1", address: "GCHANNEL" });
+    await sendZkPayment({ asset: "XLM", amount: "0.2", to: { kind: "user", username: "bob" } });
+    expect(signedBy).toEqual(["GCHANNEL"]);
+    await lastSigner!.sign("xdr");
+    expect(backend.signWithZkRelayer).toHaveBeenCalledWith("xdr", "lease-1");
+    expect(freed).toBe(1);
+    expect(backend.releaseZkChannel).toHaveBeenCalledWith("lease-1");
+  });
+
+  test("the channel is handed back even when the payment fails", async () => {
+    backend.leaseZkChannel.mockResolvedValue({ leaseId: "lease-2", address: "GCHANNEL" });
+    pool.transferToKeys.mockRejectedValue(new Error("network down"));
+    await expect(sendZkPayment({ asset: "XLM", amount: "0.2", to: { kind: "user", username: "bob" } })).rejects.toThrow("network down");
+    expect(backend.releaseZkChannel).toHaveBeenCalledWith("lease-2");
+  });
+
+  test("without channels, the payment is paid by the relayer as before", async () => {
+    await sendZkPayment({ asset: "XLM", amount: "0.2", to: { kind: "user", username: "bob" } });
+    expect(signedBy).toEqual([]);
+    expect(backend.releaseZkChannel).not.toHaveBeenCalled();
   });
 
   test("pays a user to their verified keys", async () => {
@@ -210,4 +261,15 @@ describe("checkRecipient", () => {
     expect(await checkRecipient("bob", { lookupKeys: fail(new Error("offline")) })).toBe("unknown");
     vi.unstubAllEnvs();
   });
+});
+
+test("when every channel is busy, the payment stops before anything is sent and says to try again later", async () => {
+  backend.leaseZkChannel.mockRejectedValue(new BackendError(503, "busy", "CHANNELS_BUSY"));
+  pool.balance.mockResolvedValue(5_000_000n);
+  pool.maxSpend.mockResolvedValue(4_900_000n);
+  pool.estimate.mockResolvedValue({ fees: "100000", txCount: 1 });
+  await expect(sendZkPayment({ asset: "XLM", amount: "0.2", to: { kind: "user", username: "bob" } })).rejects.toThrow(
+    "Please try again in a few minutes."
+  );
+  expect(pool.transferToKeys).not.toHaveBeenCalled();
 });

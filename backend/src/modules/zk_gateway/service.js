@@ -1,5 +1,5 @@
 import { HttpError } from "../../http/errors.js";
-import { inspectPoolTransaction, toStroops } from "../zk_payer/pool_tx.js";
+import { inspectPoolTransaction, toStroops } from "../zk_relayer/pool_tx.js";
 
 // Completes gateway deposits into the real-ZK pools from the user's device.
 //
