@@ -91,7 +91,17 @@ export function createBetaRouter({ service, requireAuth, provenEmail = null }) {
     requireAdmin,
     asyncHandler(async (req, res) => {
       const status = ["pending", "approved", "rejected"].includes(req.query.status) ? req.query.status : undefined;
-      res.status(200).json({ applications: await service.listApplications(status) });
+      const [applications, counts] = await Promise.all([service.listApplications(status), service.applicationCounts()]);
+      res.status(200).json({ applications, counts });
+    })
+  );
+
+  router.post(
+    "/api/beta/admin/applications/approve-all",
+    requireAuth,
+    requireAdmin,
+    asyncHandler(async (req, res) => {
+      res.status(200).json(await service.approveAll());
     })
   );
 

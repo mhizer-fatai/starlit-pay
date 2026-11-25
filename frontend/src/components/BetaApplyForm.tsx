@@ -14,7 +14,7 @@ const PERSONAS: { value: BetaPersona; label: string }[] = [
 ];
 
 const field =
-  "mt-2 w-full rounded-md border border-border bg-background px-4 py-3 text-[15px] text-foreground outline-none transition-colors focus:border-primary";
+  "mt-2 block w-full min-w-0 rounded-md border border-border bg-background px-3 py-2.5 text-[16px] text-foreground outline-none transition-colors focus:border-primary sm:px-4 sm:py-3";
 const label = "text-[14px] font-semibold text-foreground";
 
 const statusLink = (token: string) => `${window.location.origin}/beta/${token}`;
@@ -63,7 +63,7 @@ export function BetaApplyForm() {
 
   if (done) {
     return (
-      <div className="rounded-md border border-primary/25 bg-primary/5 p-8">
+      <div className="w-full max-w-[880px] rounded-md border border-primary/25 bg-primary/5 p-5 sm:p-8">
         <p className="text-[20px] font-semibold text-foreground">Thanks for applying!</p>
         {done.token ? (
           <>
@@ -95,25 +95,25 @@ export function BetaApplyForm() {
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-5 rounded-md border border-border bg-background/60 p-6 sm:p-8 md:grid-cols-2">
-      <label className="block">
+    <form onSubmit={submit} className="grid w-full max-w-[880px] grid-cols-1 gap-4 rounded-md border border-border bg-background/60 p-4 sm:grid-cols-2 sm:gap-5 sm:p-6 lg:p-8">
+      <label className="block min-w-0">
         <span className={label}>Name</span>
         <input className={field} value={form.name} onChange={set("name")} maxLength={100} required disabled={busy} />
       </label>
-      <label className="block">
+      <label className="block min-w-0">
         <span className={label}>Gmail address</span>
         <input className={field} type="email" placeholder="you@gmail.com" value={form.email} onChange={set("email")} maxLength={254} required disabled={busy} />
         <span className="mt-1 block text-[12px] text-foreground/60">The Google account you'll sign in with. If you're approved, it gets you in.</span>
       </label>
-      <label className="block">
+      <label className="block min-w-0">
         <span className={label}>X handle</span>
         <input className={field} placeholder="@yourhandle" value={form.x_handle} onChange={set("x_handle")} maxLength={32} disabled={busy} />
       </label>
-      <label className="block">
+      <label className="block min-w-0">
         <span className={label}>Telegram username</span>
         <input className={field} placeholder="@yourname" value={form.telegram_handle} onChange={set("telegram_handle")} maxLength={64} disabled={busy} />
       </label>
-      <label className="block md:col-span-2">
+      <label className="block sm:col-span-2">
         <span className={label}>What best describes you?</span>
         <select className={field} value={form.persona} onChange={set("persona")} required disabled={busy}>
           <option value="" disabled>
@@ -126,7 +126,7 @@ export function BetaApplyForm() {
           ))}
         </select>
       </label>
-      <label className="block md:col-span-2">
+      <label className="block sm:col-span-2">
         <span className={label}>Why do you want private payments?</span>
         <textarea
           className={`${field} min-h-[96px] resize-y`}
@@ -139,7 +139,7 @@ export function BetaApplyForm() {
           disabled={busy}
         />
       </label>
-      <div className="md:col-span-2">
+      <div className="sm:col-span-2">
         <Turnstile
           ref={turnstileRef}
           siteKey={(import.meta.env.VITE_TURNSTILE_SITE_KEY as string) || "1x00000000000000000000AA"}
@@ -150,12 +150,12 @@ export function BetaApplyForm() {
         />
       </div>
       {error && (
-        <p className="text-[14px] text-destructive md:col-span-2" role="alert">
+        <p className="text-[14px] text-destructive sm:col-span-2" role="alert">
           {error}
         </p>
       )}
-      <div className="md:col-span-2">
-        <Button type="submit" disabled={busy} className="cta-shadow h-12 rounded px-6 text-[15px]">
+      <div className="sm:col-span-2">
+        <Button type="submit" disabled={busy} className="cta-shadow h-12 w-full rounded px-6 text-[15px] sm:w-auto">
           {busy ? "Sending…" : "Apply to join"}
         </Button>
       </div>

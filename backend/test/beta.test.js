@@ -63,6 +63,10 @@ function memoryRepo() {
     async listApplications(status) {
       return applications.filter((a) => !status || a.status === status);
     },
+    async countApplications() {
+      const count = (status) => applications.filter((a) => a.status === status).length;
+      return { pending: count("pending"), approved: count("approved"), rejected: count("rejected") };
+    },
     async reviewApplication(id, fields) {
       const application = applications.find((a) => a.id === id && a.status === "pending");
       if (!application) return null;
@@ -218,6 +222,25 @@ test("approval emails the applicant once; the status page shows how to get in", 
 
   await rejects(beta.approve(row.id), 409);
   assert.equal(sent.length, 1, "no second email");
+});
+
+test("approve all approves and emails every pending application, once", async () => {
+  const sent = [];
+  const mailer = { enabled: true, send: async (mail) => (sent.push(mail), true) };
+  const beta = createBetaService({ repository: memoryRepo(), mailer });
+  await beta.apply(application());
+  await beta.apply(application({ email: "bola@gmail.com", name: "Bola" }));
+  const { statusToken } = await beta.apply(application({ email: "chi@gmail.com", name: "Chi" }));
+  const chi = (await beta.listApplications("pending")).find((a) => a.status_token === statusToken);
+  await beta.reject(chi.id);
+
+  assert.deepEqual(await beta.applicationCounts(), { pending: 2, approved: 0, rejected: 1 });
+  assert.deepEqual(await beta.approveAll(), { approved: 2, emailed: 2 });
+  assert.deepEqual(sent.map((m) => m.to).sort(), ["ada@gmail.com", "bola@gmail.com"]);
+  assert.deepEqual(await beta.applicationCounts(), { pending: 0, approved: 2, rejected: 1 });
+
+  assert.deepEqual(await beta.approveAll(), { approved: 0, emailed: 0 }, "nothing left to approve");
+  assert.equal(sent.length, 2, "no second emails");
 });
 
 test("without a mail key nothing is sent, and approval still works", async () => {

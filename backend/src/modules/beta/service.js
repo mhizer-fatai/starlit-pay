@@ -158,6 +158,30 @@ export function createBetaService({
       return { application, emailed };
     },
 
+    async applicationCounts() {
+      return repository.countApplications();
+    },
+
+    /**
+     * Approves every pending application, one at a time, emailing each.
+     * One that someone else reviewed meanwhile is skipped, not an error.
+     */
+    async approveAll() {
+      const pending = await repository.listApplications("pending");
+      let approved = 0;
+      let emailed = 0;
+      for (const application of pending) {
+        try {
+          const result = await this.approve(application.id);
+          approved += 1;
+          if (result.emailed) emailed += 1;
+        } catch (err) {
+          if (err?.status !== 409) throw err;
+        }
+      }
+      return { approved, emailed };
+    },
+
     async reject(id) {
       const application = await repository.reviewApplication(id, { status: "rejected", reviewed_at: now().toISOString() });
       if (!application) throw new HttpError(409, "That application was already reviewed.");

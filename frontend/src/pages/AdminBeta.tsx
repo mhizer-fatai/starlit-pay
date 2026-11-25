@@ -6,6 +6,7 @@ import { DashboardSidebar } from "@/components/DashboardSidebar";
 import { PageTransition } from "@/components/PageTransition";
 import { Button } from "@/components/ui/button";
 import {
+  approveAllBetaApplications,
   approveBetaApplication,
   createGroupInvite,
   fetchBetaMe,
@@ -35,6 +36,7 @@ function AdminBetaPage() {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [tab, setTab] = useState<BetaApplication["status"]>("pending");
   const [applications, setApplications] = useState<BetaApplication[]>([]);
+  const [counts, setCounts] = useState<Record<BetaApplication["status"], number> | null>(null);
   const [invites, setInvites] = useState<BetaInvite[]>([]);
   const [label, setLabel] = useState("");
   const [maxUses, setMaxUses] = useState(50);
@@ -46,6 +48,7 @@ function AdminBetaPage() {
   const refresh = useCallback(async () => {
     const [apps, codes] = await Promise.all([listBetaApplications(tab), listGroupInvites()]);
     setApplications(apps.applications);
+    setCounts(apps.counts ?? null);
     setInvites(codes.invites);
   }, [tab]);
 
@@ -88,7 +91,7 @@ function AdminBetaPage() {
         <PageTransition>
           <main className="dashboard-content">
             {allowed === false && (
-              <section className="dash-card">
+              <section className="dash-card" style={{ height: "auto", minHeight: 0 }}>
                 <p className="text-sm text-muted-foreground">Admins only.</p>
               </section>
             )}
@@ -106,17 +109,47 @@ function AdminBetaPage() {
                   </p>
                 )}
 
-                <section className="dash-card">
-                  <div className="card-title-row">
+                <section className="dash-card" style={{ height: "auto", minHeight: 0 }}>
+                  <div className="card-title-row flex-wrap gap-2">
                     <span>Applications</span>
-                    <div className="flex gap-1">
+                    <div className="flex flex-wrap gap-1">
                       {(["pending", "approved", "rejected"] as const).map((s) => (
                         <Button key={s} type="button" size="sm" variant={tab === s ? "default" : "ghost"} onClick={() => setTab(s)}>
                           {s[0].toUpperCase() + s.slice(1)}
+                          {counts && (
+                            <span className={`ml-1 rounded px-1.5 text-xs font-semibold ${tab === s ? "bg-white/25" : "bg-muted text-muted-foreground"}`}>
+                              {counts[s]}
+                            </span>
+                          )}
                         </Button>
                       ))}
                     </div>
                   </div>
+                  {tab === "pending" && applications.length > 0 && (
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-2">
+                      <p className="text-sm text-muted-foreground">
+                        {applications.length} waiting. Approving emails each person their "You're in" message.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={!!busy}
+                        onClick={() => {
+                          if (!window.confirm(`Approve all ${applications.length} pending applications? Each one gets the "You're in" email.`)) return;
+                          void act("approve-all", async () => {
+                            const { approved, emailed } = await approveAllBetaApplications();
+                            setNotice(
+                              approved === 0
+                                ? "Nothing left to approve."
+                                : `Approved ${approved} ${approved === 1 ? "application" : "applications"}. ${emailed} "You're in" ${emailed === 1 ? "email" : "emails"} sent.`
+                            );
+                          });
+                        }}
+                      >
+                        {busy === "approve-all" ? "Approving all…" : `Approve all (${applications.length})`}
+                      </Button>
+                    </div>
+                  )}
                   {applications.length === 0 && <p className="mt-3 text-sm text-muted-foreground">Nothing here yet.</p>}
                   <ul className="mt-3 grid gap-3">
                     {applications.map((a) => (
@@ -166,7 +199,7 @@ function AdminBetaPage() {
                   </ul>
                 </section>
 
-                <section className="dash-card">
+                <section className="dash-card" style={{ height: "auto", minHeight: 0 }}>
                   <div className="card-title-row">
                     <span>Group codes</span>
                   </div>

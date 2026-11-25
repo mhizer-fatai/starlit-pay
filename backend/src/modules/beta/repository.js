@@ -94,6 +94,20 @@ export function createBetaRepository(supabase) {
       return data;
     },
 
+    /** How many applications are pending, approved and rejected. */
+    async countApplications() {
+      const statuses = ["pending", "approved", "rejected"];
+      const results = await Promise.all(
+        statuses.map((status) => applications().select("id", { count: "exact", head: true }).eq("status", status))
+      );
+      const counts = {};
+      results.forEach(({ count, error }, i) => {
+        if (error) throw error;
+        counts[statuses[i]] = count ?? 0;
+      });
+      return counts;
+    },
+
     /** Only a pending application can be reviewed (so approving twice can't mint two codes). */
     async reviewApplication(id, fields) {
       const { data, error } = await applications()

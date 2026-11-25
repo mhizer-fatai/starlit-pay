@@ -401,9 +401,11 @@ export const fetchBetaStatus = (token: string) =>
 export const fetchBetaMe = () => req<{ admin: boolean; tickets: { code: string; used: boolean }[] }>("/api/beta/me");
 
 export const listBetaApplications = (status?: BetaApplication["status"]) =>
-  req<{ applications: BetaApplication[] }>(`/api/beta/admin/applications${status ? `?status=${status}` : ""}`);
+  req<{ applications: BetaApplication[]; counts: Record<BetaApplication["status"], number> }>(`/api/beta/admin/applications${status ? `?status=${status}` : ""}`);
 export const approveBetaApplication = (id: string) =>
   req<{ application: BetaApplication; emailed: boolean }>(`/api/beta/admin/applications/${id}/approve`, { method: "POST", body: "{}" });
+export const approveAllBetaApplications = () =>
+  req<{ approved: number; emailed: number }>("/api/beta/admin/applications/approve-all", { method: "POST", body: "{}" });
 export const rejectBetaApplication = (id: string) =>
   req<{ application: BetaApplication }>(`/api/beta/admin/applications/${id}/reject`, { method: "POST", body: "{}" });
 export const listGroupInvites = () => req<{ invites: BetaInvite[] }>("/api/beta/admin/invites");
