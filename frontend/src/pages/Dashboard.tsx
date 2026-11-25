@@ -24,6 +24,7 @@ import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
 import { SmartWalletCard } from "@/components/SmartWalletCard";
 import { GoldenTickets } from "@/components/GoldenTickets";
+import { GettingStarted, isPrivatePayment } from "@/components/GettingStarted";
 import { TransferModal, type TransferDirection } from "@/components/TransferModal";
 import { AssetRow, WalletCardHeader, WalletTotal } from "@/components/WalletCard";
 import { usePrices } from "@/lib/prices";
@@ -64,6 +65,7 @@ function DashboardPage() {
   const [selected, setSelected] = useState<ActivityItem | null>(null);
   const [statementOpen, setStatementOpen] = useState(false);
   const [email, setEmail] = useState("");
+  const [userId, setUserId] = useState("");
   const [usdcBalance, setUsdcBalance] = useState(0);
   const [xlmBalance, setXlmBalance] = useState(0);
   const [tvl, setTvl] = useState<string | null>(null);
@@ -137,6 +139,7 @@ function DashboardPage() {
       const name = user.display_name || user.username || user.email.split("@")[0] || user.email;
       setDisplayName(name.charAt(0).toUpperCase() + name.slice(1));
       setEmail(user.email);
+      setUserId(user.id);
       setViewerUsername(user.username);
       setChecking(false);
       // Real transaction history (read).
@@ -229,6 +232,8 @@ function DashboardPage() {
     [balanceNotes, allTxs, viewerUsername, ownWallet],
   );
   const recentActivity = activityFeed.slice(0, 4);
+  const hasFunds = usdcBalance > 0 || xlmBalance > 0 || activityFeed.some((item) => item.direction === "in");
+  const sentPrivate = activityFeed.some(isPrivatePayment);
 
   const pricesLoading = prices.status === "loading";
 
@@ -314,6 +319,14 @@ function DashboardPage() {
             </Button>
           </div>
           </motion.div>
+
+          <GettingStarted
+            userId={userId}
+            loading={balancesLoading || activityLoading}
+            hasFunds={hasFunds}
+            sentPrivate={sentPrivate}
+            onInvite={() => document.getElementById("golden-tickets")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+          />
 
           <div className="wallet-grid">
             <section className="dash-card wallet-card" aria-label="Private balance">

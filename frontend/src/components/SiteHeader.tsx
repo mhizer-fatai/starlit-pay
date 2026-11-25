@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { ArrowRight, Menu, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, ChevronDown, LogIn, Menu, Ticket, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ export function SiteHeader() {
   const home = (path: string) => (onHome ? path : `/${path}`);
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [startOpen, setStartOpen] = useState(false);
+  const startRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 16);
@@ -25,7 +27,25 @@ export function SiteHeader() {
 
   useEffect(() => {
     setMenuOpen(false);
+    setStartOpen(false);
   }, [pathname]);
+
+  // The "Get Started" menu closes on Escape or a click anywhere else.
+  useEffect(() => {
+    if (!startOpen) return;
+    function onDown(event: MouseEvent) {
+      if (!startRef.current?.contains(event.target as Node)) setStartOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setStartOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [startOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -75,17 +95,51 @@ export function SiteHeader() {
           </a>
         </nav>
         <div className="flex items-center justify-self-end">
-          <Button
-            asChild
-            className="cta-shadow hidden h-9 rounded px-3 text-sm font-semibold sm:px-4 md:inline-flex"
-          >
-            <Link to="/auth">
+          <div ref={startRef} className="relative hidden md:block">
+            <Button
+              type="button"
+              className="cta-shadow h-9 rounded px-3 text-sm font-semibold sm:px-4"
+              onClick={() => setStartOpen((value) => !value)}
+              aria-haspopup="menu"
+              aria-expanded={startOpen}
+            >
               Get Started{" "}
               <span className="grid size-7 place-items-center rounded-full bg-primary-foreground text-primary">
-                <ArrowRight className="size-4" />
+                <ChevronDown className={`size-4 transition-transform ${startOpen ? "rotate-180" : ""}`} />
               </span>
-            </Link>
-          </Button>
+            </Button>
+            {startOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 z-50 mt-2 w-64 rounded-md border border-border bg-background p-1.5 shadow-[0_20px_50px_oklch(0.2_0.02_230/0.18)]"
+              >
+                <Link
+                  to="/auth"
+                  role="menuitem"
+                  className="flex items-start gap-3 rounded px-3 py-2.5 transition-colors hover:bg-primary/10"
+                  onClick={() => setStartOpen(false)}
+                >
+                  <LogIn className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <span>
+                    <span className="block text-sm font-semibold text-foreground">Sign in</span>
+                    <span className="block text-xs text-foreground/60">Testers and invited friends</span>
+                  </span>
+                </Link>
+                <a
+                  href={home("#beta")}
+                  role="menuitem"
+                  className="flex items-start gap-3 rounded px-3 py-2.5 transition-colors hover:bg-primary/10"
+                  onClick={() => setStartOpen(false)}
+                >
+                  <Ticket className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <span>
+                    <span className="block text-sm font-semibold text-foreground">Apply for the beta</span>
+                    <span className="block text-xs text-foreground/60">Become a Founding Tester</span>
+                  </span>
+                </a>
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="app-menu-toggle md:hidden"
@@ -145,14 +199,21 @@ export function SiteHeader() {
               FAQs
             </a>
           </div>
-          <Button asChild className="cta-shadow mt-3 h-12 w-full rounded text-[15px]">
-            <Link to="/auth" onClick={() => setMenuOpen(false)}>
-              Get Started{" "}
-              <span className="grid size-8 place-items-center rounded-full bg-primary-foreground text-primary">
-                <ArrowRight className="size-4" />
-              </span>
-            </Link>
-          </Button>
+          <div className="mt-3 grid gap-2">
+            <Button asChild className="cta-shadow h-12 w-full rounded text-[15px]">
+              <a href={home("#beta")} onClick={() => setMenuOpen(false)}>
+                Apply for the beta{" "}
+                <span className="grid size-8 place-items-center rounded-full bg-primary-foreground text-primary">
+                  <ArrowRight className="size-4" />
+                </span>
+              </a>
+            </Button>
+            <Button asChild variant="secondary" className="h-12 w-full rounded text-[15px]">
+              <Link to="/auth" onClick={() => setMenuOpen(false)}>
+                <LogIn className="size-4" /> Sign in
+              </Link>
+            </Button>
+          </div>
         </nav>
         </div>
       </div>

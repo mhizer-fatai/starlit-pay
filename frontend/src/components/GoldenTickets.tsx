@@ -34,7 +34,7 @@ export function GoldenTickets() {
   const left = tickets.filter((t) => !t.used).length;
 
   return (
-    <section className="dash-card" aria-label="Golden tickets">
+    <section id="golden-tickets" className="dash-card" aria-label="Golden tickets">
       <div className="card-title-row">
         <span className="flex items-center gap-2">
           <Ticket className="size-4 text-primary" aria-hidden="true" /> Golden tickets
