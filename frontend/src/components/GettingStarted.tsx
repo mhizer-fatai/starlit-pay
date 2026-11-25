@@ -1,19 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Rocket, X } from "lucide-react";
+import { Check, ChevronDown, Rocket, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { fetchBetaConfig, fetchBetaMe } from "@/lib/backend";
+import { onOnboardingChange, readCollapsed, saveProgress, setCollapsed } from "@/lib/onboarding";
 import type { ActivityItem } from "@/lib/wallet";
-
-const dismissKey = (userId: string) => `starlit_onboarding_done_${userId}`;
-const readDismissed = (userId: string) => {
-  try {
-    return localStorage.getItem(dismissKey(userId)) === "1";
-  } catch {
-    return false;
-  }
-};
 
 /** A payment to another Starlit user, not a withdrawal or a move between your own balances. */
 export const isPrivatePayment = (item: ActivityItem) =>
@@ -41,12 +33,17 @@ export function GettingStarted({
   onInvite: () => void;
 }) {
   const navigate = useNavigate();
-  const [dismissed, setDismissed] = useState(true);
+  const [collapsed, setCollapsedState] = useState(false);
   // null = invites aren't part of this beta (open sign-up), or not loaded yet.
   const [invited, setInvited] = useState<boolean | null>(null);
+  const [invitesChecked, setInvitesChecked] = useState(false);
 
+  // The sidebar's "Get started" item can reopen the full checklist.
   useEffect(() => {
-    if (userId) setDismissed(readDismissed(userId));
+    if (!userId) return;
+    const sync = () => setCollapsedState(readCollapsed(userId));
+    sync();
+    return onOnboardingChange(sync);
   }, [userId]);
 
   useEffect(() => {
@@ -59,6 +56,8 @@ export function GettingStarted({
         if (!cancelled) setInvited(me.tickets.some((t) => t.used));
       } catch {
         /* the invite step simply doesn't show */
+      } finally {
+        if (!cancelled) setInvitesChecked(true);
       }
     })();
     return () => {
@@ -93,26 +92,48 @@ export function GettingStarted({
   }
 
   const doneCount = steps.filter((s) => s.done).length;
-  if (!userId || loading || dismissed || doneCount === steps.length) return null;
+  // Invites load a moment after the rest: wait for them so the count doesn't jump from 2 to 3.
+  const settled = !!userId && !loading && invitesChecked;
 
-  function dismiss() {
-    setDismissed(true);
-    try {
-      localStorage.setItem(dismissKey(userId), "1");
-    } catch {
-      /* storage unavailable: it shows again next visit */
-    }
+  useEffect(() => {
+    if (settled) saveProgress(userId, { done: doneCount, total: steps.length });
+  }, [settled, userId, doneCount, steps.length]);
+
+  if (!settled || doneCount === steps.length) return null;
+  const nextStep = steps.find((s) => !s.done);
+
+  if (collapsed) {
+    return (
+      <section
+        id="get-started"
+        className="dash-card flex flex-wrap items-center gap-3 !py-3"
+        style={{ height: "auto", minHeight: 0 }}
+        aria-label="Get started"
+      >
+        <Rocket className="size-4 shrink-0 text-primary" aria-hidden="true" />
+        <span className="text-sm font-semibold text-foreground">Get started</span>
+        <span className="text-sm text-muted-foreground">
+          {doneCount} of {steps.length} done{nextStep ? ` · Next: ${nextStep.title}` : ""}
+        </span>
+        <span className="h-1.5 min-w-16 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+          <span className="block h-full rounded-full bg-primary" style={{ width: `${(doneCount / steps.length) * 100}%` }} />
+        </span>
+        <Button type="button" size="sm" variant="secondary" onClick={() => setCollapsed(userId, false)}>
+          Continue <ChevronDown />
+        </Button>
+      </section>
+    );
   }
 
   return (
-    <section className="dash-card" aria-label="Get started">
+    <section id="get-started" className="dash-card" style={{ height: "auto", minHeight: 0 }} aria-label="Get started">
       <div className="card-title-row">
         <span className="flex items-center gap-2">
           <Rocket className="size-4 text-primary" aria-hidden="true" /> Get started
         </span>
         <span className="flex items-center gap-2 text-sm text-muted-foreground">
           {doneCount} of {steps.length} done
-          <button type="button" onClick={dismiss} aria-label="Hide get started" className="rounded p-1 hover:bg-muted">
+          <button type="button" onClick={() => setCollapsed(userId, true)} aria-label="Minimise get started" title="Minimise" className="rounded p-1 hover:bg-muted">
             <X className="size-4" />
           </button>
         </span>

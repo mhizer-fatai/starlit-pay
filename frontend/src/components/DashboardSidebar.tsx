@@ -12,6 +12,7 @@ import {
   Moon,
   PanelLeft,
   Receipt,
+  Rocket,
   Send,
   Settings,
   Sun,
@@ -21,9 +22,10 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/sidebar";
-import { signOut } from "@/lib/auth";
+import { getUser, signOut } from "@/lib/auth";
 import { Tooltip } from "@/components/Tooltip";
 import { fetchBetaMe } from "@/lib/backend";
+import { onOnboardingChange, readProgress, setCollapsed, type OnboardingProgress } from "@/lib/onboarding";
 
 // Asked once per session; the server still checks admin rights on every admin call.
 let adminCheck: Promise<boolean> | null = null;
@@ -102,6 +104,38 @@ export function DashboardSidebar({
   const themeLabel = mode === "light" ? "Dark Mode" : "Light Mode";
   const ThemeIcon = mode === "light" ? Moon : Sun;
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userId, setUserId] = useState("");
+  const [onboarding, setOnboarding] = useState<OnboardingProgress | null>(null);
+
+  // "Get started" progress, worked out on the Dashboard and saved for every page.
+  useEffect(() => {
+    let cancelled = false;
+    let stop = () => {};
+    void getUser().then((user) => {
+      if (cancelled || !user) return;
+      setUserId(user.id);
+      const sync = () => setOnboarding(readProgress(user.id));
+      sync();
+      stop = onOnboardingChange(sync);
+    });
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, []);
+
+  function openOnboarding() {
+    setCollapsed(userId, false);
+    onClose();
+    const reveal = () => document.getElementById("get-started")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (pathname === "/dashboard") reveal();
+    else {
+      navigate("/dashboard");
+      setTimeout(reveal, 600);
+    }
+  }
+  const showOnboarding = !!onboarding && onboarding.total > 0 && onboarding.done < onboarding.total;
+  const onboardingLabel = onboarding ? `Get started · ${onboarding.done} of ${onboarding.total} done` : "Get started";
 
   useEffect(() => {
     let cancelled = false;
@@ -145,6 +179,19 @@ export function DashboardSidebar({
         {navItems.map((item) => (
           <NavItem key={item.label} {...item} collapsed={collapsed} />
         ))}
+        {showOnboarding &&
+          (() => {
+            const content = (
+              <button type="button" className="nav-item" onClick={openOnboarding} aria-label={onboardingLabel}>
+                <Rocket />
+                <span>Get started</span>
+                <b>
+                  {onboarding.done}/{onboarding.total}
+                </b>
+              </button>
+            );
+            return collapsed ? <Tooltip text={onboardingLabel}>{content}</Tooltip> : content;
+          })()}
         <p className="nav-section">Others</p>
         {otherActions.map((item) => {
           const Icon = item.icon;

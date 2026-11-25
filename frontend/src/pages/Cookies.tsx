@@ -37,6 +37,7 @@ const INVENTORY: { name: string; category: string; purpose: string; duration: st
   { name: "Google sign-in cookies", category: "Necessary", purpose: "Set by Google only while you sign in", duration: "Session" },
   { name: "starlit-pay-theme", category: "Functional", purpose: "Remembers light/dark theme", duration: "Until changed" },
   { name: "starlit-pay-sidebar-collapsed", category: "Functional", purpose: "Remembers sidebar layout", duration: "Until changed" },
+  { name: "starlit_onboarding_*", category: "Functional", purpose: "Your Get started progress and whether the checklist is minimised", duration: "Until site data is cleared" },
   { name: "starlit_faucet_last_claim_*", category: "Functional", purpose: "Backup of faucet cooldown timing", duration: "A few hours" },
   { name: "Payment-links cache", category: "Functional", purpose: "Offline copy of your payment links", duration: "Until site data is cleared" },
 ];
