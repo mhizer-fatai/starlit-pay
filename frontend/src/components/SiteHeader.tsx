@@ -126,7 +126,7 @@ export function SiteHeader() {
                   </span>
                 </Link>
                 <a
-                  href={home("#beta")}
+                  href={onHome ? "#beta" : "/apply"}
                   role="menuitem"
                   className="flex items-start gap-3 rounded px-3 py-2.5 transition-colors hover:bg-primary/10"
                   onClick={() => setStartOpen(false)}
@@ -201,7 +201,7 @@ export function SiteHeader() {
           </div>
           <div className="mt-3 grid gap-2">
             <Button asChild className="cta-shadow h-12 w-full rounded text-[15px]">
-              <a href={home("#beta")} onClick={() => setMenuOpen(false)}>
+              <a href={onHome ? "#beta" : "/apply"} onClick={() => setMenuOpen(false)}>
                 Apply for the beta{" "}
                 <span className="grid size-8 place-items-center rounded-full bg-primary-foreground text-primary">
                   <ArrowRight className="size-4" />

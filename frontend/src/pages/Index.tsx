@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -192,6 +193,18 @@ function Index() {
     document.title = "Starlit Pay: the private money app for the stablecoin era";
     document.documentElement.classList.remove("dark");
   }, []);
+
+  // starlitpay.xyz/apply opens the landing page at the beta application form.
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (pathname !== "/apply") return;
+    document.title = "Apply for the beta: Starlit Pay";
+    const timer = window.setTimeout(
+      () => document.getElementById("beta")?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      150,
+    );
+    return () => window.clearTimeout(timer);
+  }, [pathname]);
 
   return (
     <div className="relative overflow-x-clip">

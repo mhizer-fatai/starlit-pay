@@ -99,6 +99,7 @@ createRoot(document.getElementById("root")!).render(
         <ScrollToTop />
         <Routes>
           <Route path="/" element={<Index />} />
+          <Route path="/apply" element={<Index />} />
           <Route path="/faqs" element={<Faqs />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/help" element={<HelpPage />} />

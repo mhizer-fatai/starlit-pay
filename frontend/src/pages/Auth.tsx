@@ -688,7 +688,7 @@ function AuthPage() {
                       <span className="text-[15px] font-semibold text-foreground">Invite code</span>
                       <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
                         Starlit Pay is in a closed beta. Approved applicants don't need one.{" "}
-                        <a href="/#beta" className="font-medium text-primary hover:underline">
+                        <a href="/apply" className="font-medium text-primary hover:underline">
                           No code? Apply to join
                         </a>
                       </p>
