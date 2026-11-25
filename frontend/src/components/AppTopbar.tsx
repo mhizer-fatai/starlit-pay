@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { Menu, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { NotificationBell } from "@/components/NotificationBell";
 import { getUser } from "@/lib/auth";
 import { useSidebar } from "@/lib/sidebar";
 
@@ -55,7 +54,6 @@ export function AppTopbar() {
           <input type="text" placeholder="Search or jump to" aria-label="Search" />
         </div>
         <div className="topbar-actions">
-          <NotificationBell />
           {displayName && (
             <button
               className="avatar-button"

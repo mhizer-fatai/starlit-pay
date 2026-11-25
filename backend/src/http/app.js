@@ -64,6 +64,7 @@ const limit = (max, error) => rateLimit({ windowMs: 15 * 60 * 1000, max, standar
 app.use("/api/", limit(200, "Too many requests from this IP, please try again later."));
 app.use("/api/users/", limit(30, "Too many authentication attempts, please try again later."));
 app.use("/api/faucet/", limit(10, "Too many faucet requests from this IP, please try again later."));
+app.use("/api/beta/", limit(30, "Too many beta requests from this IP, please try again later."));
 app.use("/api/relayer/", limit(30, "Too many transaction submissions from this IP, please try again later."));
 // Passkey ceremonies, session refresh and vault unlocks (per-account PIN limits apply on top)
 const sessionAuthLimiter = limit(60, "Too many sign-in requests from this IP, please try again later.");

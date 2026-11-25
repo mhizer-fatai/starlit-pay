@@ -49,6 +49,8 @@ import SendPage from "./pages/Send";
 import SettingsPage from "./pages/Settings";
 import TransactionsPage from "./pages/Transactions";
 import PayRequestPage from "./pages/PayRequest";
+import BetaStatusPage from "./pages/BetaStatus";
+import AdminBetaPage from "./pages/AdminBeta";
 import { getUser, isUnlocked } from "./lib/auth";
 import "./styles.css";
 
@@ -113,6 +115,8 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/payment-links" element={<RequireUnlock><PaymentLinksPage /></RequireUnlock>} />
           <Route path="/faucet" element={<RequireUnlock><FaucetPage /></RequireUnlock>} />
           <Route path="/pay/:commitment" element={<PayRequestPage />} />
+          <Route path="/beta/:token" element={<BetaStatusPage />} />
+          <Route path="/admin/beta" element={<RequireUnlock><AdminBetaPage /></RequireUnlock>} />
           <Route path="/settings" element={<RequireUnlock><SettingsPage /></RequireUnlock>} />
         </Routes>
       </SidebarProvider>

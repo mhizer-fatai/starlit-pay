@@ -23,6 +23,7 @@ import { ReceiptModal } from "@/components/ReceiptModal";
 import { ActivitySkeletonRow, Skeleton } from "@/components/Skeleton";
 import { StatementModal } from "@/components/StatementModal";
 import { SmartWalletCard } from "@/components/SmartWalletCard";
+import { GoldenTickets } from "@/components/GoldenTickets";
 import { TransferModal, type TransferDirection } from "@/components/TransferModal";
 import { AssetRow, WalletCardHeader, WalletTotal } from "@/components/WalletCard";
 import { usePrices } from "@/lib/prices";
@@ -374,6 +375,8 @@ function DashboardPage() {
               onRecovered={() => void handleSync()}
             />
           </div>
+
+          <GoldenTickets />
 
           <section className="dash-card activity-card">
             <div className="card-title-row">

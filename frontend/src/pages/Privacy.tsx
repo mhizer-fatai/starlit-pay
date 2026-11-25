@@ -61,7 +61,7 @@ const SECTIONS: PolicySection[] = [
         items: [
           "Account details: display name, username, and email address (verified through Google sign-in).",
           "Profile photo where available (your Google picture, otherwise a generated default avatar).",
-          "Preferences you set, such as language, currency, and notification or security settings.",
+          "Preferences you set, such as language, currency, and security settings.",
           "Messages you send to support, including their contents and metadata.",
         ],
       },
@@ -165,7 +165,7 @@ const SECTIONS: PolicySection[] = [
     blocks: [
       {
         type: "p",
-        text: "Starlit Pay primarily uses your browser's local storage rather than cookies: your login session, account profile copy, notification read-state, and faucet cooldown markers. Our testnet faucet uses a Cloudflare security challenge. We run no advertising trackers. You can clear site data in your browser settings at any time, though you will be signed out and will need your PIN to unlock your wallet again.",
+        text: "Starlit Pay primarily uses your browser's local storage rather than cookies: your login session, account profile copy, and faucet cooldown markers. Our testnet faucet uses a Cloudflare security challenge. We run no advertising trackers. You can clear site data in your browser settings at any time, though you will be signed out and will need your PIN to unlock your wallet again.",
       },
     ],
   },

@@ -38,7 +38,6 @@ const INVENTORY: { name: string; category: string; purpose: string; duration: st
   { name: "starlit-pay-theme", category: "Functional", purpose: "Remembers light/dark theme", duration: "Until changed" },
   { name: "starlit-pay-sidebar-collapsed", category: "Functional", purpose: "Remembers sidebar layout", duration: "Until changed" },
   { name: "starlit_faucet_last_claim_*", category: "Functional", purpose: "Backup of faucet cooldown timing", duration: "A few hours" },
-  { name: "starlit_notif_read_*", category: "Functional", purpose: "Which notifications you have seen", duration: "Until site data is cleared" },
   { name: "Payment-links cache", category: "Functional", purpose: "Offline copy of your payment links", duration: "Until site data is cleared" },
 ];
 
@@ -134,7 +133,7 @@ function PreferencesModal({
           />
           <CategoryToggle
             label="Functional"
-            description="Theme, layout, and convenience storage such as notification read-state."
+            description="Theme, layout, and convenience storage such as payment-link cache."
             checked={functional}
             onChange={setFunctional}
           />
@@ -216,7 +215,7 @@ function downloadCookiesPdf() {
     ["Our approach", "Essential technologies are always active. Preferences, analytics, and marketing are optional; we currently operate no analytics or advertising technologies, so keeping those off changes nothing today."],
     ["What are cookies?", "Cookies are small text files stored on your device. In this policy the term also covers similar technologies such as local storage, session storage, device identifiers, and security challenges."],
     ["Strictly Necessary", "Login sessions, account security, fraud and bot prevention (including the faucet challenge), and remembering your cookie choice. These cannot be disabled."],
-    ["Functional", "Theme, sidebar layout, notification read-state, payment-link cache, and faucet timing backup."],
+    ["Functional", "Theme, sidebar layout, payment-link cache, and faucet timing backup."],
     ["Analytics", "Would cover product-usage measurement if introduced, only with consent where the law requires it."],
     ["Marketing", "We set no advertising cookies or cross-site tracking technologies."],
     ["Third parties", "Google (sign-in only), Cloudflare (faucet challenge), Supabase (auth/database), Google Fonts, and DiceBear avatars when displayed — each under its own privacy policy."],
@@ -324,7 +323,7 @@ function CookiesPage() {
               <div className="rounded-md border border-border p-4">
                 <p className="text-[14px] font-semibold text-foreground">Functional — optional</p>
                 <p className="mt-1 text-[14px] leading-[1.7] text-foreground/75">
-                  Theme, sidebar layout, notification read-state, cached payment links, and faucet
+                  Theme, sidebar layout, cached payment links, and faucet
                   timing. Convenience only; the app works without them.
                 </p>
               </div>

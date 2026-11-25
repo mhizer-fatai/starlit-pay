@@ -14,7 +14,8 @@ database, run them in this order:
 9. `schema_zk_keys.sql`: users' public keys for private payments (real ZK)
 10. `schema_zk_history.sql`: archive of the private pools' events (real ZK)
 11. `schema_zk_gateway.sql`: gateway credits for the private pools (real ZK)
-12. `schema_lockdown.sql`: locks every table to the backend's service role (run
+12. `schema_beta.sql`: closed beta invite codes and applications
+13. `schema_lockdown.sql`: locks every table to the backend's service role (run
    it after the backend is deployed with `SUPABASE_SERVICE_ROLE_KEY`)
 
 The gateway also needs a starting position (`daemon_state` row `gateway`), so

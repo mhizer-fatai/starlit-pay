@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Lock, ShieldCheck, User } from "lucide-react";
+import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Lock, ShieldCheck, Ticket, User } from "lucide-react";
 
 import { RecoveryCodePanel } from "@/components/RecoveryCodePanel";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
   unlockWithPin,
   type SessionUser,
 } from "@/lib/auth";
-import { getStoredUser } from "@/lib/backend";
+import { fetchBetaAccess, fetchBetaConfig, getStoredUser } from "@/lib/backend";
 import { migrateLegacyAccount, migrationErrorMessage } from "@/lib/migration";
 import { isValidPin } from "@/lib/keys";
 import {
@@ -30,7 +30,7 @@ import {
   type UnlockOutcome,
 } from "@/lib/passkeyAccount";
 import type { OpenedVault } from "@/lib/vault";
-import { passkeyFlows } from "@/lib/vault/client";
+import { getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { PasskeyNeedsPinError } from "@/lib/vault/flows";
 import { supabase } from "@/lib/supabase";
 
@@ -108,6 +108,8 @@ function StatusLine({ status, error }: { status: string; error: string }) {
   return null;
 }
 
+const INVITE_KEY = "starlit_invite_code";
+
 function AuthPage() {
   const navigate = useNavigate();
   const [phase, setPhase] = useState<Phase>("google");
@@ -133,6 +135,36 @@ function AuthPage() {
   const [pendingUpgrade, setPendingUpgrade] = useState<{ user: SessionUser; opened: OpenedVault } | null>(null);
   const [upgradeNote, setUpgradeNote] = useState("");
   const [recoveryInput, setRecoveryInput] = useState("");
+  // Closed beta: an approved applicant's Gmail signs up as is; anyone else
+  // needs an invite code. A shared link (/auth?invite=…) fills it in; it is
+  // kept for the session because Google sign-in redirects back to /auth without it.
+  const [needsInviteCode, setNeedsInviteCode] = useState(false);
+  const [inviteCode, setInviteCode] = useState(() => {
+    const fromLink = new URLSearchParams(window.location.search).get("invite");
+    try {
+      if (fromLink) sessionStorage.setItem(INVITE_KEY, fromLink);
+      return fromLink ?? sessionStorage.getItem(INVITE_KEY) ?? "";
+    } catch {
+      return fromLink ?? "";
+    }
+  });
+
+  useEffect(() => {
+    if (phase !== "signup") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const proof = await getEmailProof();
+        const access = proof ? await fetchBetaAccess(proof) : { ...(await fetchBetaConfig()), approved: false };
+        if (!cancelled) setNeedsInviteCode(access.inviteOnly && !access.approved);
+      } catch {
+        /* the backend still checks at sign-up and explains what's missing */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase]);
 
   useEffect(() => {
     document.title = "Sign in — Starlit Pay";
@@ -402,6 +434,10 @@ function AuthPage() {
       setError("This browser doesn't support passkeys. Try a recent Chrome, Safari, Edge or Firefox.");
       return;
     }
+    if (needsInviteCode && !inviteCode.trim()) {
+      setError("Starlit Pay is in a closed beta. Enter your invite code, or apply to join from our homepage.");
+      return;
+    }
     resetMessages();
     setBusy(true);
     try {
@@ -411,8 +447,14 @@ function AuthPage() {
         displayName: displayName || cleanUsername,
         avatarUrl,
         pin,
+        inviteCode: needsInviteCode ? inviteCode.trim() : undefined,
         onStatus: setStatus,
       });
+      try {
+        sessionStorage.removeItem(INVITE_KEY);
+      } catch {
+        /* ignore */
+      }
       setPin("");
       setPinConfirm("");
       setRecoveryCode(result.recoveryCode);
@@ -641,6 +683,31 @@ function AuthPage() {
                 </div>
 
                 <form onSubmit={handleSignup} className="mt-8 space-y-6">
+                  {needsInviteCode && (
+                    <div>
+                      <span className="text-[15px] font-semibold text-foreground">Invite code</span>
+                      <p className="mt-1 text-[13px] leading-5 text-muted-foreground">
+                        Starlit Pay is in a closed beta. Approved applicants don't need one.{" "}
+                        <a href="/#beta" className="font-medium text-primary hover:underline">
+                          No code? Apply to join
+                        </a>
+                      </p>
+                      <div className="auth-input mt-2">
+                        <Ticket />
+                        <Input
+                          type="text"
+                          placeholder="STAR-XXXX-XXXX"
+                          value={inviteCode}
+                          onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                          autoComplete="off"
+                          spellCheck={false}
+                          maxLength={32}
+                          required
+                          disabled={busy}
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <span className="text-[15px] font-semibold text-foreground">Username</span>
                     <div className="auth-input">

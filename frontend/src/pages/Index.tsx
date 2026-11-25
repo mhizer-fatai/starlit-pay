@@ -8,6 +8,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { ScrollReveal } from "@/components/ScrollReveal";
 import { ScrollToTopButton } from "@/components/ScrollToTopButton";
 import { Button } from "@/components/ui/button";
+import { BetaApplyForm } from "@/components/BetaApplyForm";
 import { FaqList } from "@/components/FaqList";
 import { PRIVATE_VIEW, PUBLIC_VIEW, TRUST } from "@/content/site";
 import { fetchStats } from "@/lib/backend";
@@ -372,6 +373,25 @@ function Index() {
               </Link>
             </p>
           </div>
+        </section>
+      </ScrollReveal>
+
+      <ScrollReveal>
+        <section id="beta" className={`${container} py-20 lg:py-24`}>
+          <SectionHeader eyebrow="Closed beta" title="Become a Founding Tester">
+            Starlit Pay is opening to a small group of early users on the Stellar test network. Founding
+            Testers try private payments first, shape what we build next, and get first access when we
+            launch with real money.
+          </SectionHeader>
+          <div className="mt-10">
+            <BetaApplyForm />
+          </div>
+          <p className="mt-4 text-[14px] text-foreground/70">
+            Already have an invite code?{" "}
+            <Link to="/auth" className="font-medium text-primary hover:underline">
+              Create your wallet →
+            </Link>
+          </p>
         </section>
       </ScrollReveal>
 

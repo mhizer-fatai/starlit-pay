@@ -15,7 +15,12 @@ const sameSecret = (a, b) => {
   return left.length === right.length && crypto.timingSafeEqual(left, right);
 };
 
-export function createUsersService({ repository, emailProofRequired, randomMemo = () => crypto.randomInt(100_000, 1_000_000) }) {
+export function createUsersService({
+  repository,
+  emailProofRequired,
+  beta = null,
+  randomMemo = () => crypto.randomInt(100_000, 1_000_000),
+}) {
   /**
    * Only the owner of an email may ask about its account: Google sign-in proves
    * it. Without this, anyone could test any email address.
@@ -34,6 +39,21 @@ export function createUsersService({ repository, emailProofRequired, randomMemo 
     throw new Error("Failed to generate a unique deposit memo.");
   }
 
+  async function createAccount(input) {
+    const user = await repository.insert({
+      email: input.email,
+      username: input.username,
+      display_name: input.display_name || input.username,
+      identity_commitment: input.identity_commitment,
+      public_encryption_key: input.public_encryption_key,
+      avatar_url: input.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(input.username)}`,
+      stellar_address: input.stellar_address ?? null,
+      deposit_memo: await uniqueDepositMemo(),
+    });
+    if (!user) throw new HttpError(400, "Username or email already exists");
+    return user;
+  }
+
   return {
     /** Without a commitment: does this email have an account? With one: the old PIN check. */
     async login({ email, identity_commitment: commitment }, proven) {
@@ -49,17 +69,17 @@ export function createUsersService({ repository, emailProofRequired, randomMemo 
 
     async register(input, proven) {
       assertEmailOwner(input.email, proven);
-      const user = await repository.insert({
-        email: input.email,
-        username: input.username,
-        display_name: input.display_name || input.username,
-        identity_commitment: input.identity_commitment,
-        public_encryption_key: input.public_encryption_key,
-        avatar_url: input.avatar_url || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(input.username)}`,
-        stellar_address: input.stellar_address ?? null,
-        deposit_memo: await uniqueDepositMemo(),
-      });
-      if (!user) throw new HttpError(400, "Username or email already exists");
+      // Closed beta: an approved email gets in as is; anyone else takes a use
+      // of their invite code first, given back if the account can't be created.
+      const inviteCode = beta?.inviteOnly ? await beta.admit(input.email, input.invite_code) : null;
+      let user;
+      try {
+        user = await createAccount(input);
+      } catch (err) {
+        if (inviteCode) await beta.release(inviteCode);
+        throw err;
+      }
+      if (inviteCode) await beta.redeemed(inviteCode, user.id);
       return ownerView(user);
     },
 

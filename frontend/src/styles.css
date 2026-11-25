@@ -221,10 +221,6 @@
     background: oklch(0.208 0.042 265.755);
   }
 
-  .notification {
-    background: oklch(0.208 0.042 265.755);
-  }
-
   .company-art {
     background:
       radial-gradient(circle at 30% 35%, oklch(0.85 0.08 38), transparent 31%),
@@ -735,151 +731,33 @@
     color: oklch(0.67 0.02 220);
   }
 }
-@utility notification {
-  position: relative;
-  border-radius: 50%;
-  background: oklch(0.975 0.006 240);
-}
 
-@utility notification-badge {
-  position: absolute;
-  top: -2px;
-  right: -4px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 9px;
-  background: var(--color-dashboard-pink);
-  color: oklch(1 0 0);
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 18px;
-  text-align: center;
-  pointer-events: none;
-}
 
-@utility notification-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 45;
-}
 
-@utility notification-modal {
-  position: fixed;
-  top: 72px;
-  right: 24px;
-  z-index: 50;
-  width: min(calc(100% - 48px), 380px);
-  max-height: calc(100svh - 96px);
-  overflow-y: auto;
-  border-radius: 12px;
-  background: oklch(1 0 0);
-  box-shadow: 0 20px 50px oklch(0.2 0.02 230 / 0.2);
-  padding: 0;
-}
 
-@utility notification-modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--color-border);
-}
 
-@utility notification-modal-title {
-  font-size: 15px;
-  font-weight: 600;
-}
 
-@utility notification-read-all {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-primary);
-  padding: 4px 8px;
-  border-radius: 6px;
-  &:hover {
-    background: oklch(0.96 0.006 250);
-    color: var(--color-primary);
-  }
-  & svg {
-    width: 14px;
-    height: 14px;
-  }
-}
 
-@utility notification-modal-body {
-  padding: 8px;
-}
 
-@utility notification-empty {
-  padding: 24px 16px;
-  text-align: center;
-  font-size: 13px;
-  color: var(--color-muted-foreground);
-}
 
-@utility notification-item {
-  display: flex;
-  gap: 12px;
-  padding: 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  &:hover {
-    background: oklch(0.985 0.004 220);
-  }
-}
 
-@utility notification-item-read {
-  opacity: 0.7;
-}
 
-@utility notification-item-icon {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
 
-@utility notification-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  &-success {
-    background: var(--color-dashboard-green);
-  }
-  &-error {
-    background: var(--color-dashboard-pink);
-  }
-  &-info {
-    background: var(--color-dashboard-blue);
-  }
-}
 
-@utility notification-item-copy {
-  min-width: 0;
-  flex: 1;
-  & b {
-    display: block;
-    font-size: 13px;
-    font-weight: 600;
-  }
-  & p {
-    margin-top: 2px;
-    font-size: 12px;
-    color: var(--color-muted-foreground);
-    line-height: 1.5;
-  }
-  & small {
-    display: block;
-    margin-top: 2px;
-    font-size: 11px;
-    color: var(--color-muted-foreground);
-  }
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @utility avatar-button {
   width: 38px;
   height: 38px;
@@ -1881,9 +1759,6 @@
   .search-box kbd {
     display: none;
   }
-  .notification {
-    display: none;
-  }
   .dashboard-content {
     padding-top: 20px;
   }
@@ -2857,10 +2732,6 @@
   .settings-referral,
   .settings-stores-row {
     flex-wrap: wrap;
-  }
-  /* Keep notifications reachable on phones. */
-  .notification {
-    display: inline-flex;
   }
   /* Profile stacking. */
   .profile-body {

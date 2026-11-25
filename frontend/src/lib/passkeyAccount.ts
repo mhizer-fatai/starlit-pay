@@ -29,6 +29,8 @@ export async function createPasskeyAccount(input: {
   displayName: string;
   avatarUrl?: string;
   pin: string;
+  /** Closed beta: needed while sign-up is invite-only. */
+  inviteCode?: string;
   onStatus?: (message: string) => void;
 }): Promise<{ recoveryCode: string; passkeyCanUnlock: boolean }> {
   const status = input.onStatus ?? (() => undefined);
@@ -48,6 +50,7 @@ export async function createPasskeyAccount(input: {
       public_encryption_key: vault.keys.viewing.publicKey,
       avatar_url: input.avatarUrl,
       stellar_address: vault.keys.stellar.publicKey,
+      invite_code: input.inviteCode || undefined,
     }, emailProof);
     pendingSignup = { email, vault };
   }

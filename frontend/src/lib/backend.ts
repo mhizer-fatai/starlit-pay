@@ -136,6 +136,8 @@ export const register = (body: {
   display_name?: string;
   avatar_url?: string;
   stellar_address?: string;
+  /** Closed beta: needed while sign-up is invite-only. */
+  invite_code?: string;
 }, emailProof?: string) =>
   // The backend requires Google proof that the caller owns this email.
   req<AuthResponse>("/api/users/register", {
@@ -353,4 +355,59 @@ export const complianceCheck = (address: string) =>
     `/api/compliance/check/${encodeURIComponent(address)}`,
   );
 
+// --- Closed beta ("Founding Testers") ---------------------------------------
+export type BetaPersona = "freelancer" | "business" | "crypto" | "developer" | "other";
+export interface BetaApplicationInput {
+  name: string;
+  email: string;
+  x_handle?: string;
+  telegram_handle?: string;
+  persona: BetaPersona;
+  reason: string;
+  captchaToken?: string;
+}
+export interface BetaApplication {
+  id: string;
+  name: string;
+  email: string;
+  x_handle: string | null;
+  telegram_handle: string | null;
+  persona: BetaPersona;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  reviewed_at: string | null;
+}
+export interface BetaInvite {
+  code: string;
+  kind: "group" | "golden";
+  label: string | null;
+  max_uses: number;
+  uses: number;
+  revoked_at: string | null;
+  created_at: string;
+}
 
+export const fetchBetaConfig = () => req<{ inviteOnly: boolean }>("/api/beta/config");
+/** After Google sign-in: can this email sign up without an invite code? */
+export const fetchBetaAccess = (emailProof: string) =>
+  req<{ inviteOnly: boolean; approved: boolean }>("/api/beta/access", { headers: { "X-Supabase-Auth": emailProof } });
+export const applyToBeta = (body: BetaApplicationInput) =>
+  req<{ received: true; statusToken: string | null }>("/api/beta/apply", { method: "POST", body: JSON.stringify(body) });
+export const fetchBetaStatus = (token: string) =>
+  req<{ name: string; status: BetaApplication["status"]; email: string | null; telegramUrl: string | null }>(
+    `/api/beta/status/${encodeURIComponent(token)}`
+  );
+export const fetchBetaMe = () => req<{ admin: boolean; tickets: { code: string; used: boolean }[] }>("/api/beta/me");
+
+export const listBetaApplications = (status?: BetaApplication["status"]) =>
+  req<{ applications: BetaApplication[] }>(`/api/beta/admin/applications${status ? `?status=${status}` : ""}`);
+export const approveBetaApplication = (id: string) =>
+  req<{ application: BetaApplication; emailed: boolean }>(`/api/beta/admin/applications/${id}/approve`, { method: "POST", body: "{}" });
+export const rejectBetaApplication = (id: string) =>
+  req<{ application: BetaApplication }>(`/api/beta/admin/applications/${id}/reject`, { method: "POST", body: "{}" });
+export const listGroupInvites = () => req<{ invites: BetaInvite[] }>("/api/beta/admin/invites");
+export const createGroupInvite = (label: string, maxUses: number) =>
+  req<{ invite: BetaInvite }>("/api/beta/admin/invites", { method: "POST", body: JSON.stringify({ label, maxUses }) });
+export const revokeGroupInvite = (code: string) =>
+  req<{ ok: true }>(`/api/beta/admin/invites/${encodeURIComponent(code)}/revoke`, { method: "POST", body: "{}" });

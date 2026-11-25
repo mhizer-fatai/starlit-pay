@@ -1,7 +1,8 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowDownLeft,
+  ShieldCheck,
   ChevronRight,
   Download,
   Droplets,
@@ -22,6 +23,11 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "@/lib/sidebar";
 import { signOut } from "@/lib/auth";
 import { Tooltip } from "@/components/Tooltip";
+import { fetchBetaMe } from "@/lib/backend";
+
+// Asked once per session; the server still checks admin rights on every admin call.
+let adminCheck: Promise<boolean> | null = null;
+const checkAdmin = () => (adminCheck ??= fetchBetaMe().then((me) => me.admin, () => false));
 
 const navItems = [
   { label: "Home", icon: Home, to: "/dashboard" },
@@ -95,6 +101,15 @@ export function DashboardSidebar({
   const { pathname } = useLocation();
   const themeLabel = mode === "light" ? "Dark Mode" : "Light Mode";
   const ThemeIcon = mode === "light" ? Moon : Sun;
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void checkAdmin().then((admin) => !cancelled && setIsAdmin(admin));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -106,9 +121,18 @@ export function DashboardSidebar({
   }, [mode]);
 
   const otherActions = [
+    ...(isAdmin ? [{ label: "Beta admin", icon: ShieldCheck, to: "/admin/beta" as string | undefined }] : []),
     { label: "Settings", icon: Settings, to: "/settings" as string | undefined },
     { label: themeLabel, icon: ThemeIcon, action: toggleTheme },
-    { label: "Log Out", icon: LogOut, action: async () => { await signOut(); navigate("/", { replace: true }); } },
+    {
+      label: "Log Out",
+      icon: LogOut,
+      action: async () => {
+        adminCheck = null;
+        await signOut();
+        navigate("/", { replace: true });
+      },
+    },
   ];
 
   return (

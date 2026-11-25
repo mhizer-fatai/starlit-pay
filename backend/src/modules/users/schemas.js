@@ -27,6 +27,8 @@ export const registerRequest = z.object({
   public_encryption_key: hex32,
   avatar_url: avatarUrl.optional(),
   stellar_address: stellarAddress.optional(),
+  // Closed beta: required while sign-up is invite-only (checked by the service).
+  invite_code: z.string().trim().max(32).optional(),
 });
 
 export const profileUpdateRequest = z

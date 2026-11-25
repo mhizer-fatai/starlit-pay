@@ -10,6 +10,7 @@ import { complianceRouter } from "./src/modules/compliance/index.js";
 import { relayerRouter } from "./src/modules/relayer/index.js";
 import { paymentLinksRouter } from "./src/modules/payment_links/index.js";
 import { faucetRouter } from "./src/modules/faucet/index.js";
+import { betaRouter } from "./src/modules/beta/index.js";
 import { statsRouter } from "./src/modules/stats/index.js";
 import { healthRouter } from "./src/modules/health/index.js";
 import { pricesRouter } from "./src/modules/prices/index.js";
@@ -33,6 +34,7 @@ for (const router of [
   relayerRouter,
   paymentLinksRouter,
   faucetRouter,
+  betaRouter,
   statsRouter,
   healthRouter,
   pricesRouter,
