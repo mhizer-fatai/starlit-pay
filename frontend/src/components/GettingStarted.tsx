@@ -75,10 +75,11 @@ export function GettingStarted({
     },
     {
       title: "Send a private payment",
-      detail: "Pay any Starlit user by @username. Nobody on the network can see who paid whom, or how much.",
+      detail: "Pay any Starlit user by @username. Not sure who? Send a test payment to @fataidev, our founder.",
       done: sentPrivate,
-      action: "Send",
-      onClick: () => navigate("/send"),
+      action: "Pay @fataidev",
+      // Pre-filled with a small test amount; the tester can change both before sending.
+      onClick: () => navigate("/send?to=fataidev&amount=1"),
     },
   ];
   if (invited !== null) {
