@@ -4,7 +4,6 @@
 import { BackendError, register } from "@/lib/backend";
 import { identityCommitment } from "@/lib/keys";
 import { unlockFromVault, type SessionUser } from "@/lib/auth";
-import { needsMigrationFinish } from "@/lib/migration";
 import { closeVault, createVault, VaultError, type NewVault, type OpenedVault } from "@/lib/vault";
 import { AuthApiError } from "@/lib/vault/api";
 import { authApi, getEmailProof, passkeyFlows } from "@/lib/vault/client";
@@ -62,35 +61,23 @@ export async function createPasskeyAccount(input: {
   return { recoveryCode: result.recoveryCode, passkeyCanUnlock: result.passkeyCanUnlock };
 }
 
-/**
- * The result of unlocking. When an upgrade from the older email+PIN keys did
- * not finish, the vault is NOT signed in yet: the caller must finish the
- * upgrade (see lib/migration) with the returned vault.
- */
-export type UnlockOutcome = { status: "unlocked" } | { status: "finish-upgrade"; user: SessionUser; opened: OpenedVault };
-
-function settle(opened: OpenedVault, user: SessionUser): UnlockOutcome {
-  if (needsMigrationFinish(user, opened)) return { status: "finish-upgrade", user, opened };
-  unlockFromVault(opened, user);
-  return { status: "unlocked" };
-}
-
-export async function signInWithPasskey(): Promise<UnlockOutcome> {
+export async function signInWithPasskey(): Promise<void> {
   const { vault, user } = await passkeyFlows.unlockWithPasskey();
-  return settle(vault, user as SessionUser);
+  unlockFromVault(vault, user as SessionUser);
 }
 
-/** PIN unlock for passkey accounts: uses the current session, or Google proof when there is none. */
-export async function unlockWithVaultPin(pin: string, { useEmailProof }: { useEmailProof: boolean }): Promise<UnlockOutcome> {
+/** PIN unlock: uses the current session, or Google proof when there is none. */
+export async function unlockWithVaultPin(pin: string, { useEmailProof }: { useEmailProof: boolean }): Promise<void> {
   const proof = useEmailProof ? await requireEmailProof() : null;
   const { vault, user } = await passkeyFlows.unlockWithPin(pin, proof);
-  return settle(vault, user as SessionUser);
+  unlockFromVault(vault, user as SessionUser);
 }
 
 /** Recovery code unlock (needs Google). Returns the replacement code to show once. */
-export async function unlockWithRecovery(code: string): Promise<{ outcome: UnlockOutcome; newRecoveryCode: string; opened: OpenedVault }> {
+export async function unlockWithRecovery(code: string): Promise<{ newRecoveryCode: string; opened: OpenedVault }> {
   const { vault, user, newRecoveryCode } = await passkeyFlows.unlockWithRecoveryCode(code, await requireEmailProof());
-  return { outcome: settle(vault, user as SessionUser), newRecoveryCode, opened: vault };
+  unlockFromVault(vault, user as SessionUser);
+  return { newRecoveryCode, opened: vault };
 }
 
 /**
@@ -107,20 +94,6 @@ export async function confirmPaymentWithPin(pin: string): Promise<void> {
   const { vault } = await passkeyFlows.unlockWithPin(pin, null);
   // Only the check matters here; the wallet is already open.
   closeVault(vault.secrets);
-}
-
-/**
- * After Google sign-in: does this existing account use the passkey vault (a
- * PIN is stored server-side) or the older email+PIN keys?
- */
-export async function accountUsesVault(): Promise<boolean> {
-  try {
-    await authApi.pinSalt(await requireEmailProof());
-    return true;
-  } catch (err) {
-    if (err instanceof AuthApiError && err.code === "no_pin") return false;
-    throw err;
-  }
 }
 
 /** Whether a passkey session cookie is still valid (refreshing it if needed). */

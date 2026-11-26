@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { startHarness, TEST_ENV } from "./helpers/harness.js";
 import { createSoftAuthenticator } from "./helpers/soft_authenticator.js";
 import { purgeExpired } from "../src/auth_layer/maintenance.js";
+import { cookieNames, REFRESH_RACE_GRACE_SEC } from "../src/auth_layer/sessions.js";
 
 const EMAIL_PROOF = { "x-supabase-auth": "google-token-alice" };
 const b64u32 = () => crypto.randomBytes(32).toString("base64url");
@@ -207,6 +208,8 @@ describe("sessions", () => {
     const { client } = await enrolFirstPasskey();
     const stolenRefresh = client.jar.get("starlit_rt");
     assert.equal((await client.post("/api/auth/refresh")).status, 200);
+    // Past the few seconds two tabs may race in: a replay now is theft.
+    h.advance((REFRESH_RACE_GRACE_SEC + 1) * 1000);
 
     const attacker = h.client();
     attacker.jar.set("starlit_rt", stolenRefresh);
@@ -214,6 +217,23 @@ describe("sessions", () => {
 
     // The legitimate client's newer refresh token is revoked too.
     assert.equal((await client.post("/api/auth/refresh")).status, 401);
+  });
+
+  test("two tabs refreshing at the same moment don't sign the user out", async () => {
+    const { client } = await enrolFirstPasskey();
+    const sharedRefresh = client.jar.get("starlit_rt");
+    assert.equal((await client.post("/api/auth/refresh")).status, 200);
+
+    // The second tab still sent the old refresh cookie a moment later.
+    const otherTab = h.client();
+    otherTab.jar.set("starlit_rt", sharedRefresh);
+    const raced = await otherTab.post("/api/auth/refresh");
+    assert.equal(raced.status, 409);
+    assert.equal(raced.body.code, "refresh_raced");
+    assert.equal(otherTab.jar.get("starlit_at"), undefined, "the race gets no tokens of its own");
+
+    // The session itself is untouched.
+    assert.equal((await client.post("/api/auth/refresh")).status, 200);
   });
 
   test("logout revokes the refresh token", async () => {
@@ -366,7 +386,10 @@ describe("vault and PIN", () => {
   test("PIN setup tickets cannot be tampered with", async () => {
     const { client } = await setUpVaultWithPin();
     const begin = await client.post("/api/vault/pin/setup/begin", {});
-    const tampered = begin.body.ticket.slice(0, -2) + (begin.body.ticket.endsWith("A") ? "BB" : "AA");
+    // Flip a character in the middle: the last ones can be padding bits that decode the same.
+    const t = begin.body.ticket;
+    const mid = Math.floor(t.length / 2);
+    const tampered = t.slice(0, mid) + (t[mid] === "A" ? "B" : "A") + t.slice(mid + 1);
     const res = await client.post("/api/vault/pin/setup/complete", { ticket: tampered, pinVerifier: b64u32(), wrappedDek: fakeWrap() });
     assert.equal(res.status, 400);
     assert.equal(res.body.code, "ticket_invalid");
@@ -437,4 +460,58 @@ describe("maintenance", () => {
     h.advance(32 * 24 * 60 * MIN);
     assert.equal((await purgeExpired(h.store, h.clock.t)).sessions, sessionsBefore);
   });
+});
+
+describe("signing out other sessions", () => {
+  // Ada's first device (passkey + PIN set up) and a second device unlocked with the PIN.
+  async function twoDevices() {
+    const enrolled = await enrolFirstPasskey();
+    const { client, passkey } = enrolled;
+    await client.post("/api/vault", { encryptedSeed: fakeWrap(), passkeyWrap: { passkeyId: passkey.id, wrappedDek: fakeWrap() } });
+    const begin = await client.post("/api/vault/pin/setup/begin", {});
+    const pinVerifier = b64u32();
+    await client.post("/api/vault/pin/setup/complete", { ticket: begin.body.ticket, pinVerifier, wrappedDek: fakeWrap() });
+    const other = h.client();
+    assert.equal((await other.post("/api/vault/pin/unlock", { pinVerifier }, { headers: EMAIL_PROOF })).status, 200);
+    return { ...enrolled, other, pinVerifier };
+  }
+
+  test("a new PIN signs every other session out, and keeps the one that changed it", async () => {
+    const { client, other } = await twoDevices();
+    const begin = await client.post("/api/vault/pin/setup/begin", {});
+    const changed = await client.post("/api/vault/pin/setup/complete", { ticket: begin.body.ticket, pinVerifier: b64u32(), wrappedDek: fakeWrap() });
+    assert.equal(changed.status, 200);
+
+    const keyAction = await other.post("/api/vault/pin/setup/begin", {});
+    assert.equal(keyAction.status, 401, "the other device can't act with its still-unexpired access token");
+    assert.equal(keyAction.body.code, "invalid_session");
+    assert.equal((await other.post("/api/auth/refresh")).status, 401, "nor refresh");
+
+    assert.equal((await client.post("/api/auth/refresh")).status, 200, "the device that changed the PIN stays signed in");
+  });
+
+  test("a new recovery code signs every other session out", async () => {
+    const { client, other } = await twoDevices();
+    assert.equal((await client.post("/api/vault/recovery", { codeVerifier: b64u32(), wrappedDek: fakeWrap() })).status, 200);
+    assert.equal((await other.post("/api/auth/refresh")).status, 401);
+    assert.equal((await client.post("/api/auth/refresh")).status, 200);
+  });
+
+  test("a copied access cookie stops working for key actions once its session is signed out", async () => {
+    const { client } = await twoDevices();
+    const copied = client.jar.get("starlit_at");
+    assert.equal((await client.post("/api/auth/logout")).status, 200);
+
+    const thief = h.client();
+    thief.jar.set("starlit_at", copied);
+    const res = await thief.post("/api/vault/pin/setup/begin", {});
+    assert.equal(res.status, 401);
+    assert.equal(res.body.code, "invalid_session");
+  });
+});
+
+test("over HTTPS the cookies carry the __Host- / __Secure- prefixes", () => {
+  assert.deepEqual(cookieNames({ secure: true }), { access: "__Host-starlit_at", refresh: "__Secure-starlit_rt" });
+  assert.deepEqual(cookieNames({ secure: true, domain: ".starlitpay.xyz" }), { access: "__Secure-starlit_at", refresh: "__Secure-starlit_rt" });
+  assert.deepEqual(cookieNames({ secure: false }), { access: "starlit_at", refresh: "starlit_rt" });
 });

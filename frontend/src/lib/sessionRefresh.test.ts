@@ -19,3 +19,22 @@ test("refreshes running at the same moment share one request (a refresh token wo
   expect(await third).toBe(false);
   expect(calls).toBe(2);
 });
+
+test("another tab having just refreshed counts as refreshed", async () => {
+  const { refreshSucceeded } = await import("@/lib/sessionRefresh");
+  expect(refreshSucceeded({ ok: true, status: 200 })).toBe(true);
+  expect(refreshSucceeded({ ok: false, status: 409 })).toBe(true);
+  expect(refreshSucceeded({ ok: false, status: 401 })).toBe(false);
+});
+
+test("tabs take turns refreshing when the browser has Web Locks", async () => {
+  const held: string[] = [];
+  const locks = { request: async (name: string, run: () => Promise<boolean>) => (held.push(name), run()) };
+  Object.defineProperty(globalThis, "navigator", { value: { locks }, configurable: true });
+  try {
+    expect(await refreshOnce(async () => true)).toBe(true);
+    expect(held).toEqual(["starlit-session-refresh"]);
+  } finally {
+    Object.defineProperty(globalThis, "navigator", { value: undefined, configurable: true });
+  }
+});

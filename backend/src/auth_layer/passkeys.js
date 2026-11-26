@@ -288,6 +288,8 @@ export function registerPasskeyRoutes(router, { store, sessions, identity, setti
     await store.revokePasskey(target.id, new Date(nowMs()).toISOString());
     await store.deleteWrap(userId, "passkey", target.id);
     await store.revokeSessionsForPasskey(target.id);
+    // A removed passkey may have been lost or stolen: sign out every other session too.
+    await sessions.endOtherSessions(userId, req.session.sid);
     res.json({ ok: true });
   });
 }

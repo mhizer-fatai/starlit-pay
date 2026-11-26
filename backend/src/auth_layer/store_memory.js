@@ -207,6 +207,17 @@ export function createMemoryStore({ now = () => Date.now(), users = [] } = {}) {
     async revokeSessionFamily(familyId) {
       for (const row of db.sessions.values()) if (row.family_id === familyId && !row.revoked_at) row.revoked_at = iso();
     },
+    async revokeOtherSessions(userId, keepFamilyId) {
+      for (const row of db.sessions.values()) {
+        if (row.user_id === userId && row.family_id !== keepFamilyId && !row.revoked_at) row.revoked_at = iso();
+      }
+    },
+    async isSessionFamilyActive(familyId, nowIso) {
+      for (const row of db.sessions.values()) {
+        if (row.family_id === familyId && !row.revoked_at && row.expires_at > nowIso) return true;
+      }
+      return false;
+    },
     async revokeSessionsForPasskey(passkeyId) {
       for (const row of db.sessions.values()) if (row.passkey_id === passkeyId && !row.revoked_at) row.revoked_at = iso();
     },

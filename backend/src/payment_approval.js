@@ -6,7 +6,7 @@
 // running in an unlocked browser; this check cannot.
 
 export function createPaymentApproval({ sessions }) {
-  return function requirePaymentApproval(req, res, next) {
+  return async function requirePaymentApproval(req, res, next) {
     const result = sessions?.authenticate(req);
     if (!result) return res.status(401).json({ error: "Sign in to send payments.", code: "no_session" });
     if (result.error === "csrf") return res.status(403).json({ error: "Missing CSRF header.", code: "csrf" });
@@ -16,6 +16,15 @@ export function createPaymentApproval({ sessions }) {
         error: "Please confirm this payment with your passkey or PIN.",
         code: "reauth_required",
       });
+    }
+    // Signed out since this access token was issued (logout, "sign out
+    // everywhere", a stolen token detected): no payments, even within its 15 minutes.
+    try {
+      if (!(await sessions.isActive(result.session))) {
+        return res.status(401).json({ error: "You were signed out. Please sign in again.", code: "invalid_session" });
+      }
+    } catch (err) {
+      return next(err);
     }
     req.user = { id: result.session.id };
     next();

@@ -23,7 +23,6 @@ vi.mock("@/lib/vault/client", () => ({
 }));
 
 import {
-  accountUsesVault,
   confirmPaymentWithPasskey,
   confirmPaymentWithPin,
   createPasskeyAccount,
@@ -95,15 +94,6 @@ describe("PIN unlock and account type", () => {
     expect(mocks.unlockWithPin).toHaveBeenLastCalledWith("135790", null);
     await unlockWithVaultPin("135790", { useEmailProof: true });
     expect(mocks.unlockWithPin).toHaveBeenLastCalledWith("135790", "google-token");
-  });
-
-  test("detects passkey-vault accounts versus older PIN accounts", async () => {
-    mocks.pinSalt.mockResolvedValueOnce({ salt: "s", params: {} });
-    expect(await accountUsesVault()).toBe(true);
-    mocks.pinSalt.mockRejectedValueOnce(new AuthApiError(404, "No PIN", { code: "no_pin" }));
-    expect(await accountUsesVault()).toBe(false);
-    mocks.pinSalt.mockRejectedValueOnce(new AuthApiError(500, "Server error", null));
-    await expect(accountUsesVault()).rejects.toThrow("Server error");
   });
 });
 

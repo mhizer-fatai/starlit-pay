@@ -218,6 +218,19 @@ export function createSupabaseStore(supabase) {
     async revokeSessionFamily(familyId) {
       check(await supabase.from("auth_sessions").update({ revoked_at: nowIso() }).eq("family_id", familyId).is("revoked_at", null));
     },
+    /** Signs the user out everywhere except one session (the one making the change). */
+    async revokeOtherSessions(userId, keepFamilyId) {
+      let query = supabase.from("auth_sessions").update({ revoked_at: nowIso() }).eq("user_id", userId).is("revoked_at", null);
+      if (keepFamilyId) query = query.neq("family_id", keepFamilyId);
+      check(await query);
+    },
+    /** A session is live while its family has a row that is neither revoked nor expired. */
+    async isSessionFamilyActive(familyId, now) {
+      const rows = check(
+        await supabase.from("auth_sessions").select("id").eq("family_id", familyId).is("revoked_at", null).gt("expires_at", now).limit(1)
+      );
+      return Boolean(rows?.length);
+    },
     async revokeSessionsForPasskey(passkeyId) {
       check(await supabase.from("auth_sessions").update({ revoked_at: nowIso() }).eq("passkey_id", passkeyId).is("revoked_at", null));
     },

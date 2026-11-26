@@ -1,7 +1,7 @@
 // Typed client for the starlit-pay backend (Express :3001 / onrender).
 // Preserves every read/write the old JSX frontend used.
 
-import { refreshOnce, RETRYABLE_SESSION_CODES } from "@/lib/sessionRefresh";
+import { refreshOnce, refreshSucceeded, RETRYABLE_SESSION_CODES } from "@/lib/sessionRefresh";
 
 const DEFAULT_LOCAL = "http://localhost:3001";
 // Same site as starlitpay.xyz, so session cookies are first-party (Safari/iOS block cross-site cookies).
@@ -66,7 +66,7 @@ function refreshSessionCookie(): Promise<boolean> {
       credentials: "include",
       headers: { "Content-Type": "application/json", "X-Requested-With": "starlit" },
       body: "{}",
-    }).then((res) => res.ok)
+    }).then(refreshSucceeded)
   );
 }
 

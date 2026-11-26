@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { mac, randomToken } from "./crypto.js";
 
+// Cookie names before the __Host-/__Secure- prefixes; still read (and cleared)
+// so sessions from before the rename keep working until they next refresh.
 export const ACCESS_COOKIE = "starlit_at";
 export const REFRESH_COOKIE = "starlit_rt";
 export const CSRF_HEADER = "x-requested-with";
@@ -11,6 +13,22 @@ const ISSUER = "starlit-auth";
 const AUDIENCE = "starlit-api";
 const REFRESH_PATH = "/api/auth";
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+// Two tabs refreshing at the same moment present the same refresh token. A
+// reuse this soon after it was consumed is that race, not theft: it gets no new
+// tokens (the other tab's response already set them in the shared cookie jar),
+// and the session is left alone.
+export const REFRESH_RACE_GRACE_SEC = 20;
+
+/**
+ * Cookie names for these settings. Over HTTPS they carry the browser-enforced
+ * prefixes: __Host- (this exact host, path /, no Domain), so no other subdomain
+ * can set or overwrite it, and __Secure- for the refresh cookie, which keeps its
+ * narrower path.
+ */
+export function cookieNames({ secure, domain }) {
+  if (!secure) return { access: ACCESS_COOKIE, refresh: REFRESH_COOKIE };
+  return { access: domain ? `__Secure-${ACCESS_COOKIE}` : `__Host-${ACCESS_COOKIE}`, refresh: `__Secure-${REFRESH_COOKIE}` };
+}
 
 /**
  * Session service: a short-lived access JWT plus a rotating, single-use refresh
@@ -20,6 +38,10 @@ const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 export function createSessionService({ store, settings }) {
   const { keys } = settings;
   const nowSec = () => Math.floor(settings.now() / 1000);
+  const names = cookieNames(settings.cookie);
+  const renamed = names.access !== ACCESS_COOKIE;
+  const accessToken = (req) => req.cookies?.[names.access] ?? (renamed ? req.cookies?.[ACCESS_COOKIE] : undefined);
+  const refreshToken = (req) => req.cookies?.[names.refresh] ?? (renamed ? req.cookies?.[REFRESH_COOKIE] : undefined);
 
   function cookieOptions(maxAgeSec, path) {
     return {
@@ -79,7 +101,8 @@ export function createSessionService({ store, settings }) {
   }
 
   function setAccessCookie(res, user, claims) {
-    res.cookie(ACCESS_COOKIE, signAccess(user, claims), cookieOptions(settings.accessTtlSec, "/"));
+    res.cookie(names.access, signAccess(user, claims), cookieOptions(settings.accessTtlSec, "/"));
+    if (renamed) clearLegacyCookies(res);
   }
 
   /** Starts a new session family and sets both cookies. */
@@ -104,7 +127,7 @@ export function createSessionService({ store, settings }) {
       userAgent: userAgent ? String(userAgent).slice(0, 256) : null,
       expiresAt: new Date(settings.now() + settings.refreshTtlSec * 1000).toISOString(),
     });
-    res.cookie(REFRESH_COOKIE, refreshToken, cookieOptions(settings.refreshTtlSec, REFRESH_PATH));
+    res.cookie(names.refresh, refreshToken, cookieOptions(settings.refreshTtlSec, REFRESH_PATH));
   }
 
   /** Re-signs the access token with a fresh auth_time after a step-up ceremony. */
@@ -113,15 +136,22 @@ export function createSessionService({ store, settings }) {
     setAccessCookie(res, user, { sid: session.sid, amr, authTime: nowSec() });
   }
 
+  const cookieBase = () => ({
+    httpOnly: true,
+    secure: settings.cookie.secure,
+    sameSite: settings.cookie.sameSite,
+    domain: settings.cookie.domain,
+  });
+
+  function clearLegacyCookies(res) {
+    res.clearCookie(ACCESS_COOKIE, { ...cookieBase(), path: "/" });
+    res.clearCookie(REFRESH_COOKIE, { ...cookieBase(), path: REFRESH_PATH });
+  }
+
   function clearCookies(res) {
-    const base = {
-      httpOnly: true,
-      secure: settings.cookie.secure,
-      sameSite: settings.cookie.sameSite,
-      domain: settings.cookie.domain,
-    };
-    res.clearCookie(ACCESS_COOKIE, { ...base, path: "/" });
-    res.clearCookie(REFRESH_COOKIE, { ...base, path: REFRESH_PATH });
+    res.clearCookie(names.access, { ...cookieBase(), path: "/" });
+    res.clearCookie(names.refresh, { ...cookieBase(), path: REFRESH_PATH });
+    if (renamed) clearLegacyCookies(res);
   }
 
   /**
@@ -132,7 +162,7 @@ export function createSessionService({ store, settings }) {
   function authenticate(req) {
     const header = req.headers.authorization;
     const bearer = header?.startsWith("Bearer ") ? header.slice(7) : null;
-    const cookieToken = req.cookies?.[ACCESS_COOKIE];
+    const cookieToken = accessToken(req);
     const token = bearer || cookieToken;
     if (!token) return null;
 
@@ -161,19 +191,44 @@ export function createSessionService({ store, settings }) {
     return nowSec() - session.auth_time <= settings.freshAuthSec;
   }
 
-  /** Use after requireSession: sensitive actions need an auth ceremony in the last few minutes. */
-  function requireFreshAuth(req, res, next) {
+  /**
+   * Whether the session has not been signed out (logout, "sign out everywhere",
+   * or a detected stolen token). The access JWT alone stays valid for up to 15
+   * minutes after that, so money and key actions check this too.
+   */
+  async function isActive(session) {
+    return store.isSessionFamilyActive(session.sid, new Date(settings.now()).toISOString());
+  }
+
+  /** Signs the user out of every other session: after a credential changes, a stolen session must stop working. */
+  async function endOtherSessions(userId, keepFamilyId) {
+    await store.revokeOtherSessions(userId, keepFamilyId ?? null);
+  }
+
+  /**
+   * Use after requireSession: sensitive actions need an auth ceremony in the
+   * last few minutes, on a session that is still live.
+   */
+  async function requireFreshAuth(req, res, next) {
     if (!req.session || !isFresh(req.session)) {
       return res.status(401).json({
         error: "Please confirm it's you with your passkey or PIN.",
         code: "reauth_required",
       });
     }
+    try {
+      if (!(await isActive(req.session))) {
+        clearCookies(res);
+        return res.status(401).json({ error: "You were signed out. Please sign in again.", code: "invalid_session" });
+      }
+    } catch (err) {
+      return next(err);
+    }
     next();
   }
 
   async function refresh(req, res) {
-    const token = req.cookies?.[REFRESH_COOKIE];
+    const token = refreshToken(req);
     if (!token) return res.status(401).json({ error: "Not signed in.", code: "no_session" });
 
     const tokenHash = mac(keys.refreshToken, token);
@@ -184,6 +239,11 @@ export function createSessionService({ store, settings }) {
       // token means it was stolen: revoke every session in that family.
       const existing = await store.findSessionByHash(tokenHash);
       if (existing?.consumed_at && !existing.revoked_at) {
+        const sinceSec = (settings.now() - new Date(existing.consumed_at).getTime()) / 1000;
+        if (sinceSec <= REFRESH_RACE_GRACE_SEC) {
+          // Another tab refreshed a moment ago: its new cookies are already in the jar.
+          return res.status(409).json({ error: "Already refreshed in another tab.", code: "refresh_raced" });
+        }
         await store.revokeSessionFamily(existing.family_id);
       }
       clearCookies(res);
@@ -212,8 +272,8 @@ export function createSessionService({ store, settings }) {
     const result = authenticate(req);
     if (result?.session) {
       await store.revokeSessionFamily(result.session.sid);
-    } else if (req.cookies?.[REFRESH_COOKIE]) {
-      const existing = await store.findSessionByHash(mac(keys.refreshToken, req.cookies[REFRESH_COOKIE]));
+    } else if (refreshToken(req)) {
+      const existing = await store.findSessionByHash(mac(keys.refreshToken, refreshToken(req)));
       if (existing) await store.revokeSessionFamily(existing.family_id);
     }
     clearCookies(res);
@@ -227,6 +287,8 @@ export function createSessionService({ store, settings }) {
     requireSession,
     requireFreshAuth,
     isFresh,
+    isActive,
+    endOtherSessions,
     refresh,
     logout,
     clearCookies,

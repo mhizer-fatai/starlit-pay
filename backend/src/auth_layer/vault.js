@@ -148,6 +148,8 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
       serverShareEnc: seal(keys.serverShare, Buffer.from(data.k), `pin-share:${userId}`),
     });
     await store.upsertWrap(userId, "pin", null, wrappedDek);
+    // A new PIN: any other session (perhaps a stolen one) is signed out.
+    await sessions.endOtherSessions(userId, req.session.sid);
     res.json({ ok: true });
   });
 
@@ -251,7 +253,9 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
     if (!safeEqual(mac(keys.recoveryCode, user.id, codeVerifier), recovery.code_mac)) return failed();
     if (!(await store.consumeRecoveryCode(user.id))) return failed();
 
-    await sessions.issue(res, user, { amr: ["recovery"], userAgent: req.headers["user-agent"] });
+    const { familyId } = await sessions.issue(res, user, { amr: ["recovery"], userAgent: req.headers["user-agent"] });
+    // Recovery means the passkeys and PIN were lost, maybe stolen: sign out every other session.
+    await sessions.endOtherSessions(user.id, familyId);
     void alerts.send(user, "recovery_used");
     const vault = await store.getVault(user.id);
     const wrap = await store.getWrap(user.id, "recovery", null);
@@ -272,6 +276,7 @@ export function registerVaultRoutes(router, { store, sessions, identity, setting
     }
     await store.setRecovery(userId, mac(keys.recoveryCode, userId, codeVerifier));
     await store.upsertWrap(userId, "recovery", null, wrappedDek);
+    await sessions.endOtherSessions(userId, req.session.sid);
     res.json({ ok: true });
   });
 }

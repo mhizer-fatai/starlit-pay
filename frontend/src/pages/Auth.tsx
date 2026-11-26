@@ -1,25 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Lock, ShieldCheck, Ticket, User } from "lucide-react";
+import { ArrowLeft, Fingerprint, KeyRound, LifeBuoy, Lock, Ticket, User } from "lucide-react";
 
 import { RecoveryCodePanel } from "@/components/RecoveryCodePanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  getUser,
-  getVaultSecrets,
-  isUnlocked,
-  isVaultMode,
-  lookupByEmail,
-  signOut,
-  unlockWithPin,
-  type SessionUser,
-} from "@/lib/auth";
-import { fetchBetaAccess, fetchBetaConfig, getStoredUser } from "@/lib/backend";
-import { migrateLegacyAccount, migrationErrorMessage } from "@/lib/migration";
+import { getUser, getVaultSecrets, isUnlocked, isVaultMode, lookupByEmail, signOut } from "@/lib/auth";
+import { fetchBetaAccess, fetchBetaConfig } from "@/lib/backend";
 import { isValidPin } from "@/lib/keys";
 import {
-  accountUsesVault,
   createPasskeyAccount,
   friendlyAuthError,
   hasPasskeySession,
@@ -27,9 +16,7 @@ import {
   signInWithPasskey,
   unlockWithRecovery,
   unlockWithVaultPin,
-  type UnlockOutcome,
 } from "@/lib/passkeyAccount";
-import type { OpenedVault } from "@/lib/vault";
 import { getEmailProof, passkeyFlows } from "@/lib/vault/client";
 import { PasskeyNeedsPinError } from "@/lib/vault/flows";
 import { supabase } from "@/lib/supabase";
@@ -63,9 +50,6 @@ function GoogleIcon() {
 // recovery    show the new recovery code once
 // unlock      passkey account: unlock with passkey (PIN as fallback)
 // unlock-pin  passkey account: unlock with PIN
-// legacy-pin  older email+PIN account: enter the old PIN, then upgrade
-// migrate     upgrade an email+PIN account to a passkey vault (moves funds)
-// migrate-finish  an earlier upgrade stopped part-way; enter the PIN to finish
 // recover     lost passkeys and PIN: Google + recovery code
 // recover-pin after recovery: choose a new PIN
 type Phase =
@@ -75,9 +59,6 @@ type Phase =
   | "recovery"
   | "unlock"
   | "unlock-pin"
-  | "legacy-pin"
-  | "migrate"
-  | "migrate-finish"
   | "recover"
   | "recover-pin";
 
@@ -129,10 +110,7 @@ function AuthPage() {
   // otherwise by Google sign-in.
   const [pinUsesEmailProof, setPinUsesEmailProof] = useState(true);
   const canUsePasskeys = passkeysSupported();
-  // Upgrade from email+PIN keys: the old PIN (same PIN for the new vault), and
-  // for an interrupted upgrade, the already-opened vault awaiting completion.
-  const [upgradePin, setUpgradePin] = useState("");
-  const [pendingUpgrade, setPendingUpgrade] = useState<{ user: SessionUser; opened: OpenedVault } | null>(null);
+  // A note shown above the recovery code (after recovering an account).
   const [upgradeNote, setUpgradeNote] = useState("");
   const [recoveryInput, setRecoveryInput] = useState("");
   // Closed beta: an approved applicant's Gmail signs up as is; anyone else
@@ -171,7 +149,7 @@ function AuthPage() {
     let cancelled = false;
     void (async () => {
       // Returning from Google OAuth: resolve the Supabase session, then route
-      // the account to sign-up, passkey unlock, or the older PIN screen.
+      // the account to sign-up or passkey unlock.
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
       const hash = window.location.hash;
@@ -228,10 +206,8 @@ function AuthPage() {
           setPinConfirm("");
           if (exists) {
             setUsername(user?.username ?? "");
-            const usesVault = await accountUsesVault();
-            if (cancelled) return;
             setPinUsesEmailProof(true);
-            setPhase(usesVault ? "unlock" : "legacy-pin");
+            setPhase("unlock");
           } else {
             const base =
               googleEmail
@@ -281,9 +257,7 @@ function AuthPage() {
         }
         setPinUsesEmailProof(false);
         setPhase("unlock");
-        return;
       }
-      setPhase("legacy-pin");
     })();
     return () => {
       cancelled = true;
@@ -346,7 +320,8 @@ function AuthPage() {
     setBusy(true);
     setStatus("Confirm with your fingerprint, face or screen lock…");
     try {
-      afterUnlock(await signInWithPasskey());
+      await signInWithPasskey();
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       if (err instanceof PasskeyNeedsPinError) {
         // Signed in by the passkey; this device just can't open the vault with it.
@@ -371,43 +346,10 @@ function AuthPage() {
     setBusy(true);
     setStatus("Unlocking wallet…");
     try {
-      const outcome = await unlockWithVaultPin(pin, { useEmailProof: pinUsesEmailProof });
-      if (outcome.status === "finish-upgrade") {
-        // Same PIN as the old account: finish the upgrade straight away.
-        await runUpgrade({ pin, user: outcome.user, opened: outcome.opened });
-        return;
-      }
+      await unlockWithVaultPin(pin, { useEmailProof: pinUsesEmailProof });
       navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(friendlyAuthError(err));
-      setPin("");
-    } finally {
-      setBusy(false);
-      setStatus("");
-    }
-  }
-
-  async function handleLegacyPinUnlock(e: React.FormEvent) {
-    e.preventDefault();
-    if (!isValidPin(pin)) {
-      setError("PIN must be exactly 6 digits.");
-      return;
-    }
-    resetMessages();
-    setBusy(true);
-    setStatus("Unlocking wallet…");
-    try {
-      await unlockWithPin(email, pin);
-      if (!canUsePasskeys) {
-        setError("Your account needs a quick upgrade, which requires a browser with passkey support. Please use a recent Chrome, Safari or Edge.");
-        setPin("");
-        return;
-      }
-      setUpgradePin(pin);
-      setPin("");
-      setPhase("migrate");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Incorrect PIN.");
       setPin("");
     } finally {
       setBusy(false);
@@ -473,75 +415,14 @@ function AuthPage() {
     navigate("/dashboard", { replace: true });
   }
 
-  function afterUnlock(outcome: UnlockOutcome) {
-    if (outcome.status === "finish-upgrade") {
-      setPendingUpgrade({ user: outcome.user, opened: outcome.opened });
-      setPin("");
-      setPhase("migrate-finish");
-      return;
-    }
-    navigate("/dashboard", { replace: true });
-  }
-
-  /** Runs or resumes the upgrade from email+PIN keys to the passkey vault. */
-  async function runUpgrade(input: { pin: string; user?: SessionUser; opened?: OpenedVault }) {
-    const user = input.user ?? getStoredUser<SessionUser>();
-    if (!user) {
-      setError("Your session expired. Please sign in again.");
-      setPhase("google");
-      return;
-    }
-    resetMessages();
-    setBusy(true);
-    try {
-      const result = await migrateLegacyAccount({ user, pin: input.pin, opened: input.opened, onStatus: setStatus });
-      setUpgradePin("");
-      setPendingUpgrade(null);
-      const xlm =
-        result.publicXlm.status === "moved"
-          ? ` ${Number(result.publicXlm.amount).toFixed(2)} XLM moved from your old address.`
-          : result.publicXlm.status === "skipped"
-            ? ` Note: ${result.publicXlm.reason}`
-            : "";
-      setUpgradeNote(`Upgrade complete.${xlm}`);
-      if (result.recoveryCode) {
-        setRecoveryCode(result.recoveryCode);
-        setPasskeyCanUnlock(result.passkeyCanUnlock);
-        setPhase("recovery");
-      } else {
-        navigate("/dashboard", { replace: true });
-      }
-    } catch (err) {
-      setError(err instanceof Error && err.name === "AuthApiError" ? friendlyAuthError(err) : migrationErrorMessage(err));
-    } finally {
-      setBusy(false);
-      setStatus("");
-    }
-  }
-
-  async function handleFinishUpgrade(e: React.FormEvent) {
-    e.preventDefault();
-    if (!isValidPin(pin)) {
-      setError("PIN must be exactly 6 digits.");
-      return;
-    }
-    await runUpgrade({ pin, user: pendingUpgrade?.user, opened: pendingUpgrade?.opened });
-    setPin("");
-  }
-
   async function handleRecover(e: React.FormEvent) {
     e.preventDefault();
     resetMessages();
     setBusy(true);
     setStatus("Checking your recovery code…");
     try {
-      const { outcome, newRecoveryCode } = await unlockWithRecovery(recoveryInput);
+      const { newRecoveryCode } = await unlockWithRecovery(recoveryInput);
       setRecoveryInput("");
-      if (outcome.status === "finish-upgrade") {
-        setPendingUpgrade({ user: outcome.user, opened: outcome.opened });
-        setPhase("migrate-finish");
-        return;
-      }
       setRecoveryCode(newRecoveryCode);
       setPin("");
       setPinConfirm("");
@@ -798,7 +679,7 @@ function AuthPage() {
               </>
             )}
 
-            {(phase === "unlock-pin" || phase === "legacy-pin") && (
+            {phase === "unlock-pin" && (
               <>
                 <div className="text-center">
                   <Lock className="mx-auto size-8 text-primary" aria-hidden="true" />
@@ -809,16 +690,13 @@ function AuthPage() {
                   </p>
                 </div>
 
-                <form
-                  onSubmit={phase === "unlock-pin" ? handleVaultPinUnlock : handleLegacyPinUnlock}
-                  className="mt-8 space-y-6"
-                >
+                <form onSubmit={handleVaultPinUnlock} className="mt-8 space-y-6">
                   {pinInput({ value: pin, onChange: setPin, placeholder: "••••••", autoComplete: "off", autoFocus: true })}
                   <StatusLine status={status} error={error} />
                   <Button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
                     {busy ? status || "Unlocking…" : "Unlock"}
                   </Button>
-                  {phase === "unlock-pin" && canUsePasskeys && (
+                  {canUsePasskeys && (
                     <Button
                       type="button"
                       variant="secondary"
@@ -832,64 +710,13 @@ function AuthPage() {
                       <Fingerprint /> Use passkey instead
                     </Button>
                   )}
-                  {phase === "unlock-pin" && recoveryLink}
+                  {recoveryLink}
                   <Button type="button" variant="ghost" onClick={handleSwitchAccount} disabled={busy} className={SECONDARY_BUTTON}>
                     Switch Account
                   </Button>
                 </form>
               </>
             )}
-            {phase === "migrate" && (
-              <>
-                <div className="text-center">
-                  <ShieldCheck className="mx-auto size-8 text-primary" aria-hidden="true" />
-                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Upgrade your wallet</h1>
-                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
-                    Your wallet is protected only by your 6-digit PIN. We're moving it to new keys secured by a
-                    passkey on this device, your PIN and a recovery code. Your balance moves with it.
-                  </p>
-                </div>
-                <ul className="mt-6 space-y-2 text-[14px] leading-5 text-foreground">
-                  <li>1. Create a passkey (fingerprint, face or screen lock)</li>
-                  <li>2. Your private balance moves to the new keys (about a minute)</li>
-                  <li>3. Save your recovery code</li>
-                </ul>
-                <div className="mt-8 space-y-6">
-                  <StatusLine status={status} error={error} />
-                  <Button
-                    type="button"
-                    onClick={() => runUpgrade({ pin: upgradePin })}
-                    disabled={busy || !upgradePin}
-                    className={PRIMARY_BUTTON}
-                  >
-                    <Fingerprint /> {busy ? status || "Upgrading…" : error ? "Try again" : "Upgrade now"}
-                  </Button>
-                  <p className="text-center text-[13px] text-muted-foreground">
-                    Keep this page open until it finishes. If it stops, sign in again to continue where it left off.
-                  </p>
-                </div>
-              </>
-            )}
-
-            {phase === "migrate-finish" && (
-              <>
-                <div className="text-center">
-                  <ShieldCheck className="mx-auto size-8 text-primary" aria-hidden="true" />
-                  <h1 className="mt-4 text-[28px] font-medium text-foreground">Finish your upgrade</h1>
-                  <p className="mt-3 text-[15px] leading-6 text-muted-foreground">
-                    Your upgrade stopped before your balance finished moving. Enter your PIN to complete it.
-                  </p>
-                </div>
-                <form onSubmit={handleFinishUpgrade} className="mt-8 space-y-6">
-                  {pinInput({ value: pin, onChange: setPin, placeholder: "••••••", autoComplete: "off", autoFocus: true })}
-                  <StatusLine status={status} error={error} />
-                  <Button type="submit" disabled={busy} className={PRIMARY_BUTTON}>
-                    {busy ? status || "Finishing…" : "Finish upgrade"}
-                  </Button>
-                </form>
-              </>
-            )}
-
             {phase === "recover" && (
               <>
                 <div className="text-center">

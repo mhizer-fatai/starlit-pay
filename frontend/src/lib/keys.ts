@@ -1,17 +1,6 @@
-// Client-side key derivation (ported from the previous frontend's utils/crypto.js).
-// Keys are deterministically derived from `email + 6-digit PIN` so no recovery
-// phrase is needed: the same email + PIN always reproduces the same wallet.
-//
-//   masterSeed   = sha256(email:pin)
-//   stellar      = Keypair.fromRawEd25519Seed(sha256(masterSeed:stellar))
-//   spendingKey  = hex(sha256(masterSeed:spending))
-//   viewing      = NaCl Box keypair from sha256(masterSeed:viewing)
-//
-// Only `identity_commitment = sha256(spendingKey)` is stored in the `users`
-// table — the DB/backend can verify a PIN without ever seeing the keys.
-
-import * as StellarSdk from "@stellar/stellar-sdk";
-import nacl from "tweetnacl";
+// Small key helpers. The wallet's keys themselves are random and live in the
+// encrypted vault (lib/vault); `identity_commitment = sha256(spendingKey)` is
+// the only key-derived value the users table holds.
 
 export function stringToBytes(str: string): Uint8Array {
   return new TextEncoder().encode(str);
@@ -39,35 +28,6 @@ export interface DerivedKeys {
   stellar: { publicKey: string; secretKey: string };
   spendingKey: string;
   viewing: { publicKey: string; secretKey: string };
-}
-
-export async function deriveKeysFromEmailAndPin(email: string, pin: string): Promise<DerivedKeys> {
-  const cleanEmail = email.toLowerCase().trim();
-  const cleanPin = pin.trim();
-
-  const masterSeed = await sha256(`${cleanEmail}:${cleanPin}`);
-
-  const stellarSeed = await sha256(`${bytesToHex(masterSeed)}:stellar`);
-  const stellarKeypair = StellarSdk.Keypair.fromRawEd25519Seed(Buffer.from(stellarSeed));
-
-  const zkSpendingSeed = await sha256(`${bytesToHex(masterSeed)}:spending`);
-  const zkSpendingKey = bytesToHex(zkSpendingSeed);
-
-  const viewingSeed = await sha256(`${bytesToHex(masterSeed)}:viewing`);
-  const viewingKeyPair = nacl.box.keyPair.fromSecretKey(viewingSeed);
-
-  return {
-    masterSeed: bytesToHex(masterSeed),
-    stellar: {
-      publicKey: stellarKeypair.publicKey(),
-      secretKey: stellarKeypair.secret(),
-    },
-    spendingKey: zkSpendingKey,
-    viewing: {
-      publicKey: bytesToHex(viewingKeyPair.publicKey),
-      secretKey: bytesToHex(viewingKeyPair.secretKey),
-    },
-  };
 }
 
 /** One-way commitment stored in `users.identity_commitment` for PIN verification. */
